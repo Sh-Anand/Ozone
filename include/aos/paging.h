@@ -21,6 +21,7 @@
 #include <aos/slab.h>
 #include <barrelfish_kpi/paging_arch.h>
 #include <aos/paging_types.h>
+#include <aos/slot_alloc.h>
 
 struct paging_state;
 
@@ -105,6 +106,8 @@ static inline errval_t paging_map_frame_complete(struct paging_state *st, void *
 
     return paging_map_frame_attr(st, buf, id.bytes, frame, VREGION_FLAGS_READ_WRITE);
 }
+
+errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_alloc);
 
 /**
  * @brief mapps the provided frame at the supplied address in the paging state

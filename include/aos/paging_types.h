@@ -38,11 +38,15 @@
 typedef int paging_flags_t;
 
 
+typedef errval_t (*slot_alloc_t)(void *inst, uint64_t nslots, struct capref *ret);
 
 
 // struct to store the paging status of a process
 struct paging_state {
-    struct slot_allocator *slot_alloc;
+    int pos;
+    slot_alloc_t f;
+    struct slot_prealloc *slot_alloc;
+    struct capref pt_l0, pt_l1, pt_l2, pt_l3;
 };
 
 

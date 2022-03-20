@@ -10,6 +10,7 @@
 
 /// MM allocator instance data
 struct mm aos_mm;
+char buf[64000];
 
 errval_t aos_ram_alloc_aligned(struct capref *ret, size_t size, size_t alignment)
 {
@@ -43,14 +44,14 @@ static inline errval_t initialize_ram_allocator(void)
     // Initialize aos_mm
     err = mm_init(&aos_mm, ObjType_RAM, NULL,
                   slot_alloc_prealloc, slot_prealloc_refill,
-                  &init_slot_alloc);
+                  &init_slot_alloc);paging_init2(slot_alloc_prealloc, &init_slot_alloc);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "Can't initalize the memory manager.");
     }
 
     // Give aos_mm a bit of memory for the initialization
     // M1 TODO: grow be with some memory!
-    slab_grow(&aos_mm.slabs, NULL, 0);
+    slab_grow(&aos_mm.slabs, &buf, 64000);
 
     return SYS_ERR_OK;
 }
@@ -106,6 +107,67 @@ errval_t initialize_ram_alloc(void)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC_SET);
     }
+
+    printf("dasdasd2\n");
+    struct capref garbage;
+    for (int i = 0; i < 5000; i++) {
+        err = mm_alloc(&aos_mm, 1024 * 3, &garbage);
+        if (err_is_ok(err)) debug_printf("Added %i\n", i);
+        else {
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+        err = mm_free(&aos_mm, garbage);
+        if (err_is_ok(err)) debug_printf("Removed %i\n", i);
+        else {
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+    }
+
+    struct capref arr[1800];
+    for (int i = 0; i < 1800; i++) {
+        err = mm_alloc(&aos_mm, 1024 * 1024, &arr[i]);
+        if (err_is_ok(err)) debug_printf("Added %i\n", i);
+        else {
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+    }
+    for (int i = 0; i < 1800; i++) {
+        printf(".\n");
+        err = mm_free(&aos_mm, arr[i]);
+        printf(".\n");
+        if (err_is_ok(err)) debug_printf("Removed %i\n", i);
+        else {
+        printf("ERR\n");
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+    }
+    for (int i = 0; i < 450; i++) {
+        err = mm_alloc(&aos_mm, 1024 * 1024 * 4, &arr[i]);
+        if (err_is_ok(err)) debug_printf("Added %i\n", i);
+        else {
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+    }
+    for (int i = 0; i < 450; i++) {
+        err = mm_free(&aos_mm, arr[i]);
+        if (err_is_ok(err)) debug_printf("Removed %i\n", i);
+        else {
+            DEBUG_ERR(err, "Warning: Allocating failed %i", i);
+            while (1);
+        }
+    }
+
+
+
+
+    //struct capref cap;
+    // paging_map_fixed_attr(get_current_paging_state(), 0x0005550000000000,
+    //                            cap , 4096, 0);
 
     // Grading
     grading_test_mm(&aos_mm);

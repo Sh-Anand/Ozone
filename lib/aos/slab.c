@@ -18,6 +18,7 @@
 #include <aos/aos.h>
 #include <aos/slab.h>
 #include <aos/static_assert.h>
+#include <aos/core_state.h>
 
 struct block_head {
     struct block_head *next;///< Pointer to next block in free list
@@ -179,10 +180,28 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-    // Hint: you can't just use malloc here...
-    // Hint: For M1, just use the fixed mapping funcionality, however you may want to replace
-    //       the fixed mapping later to avoid conflicts.
-    return LIB_ERR_NOT_IMPLEMENTED;
+    static lvaddr_t addr = 0x0000090000000000;
+    bytes = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
+
+    struct capref frame;
+    size_t frame_bytes;
+
+    errval_t err = frame_alloc(&frame, bytes, &frame_bytes);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to snip part of capability\n");
+        return err_push(err, MM_ERR_CHUNK_NODE);
+    }
+
+    err = paging_map_fixed_attr(get_current_paging_state(), addr, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to snip part of capability\n");
+        return err_push(err, MM_ERR_CHUNK_NODE);
+    }
+
+    slab_grow(slabs, (void *)addr, frame_bytes);
+    addr += frame_bytes;    
+
+    return SYS_ERR_OK;
 }
 
 
