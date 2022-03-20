@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <machine/pte.h>
 
 static struct paging_state current;
 
@@ -33,11 +34,11 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
                          struct capref *ret) 
 {
     errval_t err;
-    err = st->slot_alloc->alloc(st->slot_alloc, ret);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        return err;
-    }
+    err = current.f(current.slot_alloc, 1, ret);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to alloc capabilities\n");
+            return err_push(err, MM_ERR_SLOT_NOSLOTS);
+        }
     err = vnode_create(*ret, type);
     if (err_is_fail(err)) {
         debug_printf("vnode_create failed: %s\n", err_getstring(err));
@@ -124,6 +125,113 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
     set_current_paging_state(&current);
+
+    return SYS_ERR_OK;
+    
+}
+
+errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_alloc) {
+    current.pos = 0;
+    current.slot_alloc = slot_alloc;
+    current.f = slot_alloc_func;
+    current.pt_l0 = cap_vroot;
+
+    errval_t err;
+    struct capref cap;
+    err = current.f(current.slot_alloc, 1, &cap);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to alloc capabilities\n");
+        return err_push(err, MM_ERR_SLOT_NOSLOTS);
+    }
+
+
+
+
+    err = pt_alloc_l1(&current, &current.pt_l1);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    err = vnode_map(current.pt_l0, current.pt_l1, 18,
+    0, 0, 1, cap);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    struct capability c;
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to get the frame info\n");
+        return err_push(err, MM_ERR_FIND_NODE);
+    }    
+    printf("%lld\n", c.u.frame_mapping.entry);
+
+    err = current.f(current.slot_alloc, 1, &cap);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to alloc capabilities\n");
+            return err_push(err, MM_ERR_SLOT_NOSLOTS);
+        }
+
+
+
+
+    err = pt_alloc_l2(&current, &current.pt_l2);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    err = vnode_map(current.pt_l1, current.pt_l2, 0,
+    0, 0, 1, cap);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to get the frame info\n");
+        return err_push(err, MM_ERR_FIND_NODE);
+    }    
+    printf("%lld\n", c.u.frame_mapping.entry);
+    err = current.f(current.slot_alloc, 1, &cap);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to alloc capabilities\n");
+            return err_push(err, MM_ERR_SLOT_NOSLOTS);
+        }
+
+
+
+
+
+
+    err = pt_alloc_l3(&current, &current.pt_l3);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    err = vnode_map(current.pt_l2, current.pt_l3, 0,
+    0, 0, 1, cap);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        while(1);
+        return err;
+    }
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to get the frame info\n");
+        return err_push(err, MM_ERR_FIND_NODE);
+    }    
+    printf("%lld\n", c.u.frame_mapping.entry);
+
+    printf("%i\n", get_cap_addr(current.pt_l0));
+    printf("%i\n", get_cap_addr(current.pt_l1));
+    printf("%i\n", get_cap_addr(current.pt_l2));
+    printf("%i\n", get_cap_addr(current.pt_l3));
+
     return SYS_ERR_OK;
 }
 
@@ -208,8 +316,38 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
  * @return SYS_ERR_OK on success.
  */
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
-                               struct capref frame, size_t bytes, int flags)
+                               struct capref frame, size_t bytes, int flags, struct capref cap)
 {
+    errval_t err;
+    // struct capref cap;
+    // err = current.slot_alloc->alloc(current.slot_alloc, &cap);
+    // if (err_is_fail(err)) {
+    //     debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+    //     while(1);
+    //     return err;
+    // }
+    printf(".\n");
+    err = vnode_map(current.pt_l3, frame, st->pos++, 3, 0, 1, cap);
+    printf(".\n");
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        DEBUG_ERR(err, "failed to snip part of capability\n");
+        while(1);
+        return err;
+    }
+    struct capability c;
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to get the frame info\n");
+        return err_push(err, MM_ERR_FIND_NODE);
+    }
+    assert(c.type == ObjType_Frame_Mapping);
+    
+
+    printf("%lld\n", vaddr - (18L << 39));
+    printf("%lld\n", c.u.frame_mapping.entry);
+    
+
     /*
      * TODO(M1):
      *    - Map a frame assuming all mappings will fit into one leaf page table (L3)
@@ -220,7 +358,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      * Hint:
      *  - think about what mapping configurations are actually possible
      */
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return SYS_ERR_OK;
 }
 
 

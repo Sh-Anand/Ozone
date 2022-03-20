@@ -22,8 +22,30 @@
 #include <aos/capabilities.h>
 #include <aos/slab.h>
 #include "slot_alloc.h"
+#include <aos/caddr.h>
 
 __BEGIN_DECLS
+
+struct mm_block {
+    struct capref root_cap;
+    gensize_t root_offset;
+    unsigned char size_bits, alignment_bits;
+};
+
+struct mm_node {
+    struct mm_block block;
+    struct mm_node *parent, *left, *right;
+    capaddr_t key;
+    bool is_pending, is_leaf;
+};
+
+#define MM_ADDR_BITS (8 * sizeof(genpaddr_t))
+#define MM_NODE_TABLE_ROW_OFFSET(block_size_bits) ((MM_ADDR_BITS - (block_size_bits) - 1) * (MM_ADDR_BITS - (block_size_bits)) / 2)
+#define MM_NODE_TABLE_COL_OFFSET(alignment_bits) (MM_ADDR_BITS - 1 - (alignment_bits))
+#define MM_NODE_TABLE_INDEX(block_size_bits, alignment_bits) (MM_NODE_TABLE_ROW_OFFSET(block_size_bits) + MM_NODE_TABLE_COL_OFFSET(alignment_bits))
+#define MM_NODE_TABLE_SIZE MM_NODE_TABLE_ROW_OFFSET(BASE_PAGE_BITS - 1)
+
+#define MM_PENDING_TREE_PIVOT (0x80000000)
 
 
 /**
@@ -39,6 +61,8 @@ struct mm {
     void *slot_alloc_inst;       ///< Opaque instance pointer for slot allocator
     enum objtype objtype;        ///< Type of capabilities stored
     // TODO: add your meta data tracking here...
+    struct mm_node *pending_root;
+    struct mm_node *node_table[MM_NODE_TABLE_SIZE];
 };
 
 errval_t mm_init(struct mm *mm, enum objtype objtype,

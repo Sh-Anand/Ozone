@@ -18,6 +18,7 @@
 #include <aos/aos.h>
 #include <aos/slab.h>
 #include <aos/static_assert.h>
+#include <aos/core_state.h>
 
 struct block_head {
     struct block_head *next;///< Pointer to next block in free list
@@ -38,6 +39,7 @@ void slab_init(struct slab_allocator *slabs, size_t blocksize,
     slabs->slabs = NULL;
     slabs->blocksize = SLAB_REAL_BLOCKSIZE(blocksize);
     slabs->refill_func = refill_func;
+    slabs->offset = 0;
 }
 
 

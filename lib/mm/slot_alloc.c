@@ -34,10 +34,11 @@ errval_t slot_prealloc_refill(void *this)
         return SYS_ERR_OK;
     }
 
-    if (sa->meta[refill].free == L2_CNODE_SLOTS) {
+    if (sa->meta[refill].free == L2_CNODE_SLOTS) { // TODO: Potential buggy behaviour if more than 1 slot is allocated at a time (i.e. slots could be thrown away, maybe replace by >= 0)
         return SYS_ERR_OK; // Nop
     }
 
+    printf("Adding slots\n");
     is_refilling = true;
 
     // Allocate a ram cap
@@ -87,6 +88,12 @@ errval_t slot_alloc_prealloc(void *inst, uint64_t nslots, struct capref *ret)
 {
     struct slot_prealloc *this = inst;
     assert(nslots < L2_CNODE_SLOTS);
+
+    // We always need at least two capabilities left: One for allocating a cnode and one for allocating nodes in the mm if required.
+    // CARE IF USING WITH paging, as it might require additonal nodes
+    if (this->meta[this->current].free - nslots <= 20) { 
+        slot_prealloc_refill(inst);
+    }
 
     /* Check if enough space */
     if (this->meta[this->current].free < nslots) {
