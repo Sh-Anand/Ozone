@@ -26,6 +26,8 @@ static struct paging_state current;
 #define SLAB_INIT_BUF_LEN 262144 // for starting out, 256kB should be enough for the memory manager to begin mapping some pages
 static char slab_init_buf[SLAB_INIT_BUF_LEN];
 
+const static enum objtype vnode_types[3] = { ObjType_VNode_AARCH64_l1, ObjType_VNode_AARCH64_l2, ObjType_VNode_AARCH64_l3 };
+
 /**
  * \brief Helper function that allocates a slot and
  *        creates a aarch64 page table capability for a certain level
@@ -60,6 +62,73 @@ __attribute__((unused)) static errval_t pt_alloc_l2(struct paging_state * st, st
 __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state * st, struct capref *ret) 
 {
     return pt_alloc(st, ObjType_VNode_AARCH64_l3, ret);
+}
+
+
+static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
+	capaddr_t start, end;
+	size_t bit_offset = 39 - 9*depth;
+	size_t sub_region_size = 1 << bit_offset;
+	start = rvaddr >> (39 - depth*9);
+	end = (rvaddr + size - 1) >> (39 - depth*9);
+	
+	for (int i = start; i <= end; i++) {
+		
+		if (not_allocated) {
+			allocate
+		}
+		lvaddr_t new_rvaddr = rvaddr - i*sub_region_size;
+		
+		if (depth < 3) rec_map(st, new_root, new_rvaddr, MIN(sub_region_size, size - i*sub_region_size), frame, flags, frame_offset + i*sub_region_size, depth + 1);
+		else {
+			
+		}
+	}
+}
+
+/**
+ * @brief Tries to find an entry reference, either in the form of a child vnode, or a child page in the case of an L3 root.
+ *
+ * @param root Non NULL
+ * @param slot
+ * @return union mm_meta*
+ */
+static union mm_meta * find_or_insert_entry(struct paging_state *st, struct mm_vnode_meta *root, enum objtype type, int slot, uint64_t flags, struct capref *frame) {
+	// sanity checks
+	assert(root != NULL);
+	assert((type == ObjType_Frame) != (frame == NULL));
+	
+	union mm_meta *current = root->first;
+	union mm_meta **previous = &root->first;
+	
+	// walk through the list of entries until we find the correct slot, or know we have to insert one
+	while (current !=  NULL && current->entry.slot < slot) { 
+		previous = &current->entry.next;
+		current = current->entry.next;
+	}
+	
+	if (current != NULL && current->entry.slot == slot) {
+		return current;
+	} else {
+		// Create new page table and map it. Use it to create new vnode (pointer)
+		
+		union mm_meta *meta = slab_alloc(&(st->slab_alloc));	
+		st->slot_alloc->alloc(st->slot_alloc, &(meta->entry.map));
+		if (type == ObjType_Frame) {
+			
+		} else {
+			errval_t err = pt_alloc(st, type, &(meta->vnode.cap));
+			// error handling
+			
+			err = vnode_map(root->cap, meta->vnode.cap, slot, flags, 0, 1, meta->entry.map);
+			
+			if (current != NULL) meta->entry.next = current;
+			
+			*previous = meta;
+		}
+	}
+	
+	return NULL;
 }
 
 
@@ -143,7 +212,7 @@ errval_t paging_init(void)
 	current.root_page_tbl.last = NULL;
 	
 	
-	slab_init(&(current.slab_alloc), sizeof(struct mm_l1_vnode_meta), slab_default_refill);
+	slab_init(&(current.slab_alloc), sizeof(union mm_meta), slab_default_refill);
 	slab_grow(&(current.slab_alloc), slab_init_buf, SLAB_INIT_BUF_LEN);
 	
     set_current_paging_state(&current);
@@ -254,11 +323,11 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 	}
 	
 	// calculate the slots necessary for this mapping
-	capaddr_t l0_slot, l1_slot, l2_slot, l3_slot;
-	l0_slot = (0x0000ff8000000000 & vaddr) >> 39;
-	l1_slot = (0x0000007fc0000000 & vaddr) >> 30;
-	l2_slot = (0x000000003fe00000 & vaddr) >> 21;
-	l3_slot = (0x00000000001ff000 & vaddr) >> 12;
+	capaddr_t slot[4];
+	slot[0] = (0x0000ff8000000000 & vaddr) >> 39;
+	slot[1] = (0x0000007fc0000000 & vaddr) >> 30;
+	slot[2] = (0x000000003fe00000 & vaddr) >> 21;
+	slot[3] = (0x00000000001ff000 & vaddr) >> 12;
 	
 	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
 	
@@ -266,139 +335,42 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 	
 	errval_t err;
 	
-	struct mm_l1_vnode_meta *l1_meta = find_l1_vnode_meta(&(st->root_page_tbl), l0_slot);
-	if (l1_meta) l1_cap = l1_meta->cap;
-	else {
-		// create new capability for the page table
-		err = pt_alloc_l1(st, &l1_cap);
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L1 page alloc");
-			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
-			return err;
+	union mm_meta *root = &(st->root);
+	
+	for (int i = 0; i < 4; i++) {
+		union mm_meta *current = root->first;
+		union mm_meta **previous = &root->first;
+		
+		// walk through the list of entries until we find the correct slot, or know we have to insert one
+		while (current !=  NULL && current->entry.slot < slot[i]) { 
+			previous = &current->entry.next;
+			current = current->entry.next;
 		}
 		
-		// insert meta info into datastructure
-		l1_meta = slab_alloc(&(st->slab_alloc));
-		l1_meta->cap = l1_cap;
-		l1_meta->slot = l0_slot;
-		
-		l1_meta->next = NULL;
-		l1_meta->prev = NULL;
-		
-		l1_meta->first = NULL;
-		l1_meta->last = NULL;
-		
-		if (st->root_page_tbl.last) st->root_page_tbl.last->next = l1_meta;
-		l1_meta->prev = st->root_page_tbl.last;
-		st->root_page_tbl.last = l1_meta;
-		if (!st->root_page_tbl.first) st->root_page_tbl.first = l1_meta;
-		
-		// map page table entry
-		st->slot_alloc->alloc(st->slot_alloc, &(l1_meta->map));
-		err = vnode_map(current.root_page_tbl.cap, l1_cap, l0_slot, flags, 0, 1, l1_meta->map); // TODO: find appropriate flags
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L1 Page mapping");
-			err = err_push(err, LIB_ERR_VNODE_MAP);
-			return err;
+		if (current != NULL && current->entry.slot == slot[i]) {
+			return current;
+		} else {
+			// Create new page table and map it. Use it to create new vnode (pointer)
+			
+			union mm_meta *meta = slab_alloc(&(st->slab_alloc));	
+			st->slot_alloc->alloc(st->slot_alloc, &(meta->entry.map));
+			
+			if (i < 3) {
+				errval_t err;
+				err = pt_alloc(st, vnode_types[i], &(meta->vnode.cap));
+				// error handling
+				
+				err = vnode_map(root->vnode.cap, meta->vnode.cap, slot[i], flags, 0, 1, meta->entry.map);
+				// error handling
+				
+				if (current != NULL) meta->entry.next = current;
+				
+				*previous = meta;
+			} else {
+				assert(i == 3);
+			}
 		}
 	}
-	
-	struct mm_l2_vnode_meta *l2_meta = find_l2_vnode_meta(l1_meta, l1_slot);
-	if (l2_meta) l2_cap = l2_meta->cap;
-	else {
-		// create new capability for the page table
-		err = pt_alloc_l2(st, &l2_cap);
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L2 page alloc");
-			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
-			return err;
-		}
-		
-		// insert meta info into datastructure
-		l2_meta = slab_alloc(&(st->slab_alloc));
-		l2_meta->cap = l2_cap;
-		l2_meta->slot = l1_slot;
-		
-		l2_meta->next = NULL;
-		l2_meta->prev = NULL;
-		
-		l2_meta->first = NULL;
-		l2_meta->last = NULL;
-		
-		if (l1_meta->last) l1_meta->last->next = l2_meta;
-		l2_meta->prev = l1_meta->last;
-		l1_meta->last = l2_meta;
-		if (!l1_meta->first) l1_meta->first = l2_meta;
-		
-		// map page table entry
-		st->slot_alloc->alloc(st->slot_alloc, &(l2_meta->map));
-		err = vnode_map(l1_meta->cap, l2_cap, l1_slot, flags, 0, 1, l2_meta->map);
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L2 Page mapping");
-			err = err_push(err, LIB_ERR_VNODE_MAP);
-			return err;
-		}
-	}
-	
-	struct mm_l3_vnode_meta *l3_meta = find_l3_vnode_meta(l2_meta, l2_slot);
-	if (l3_meta) l3_cap = l3_meta->cap;
-	else {
-		// create new capability for the page table
-		err = pt_alloc_l3(st, &l3_cap);
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L3 page alloc");
-			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
-			return err;
-		}
-		
-		// insert meta info into datastructure
-		l3_meta = slab_alloc(&(st->slab_alloc));
-		l3_meta->cap = l3_cap;
-		l3_meta->slot = l2_slot;
-		
-		l3_meta->next = NULL;
-		l3_meta->prev = NULL;
-		
-		l3_meta->first = NULL;
-		l3_meta->last = NULL;
-		
-		if (l2_meta->last) l2_meta->last->next = l3_meta;
-		l3_meta->prev = l2_meta->last;
-		l2_meta->last = l3_meta;
-		if (!l2_meta->first) l2_meta->first = l3_meta;
-		
-		// map page table entry
-		st->slot_alloc->alloc(st->slot_alloc, &(l3_meta->map));
-		err = vnode_map(l2_meta->cap, l3_cap, l2_slot, flags, 0, 1, l3_meta->map); // TODO: find appropriate flags
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "L3 Page mapping");
-			err = err_push(err, LIB_ERR_VNODE_MAP);
-			return err;
-		}
-	}
-	
-	
-	struct mm_page_meta *page = find_page_meta(l3_meta, l3_slot);
-	if (page) {
-		// this page has already been mapped
-		return LIB_ERR_PMAP_NOT_MAPPED;
-	} else {
-		page = slab_alloc(&(st->slab_alloc));
-		page->slot = l3_slot;
-		
-		page->next = NULL;
-		page->prev = NULL;
-		
-		st->slot_alloc->alloc(st->slot_alloc, &(page->map));
-		err = vnode_map(l3_meta->cap, frame, l3_slot, flags, 0, (bytes / BASE_PAGE_SIZE) + (bytes % BASE_PAGE_SIZE ? 1 : 0), page->map);
-		if (err_is_fail(err)) {
-			DEBUG_ERR(err, "Page mapping");
-			err = err_push(err, LIB_ERR_VREGION_MAP);
-			return err;
-		}
-	}
-	
-	//debug_printf("Mapped Virtual Address: %p\n", vaddr);
 	
     return SYS_ERR_OK;
 }
