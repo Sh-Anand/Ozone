@@ -316,7 +316,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
  * @return SYS_ERR_OK on success.
  */
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
-                               struct capref frame, size_t bytes, int flags)
+                               struct capref frame, size_t bytes, int flags, struct capref cap)
 {
     errval_t err;
     // struct capref cap;

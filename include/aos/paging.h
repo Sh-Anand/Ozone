@@ -53,7 +53,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
                                int flags);
 /// Map user provided frame at user provided VA with given flags.
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
-                               struct capref frame, size_t bytes, int flags);
+                               struct capref frame, size_t bytes, int flags, struct capref cap);
 
 
 
@@ -122,7 +122,7 @@ errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_a
 static inline errval_t paging_map_fixed(struct paging_state *st, lvaddr_t vaddr,
                                         struct capref frame, size_t bytes)
 {
-    return paging_map_fixed_attr(st, vaddr, frame, bytes, VREGION_FLAGS_READ_WRITE);
+    return paging_map_fixed_attr(st, vaddr, frame, bytes, VREGION_FLAGS_READ_WRITE, frame);
 }
 
 static inline lvaddr_t paging_genvaddr_to_lvaddr(genvaddr_t genvaddr) {
