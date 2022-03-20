@@ -93,42 +93,9 @@ static inline errval_t __mm_create_node(struct mm *mm, struct mm_node **node, st
     static bool is_refilling = false;
 
     if (!is_refilling && slab_freecount(&mm->slabs) <= (MM_ADDR_BITS - BASE_PAGE_BITS - 1) * 2) { // at most 2 slabs are needed for each of the layers to reach a BASE_PAGE_SIZE leaf
-        is_refilling = true;
-        struct capref ram, frame, some;
-        errval_t     err = mm->slot_alloc(mm->slot_alloc_inst, 1, &frame);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to alloc capabilities\n");
-            return err_push(err, MM_ERR_SLOT_NOSLOTS);
-        }
-
-           err = mm->slot_alloc(mm->slot_alloc_inst, 1, &some);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to alloc capabilities\n");
-            return err_push(err, MM_ERR_SLOT_NOSLOTS);
-        }
-
-        mm_alloc(mm, 4096, &ram);
-        // Hint: you can't just use malloc here...
-        // Hint: For M1, just use the fixed mapping funcionality, however you may want to replace
-        //       the fixed mapping later to avoid conflicts.
-        err = cap_retype(frame, ram, 0, ObjType_Frame, 4096, 1);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to snip part of capability\n");
-            return err_push(err, MM_ERR_CHUNK_NODE);
-        }
-        paging_map_fixed_attr(get_current_paging_state(), 0x0000090000000000+mm->slabs.offset, frame, 4096, 0, some);
-
-
-        printf("%ld\n", 0x0000090000000000+mm->slabs.offset);
-        printf("%i\n", *(int*)(0x0000090000000000+mm->slabs.offset));
-
-        slab_grow(&mm->slabs, (void *)( 0x0000090000000000+mm->slabs.offset), 4096);
-        mm->slabs.offset+=4096;
-
-
-        printf("got some slabs\n");
-        is_refilling = false;
-        // TODO alloc additional slabs :)
+		is_refilling = true;
+        slab_default_refill(&mm->slabs);
+		is_refilling = false;
     }
 
     *node = slab_alloc(&mm->slabs);

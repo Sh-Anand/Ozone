@@ -44,7 +44,7 @@ static inline errval_t initialize_ram_allocator(void)
     // Initialize aos_mm
     err = mm_init(&aos_mm, ObjType_RAM, NULL,
                   slot_alloc_prealloc, slot_prealloc_refill,
-                  &init_slot_alloc);paging_init2(slot_alloc_prealloc, &init_slot_alloc);
+                  &init_slot_alloc);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "Can't initalize the memory manager.");
     }
@@ -110,7 +110,7 @@ errval_t initialize_ram_alloc(void)
 
     printf("dasdasd2\n");
     struct capref garbage;
-    for (int i = 0; i < 5000; i++) {
+    for (int i = 0; i < 50000; i++) {
         err = mm_alloc(&aos_mm, 1024 * 3, &garbage);
         if (err_is_ok(err)) debug_printf("Added %i\n", i);
         else {

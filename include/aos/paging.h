@@ -21,7 +21,6 @@
 #include <aos/slab.h>
 #include <barrelfish_kpi/paging_arch.h>
 #include <aos/paging_types.h>
-#include <aos/slot_alloc.h>
 
 struct paging_state;
 
@@ -53,7 +52,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
                                int flags);
 /// Map user provided frame at user provided VA with given flags.
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
-                               struct capref frame, size_t bytes, int flags, struct capref cap);
+                               struct capref frame, size_t bytes, int flags);
 
 
 
@@ -107,8 +106,6 @@ static inline errval_t paging_map_frame_complete(struct paging_state *st, void *
     return paging_map_frame_attr(st, buf, id.bytes, frame, VREGION_FLAGS_READ_WRITE);
 }
 
-errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_alloc);
-
 /**
  * @brief mapps the provided frame at the supplied address in the paging state
  *
@@ -122,7 +119,7 @@ errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_a
 static inline errval_t paging_map_fixed(struct paging_state *st, lvaddr_t vaddr,
                                         struct capref frame, size_t bytes)
 {
-    return paging_map_fixed_attr(st, vaddr, frame, bytes, VREGION_FLAGS_READ_WRITE, frame);
+    return paging_map_fixed_attr(st, vaddr, frame, bytes, VREGION_FLAGS_READ_WRITE);
 }
 
 static inline lvaddr_t paging_genvaddr_to_lvaddr(genvaddr_t genvaddr) {

@@ -20,11 +20,11 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <machine/pte.h>
 
 static struct paging_state current;
 
-
+#define SLAB_INIT_BUF_LEN 262144 // for starting out, 256kB should be enough for the memory manager to begin mapping some pages
+static char slab_init_buf[SLAB_INIT_BUF_LEN];
 
 /**
  * \brief Helper function that allocates a slot and
@@ -34,11 +34,11 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
                          struct capref *ret) 
 {
     errval_t err;
-    err = current.f(current.slot_alloc, 1, ret);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to alloc capabilities\n");
-            return err_push(err, MM_ERR_SLOT_NOSLOTS);
-        }
+    err = st->slot_alloc->alloc(st->slot_alloc, ret);
+    if (err_is_fail(err)) {
+        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
+        return err;
+    }
     err = vnode_create(*ret, type);
     if (err_is_fail(err)) {
         debug_printf("vnode_create failed: %s\n", err_getstring(err));
@@ -124,114 +124,29 @@ errval_t paging_init(void)
     // you can handle page faults in any thread of a domain.
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
+	
+	//errval_t err;
+	//err = slot_alloc_init();
+	//DEBUG_ERR(err, "slot_alloc_init");
+	
+	//err = two_level_slot_alloc_init(&msa);
+	//if (err_is_fail(err)) {
+	//	USER_PANIC_ERR(err, "Failed to init slot_alloc");
+	//	return err;
+	//}
+	//current.slot_alloc = &(msa.a);
+	
+	current.slot_alloc = get_default_slot_allocator();
+	
+	current.root_page_tbl.cap = cap_vroot;
+	current.root_page_tbl.first = NULL;
+	current.root_page_tbl.last = NULL;
+	
+	
+	slab_init(&(current.slab_alloc), sizeof(struct mm_l1_vnode_meta), slab_default_refill);
+	slab_grow(&(current.slab_alloc), slab_init_buf, SLAB_INIT_BUF_LEN);
+	
     set_current_paging_state(&current);
-
-    return SYS_ERR_OK;
-    
-}
-
-errval_t paging_init2(slot_alloc_t slot_alloc_func, struct slot_prealloc *slot_alloc) {
-    current.pos = 0;
-    current.slot_alloc = slot_alloc;
-    current.f = slot_alloc_func;
-    current.pt_l0 = cap_vroot;
-
-    errval_t err;
-    struct capref cap;
-    err = current.f(current.slot_alloc, 1, &cap);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to alloc capabilities\n");
-        return err_push(err, MM_ERR_SLOT_NOSLOTS);
-    }
-
-
-
-
-    err = pt_alloc_l1(&current, &current.pt_l1);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    err = vnode_map(current.pt_l0, current.pt_l1, 18,
-    0, 0, 1, cap);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    struct capability c;
-    err = cap_direct_identify(cap, &c);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to get the frame info\n");
-        return err_push(err, MM_ERR_FIND_NODE);
-    }    
-    printf("%lld\n", c.u.frame_mapping.entry);
-
-    err = current.f(current.slot_alloc, 1, &cap);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to alloc capabilities\n");
-            return err_push(err, MM_ERR_SLOT_NOSLOTS);
-        }
-
-
-
-
-    err = pt_alloc_l2(&current, &current.pt_l2);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    err = vnode_map(current.pt_l1, current.pt_l2, 0,
-    0, 0, 1, cap);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    err = cap_direct_identify(cap, &c);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to get the frame info\n");
-        return err_push(err, MM_ERR_FIND_NODE);
-    }    
-    printf("%lld\n", c.u.frame_mapping.entry);
-    err = current.f(current.slot_alloc, 1, &cap);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to alloc capabilities\n");
-            return err_push(err, MM_ERR_SLOT_NOSLOTS);
-        }
-
-
-
-
-
-
-    err = pt_alloc_l3(&current, &current.pt_l3);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    err = vnode_map(current.pt_l2, current.pt_l3, 0,
-    0, 0, 1, cap);
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        while(1);
-        return err;
-    }
-    err = cap_direct_identify(cap, &c);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to get the frame info\n");
-        return err_push(err, MM_ERR_FIND_NODE);
-    }    
-    printf("%lld\n", c.u.frame_mapping.entry);
-
-    printf("%i\n", get_cap_addr(current.pt_l0));
-    printf("%i\n", get_cap_addr(current.pt_l1));
-    printf("%i\n", get_cap_addr(current.pt_l2));
-    printf("%i\n", get_cap_addr(current.pt_l3));
-
     return SYS_ERR_OK;
 }
 
@@ -316,40 +231,8 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
  * @return SYS_ERR_OK on success.
  */
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
-                               struct capref frame, size_t bytes, int flags, struct capref cap)
+                               struct capref frame, size_t bytes, int flags)
 {
-    errval_t err;
-    // struct capref cap;
-    // err = current.slot_alloc->alloc(current.slot_alloc, &cap);
-    // if (err_is_fail(err)) {
-    //     debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-    //     while(1);
-    //     return err;
-    // }
-
-    
-    printf(".\n");
-    err = vnode_map(current.pt_l3, frame, st->pos++, 3, 0, 1);
-    printf(".\n");
-    if (err_is_fail(err)) {
-        debug_printf("slot_alloc failed: %s\n", err_getstring(err));
-        DEBUG_ERR(err, "failed to snip part of capability\n");
-        while(1);
-        return err;
-    }
-    struct capability c;
-    err = cap_direct_identify(cap, &c);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to get the frame info\n");
-        return err_push(err, MM_ERR_FIND_NODE);
-    }
-    assert(c.type == ObjType_Frame_Mapping);
-    
-
-    printf("%lld\n", vaddr - (18L << 39));
-    printf("%lld\n", c.u.frame_mapping.entry);
-    
-
     /*
      * TODO(M1):
      *    - Map a frame assuming all mappings will fit into one leaf page table (L3)
@@ -360,6 +243,163 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      * Hint:
      *  - think about what mapping configurations are actually possible
      */
+	
+	static int slab_refilling = 0;
+	if (!slab_refilling && slab_freecount(&(st->slab_alloc)) < 64) {
+		slab_refilling = 1;
+		debug_printf("Refilling Paging slabs...");
+		errval_t e = slab_default_refill(&(st->slab_alloc));
+		debug_printf("Slab Refilling error: %d\n", err_no(e));
+		slab_refilling = 1;
+	}
+	
+	// calculate the slots necessary for this mapping
+	capaddr_t l0_slot, l1_slot, l2_slot, l3_slot;
+	l0_slot = (0x0000ff8000000000 & vaddr) >> 39;
+	l1_slot = (0x0000007fc0000000 & vaddr) >> 30;
+	l2_slot = (0x000000003fe00000 & vaddr) >> 21;
+	l3_slot = (0x00000000001ff000 & vaddr) >> 12;
+	
+	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
+	
+	struct capref l1_cap, l2_cap, l3_cap;
+	
+	errval_t err;
+	
+	struct mm_l1_vnode_meta *l1_meta = find_l1_vnode_meta(&(st->root_page_tbl), l0_slot);
+	if (l1_meta) l1_cap = l1_meta->cap;
+	else {
+		// create new capability for the page table
+		err = pt_alloc_l1(st, &l1_cap);
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L1 page alloc");
+			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
+			return err;
+		}
+		
+		// insert meta info into datastructure
+		l1_meta = slab_alloc(&(st->slab_alloc));
+		l1_meta->cap = l1_cap;
+		l1_meta->slot = l0_slot;
+		
+		l1_meta->next = NULL;
+		l1_meta->prev = NULL;
+		
+		l1_meta->first = NULL;
+		l1_meta->last = NULL;
+		
+		if (st->root_page_tbl.last) st->root_page_tbl.last->next = l1_meta;
+		l1_meta->prev = st->root_page_tbl.last;
+		st->root_page_tbl.last = l1_meta;
+		if (!st->root_page_tbl.first) st->root_page_tbl.first = l1_meta;
+		
+		// map page table entry
+		st->slot_alloc->alloc(st->slot_alloc, &(l1_meta->map));
+		err = vnode_map(current.root_page_tbl.cap, l1_cap, l0_slot, flags, 0, 1, l1_meta->map); // TODO: find appropriate flags
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L1 Page mapping");
+			err = err_push(err, LIB_ERR_VNODE_MAP);
+			return err;
+		}
+	}
+	
+	struct mm_l2_vnode_meta *l2_meta = find_l2_vnode_meta(l1_meta, l1_slot);
+	if (l2_meta) l2_cap = l2_meta->cap;
+	else {
+		// create new capability for the page table
+		err = pt_alloc_l2(st, &l2_cap);
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L2 page alloc");
+			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
+			return err;
+		}
+		
+		// insert meta info into datastructure
+		l2_meta = slab_alloc(&(st->slab_alloc));
+		l2_meta->cap = l2_cap;
+		l2_meta->slot = l1_slot;
+		
+		l2_meta->next = NULL;
+		l2_meta->prev = NULL;
+		
+		l2_meta->first = NULL;
+		l2_meta->last = NULL;
+		
+		if (l1_meta->last) l1_meta->last->next = l2_meta;
+		l2_meta->prev = l1_meta->last;
+		l1_meta->last = l2_meta;
+		if (!l1_meta->first) l1_meta->first = l2_meta;
+		
+		// map page table entry
+		st->slot_alloc->alloc(st->slot_alloc, &(l2_meta->map));
+		err = vnode_map(l1_meta->cap, l2_cap, l1_slot, flags, 0, 1, l2_meta->map);
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L2 Page mapping");
+			err = err_push(err, LIB_ERR_VNODE_MAP);
+			return err;
+		}
+	}
+	
+	struct mm_l3_vnode_meta *l3_meta = find_l3_vnode_meta(l2_meta, l2_slot);
+	if (l3_meta) l3_cap = l3_meta->cap;
+	else {
+		// create new capability for the page table
+		err = pt_alloc_l3(st, &l3_cap);
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L3 page alloc");
+			err = err_push(err, LIB_ERR_PMAP_ALLOC_VNODE);
+			return err;
+		}
+		
+		// insert meta info into datastructure
+		l3_meta = slab_alloc(&(st->slab_alloc));
+		l3_meta->cap = l3_cap;
+		l3_meta->slot = l2_slot;
+		
+		l3_meta->next = NULL;
+		l3_meta->prev = NULL;
+		
+		l3_meta->first = NULL;
+		l3_meta->last = NULL;
+		
+		if (l2_meta->last) l2_meta->last->next = l3_meta;
+		l3_meta->prev = l2_meta->last;
+		l2_meta->last = l3_meta;
+		if (!l2_meta->first) l2_meta->first = l3_meta;
+		
+		// map page table entry
+		st->slot_alloc->alloc(st->slot_alloc, &(l3_meta->map));
+		err = vnode_map(l2_meta->cap, l3_cap, l2_slot, flags, 0, 1, l3_meta->map); // TODO: find appropriate flags
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "L3 Page mapping");
+			err = err_push(err, LIB_ERR_VNODE_MAP);
+			return err;
+		}
+	}
+	
+	
+	struct mm_page_meta *page = find_page_meta(l3_meta, l3_slot);
+	if (page) {
+		// this page has already been mapped
+		return LIB_ERR_PMAP_NOT_MAPPED;
+	} else {
+		page = slab_alloc(&(st->slab_alloc));
+		page->slot = l3_slot;
+		
+		page->next = NULL;
+		page->prev = NULL;
+		
+		st->slot_alloc->alloc(st->slot_alloc, &(page->map));
+		err = vnode_map(l3_meta->cap, frame, l3_slot, flags, 0, (bytes / BASE_PAGE_SIZE) + (bytes % BASE_PAGE_SIZE ? 1 : 0), page->map);
+		if (err_is_fail(err)) {
+			DEBUG_ERR(err, "Page mapping");
+			err = err_push(err, LIB_ERR_VREGION_MAP);
+			return err;
+		}
+	}
+	
+	//debug_printf("Mapped Virtual Address: %p\n", vaddr);
+	
     return SYS_ERR_OK;
 }
 
