@@ -66,22 +66,69 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state * st, st
 
 
 static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
+	// declare and define necessary variables
+	errval_t err;
 	capaddr_t start, end;
 	size_t bit_offset = 39 - 9*depth;
 	size_t sub_region_size = 1 << bit_offset;
 	start = rvaddr >> (39 - depth*9);
 	end = (rvaddr + size - 1) >> (39 - depth*9);
 	
+	union mm_meta **pointer_to_current = &(root->first); // this tracks the address of the pointer we need to write
+	union mm_meta *current = root->first; // this tracks the current page table entry while walking through the list
+	
 	for (int i = start; i <= end; i++) {
-		
-		if (not_allocated) {
-			allocate
+		// walk through the list until current is either the required entry, or the first entry after the point of insertion
+		while (current != NULL && current->entry.slot < i) {
+			pointer_to_current = &(current->entry.next);
+			current = current->entry.next;
 		}
+		
+		// check if we found the necessary entry
+		if (current != NULL && current->entry.slot == i) {
+			// found the necessary root
+		} else {
+			// create new entry
+			union mm_meta *new_entry = slab_alloc(&(st->slab_alloc)); // this always allocates space for a full vnode struct instead of only an entry for pages
+			
+			new_entry->entry.slot = i; // set the slot of the new element
+			new_entry->entry.next = current; // set the next pointer of the new element
+			*pointer_to_current = new_entry; // link the new element into the list
+			
+			// TODO: react to the depth of the current iteration
+			
+			err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
+			if (err_is_fail(err)) {
+				DEBUG_ERR(err, "pt_alloc failed");
+				return LIB_ERR_PMAP_NOT_MAPPED;
+			}
+			
+			// allocate the mapping capability
+			err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
+			if (err_is_fail(err)) {
+				DEBUG_ERR(err, "slot_alloc failed");
+				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
+				return LIB_ERR_PMAP_NOT_MAPPED;
+			}
+			
+			// map the page
+			err = vnode_map(root->cap, new_entry->vnode.cap, i, flags, 0 /* for now this is always 0 */, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
+			if (err_is_fail(err)) {
+				DEBUG_ERR(err, "vnode_map failed");
+				st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
+				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
+				return LIB_ERR_PMAP_NOT_MAPPED;
+			}
+			
+			// update current to be used later
+			current = new_entry;
+		}
+		
 		lvaddr_t new_rvaddr = rvaddr - i*sub_region_size;
 		
-		if (depth < 3) rec_map(st, new_root, new_rvaddr, MIN(sub_region_size, size - i*sub_region_size), frame, flags, frame_offset + i*sub_region_size, depth + 1);
-		else {
-			
+		if (depth < 3) {
+			// this is not the last level page table, so continue with the next layer
+			rec_map(st, current, new_rvaddr, MIN(sub_region_size, size - i*sub_region_size), frame, flags, frame_offset + i*sub_region_size, depth + 1);
 		}
 	}
 }
