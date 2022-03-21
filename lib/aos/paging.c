@@ -49,70 +49,57 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
     return SYS_ERR_OK;
 }
 
-__attribute__((unused)) static errval_t pt_alloc_l1(struct paging_state * st, struct capref *ret)
-{
-    return pt_alloc(st, ObjType_VNode_AARCH64_l1, ret);
-}
-
-__attribute__((unused)) static errval_t pt_alloc_l2(struct paging_state * st, struct capref *ret)
-{
-    return pt_alloc(st, ObjType_VNode_AARCH64_l2, ret);
-}
-
-__attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state * st, struct capref *ret) 
-{
-    return pt_alloc(st, ObjType_VNode_AARCH64_l3, ret);
-}
-
-
 static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
 	// declare and define necessary variables
 	errval_t err;
 	capaddr_t start, end;
 	size_t bit_offset = 39 - 9*depth;
-	size_t sub_region_size = 1 << bit_offset;
+	size_t sub_region_size = 1UL << bit_offset;
 	start = rvaddr >> (39 - depth*9);
 	end = (rvaddr + size - 1) >> (39 - depth*9);
+	printf("%ld, %ld, %ld, %ld, %ld, %d\n", rvaddr, size, bit_offset, sub_region_size, depth, flags);
+	printf("%i, %i\n", start, end);
+	assert(start < 512 && end < 512);
 	
-	union mm_meta **pointer_to_current = &(root->first); // this tracks the address of the pointer we need to write
-	union mm_meta *current = root->first; // this tracks the current page table entry while walking through the list
+	union mm_meta **pointer_to_current_meta = &(root->first); // this tracks the address of the pointer we need to write
+	union mm_meta *current_meta = root->first; // this tracks the current_meta page table entry while walking through the list
 	
 	for (int i = start; i <= end; i++) {
-		// walk through the list until current is either the required entry, or the first entry after the point of insertion
-		while (current != NULL && current->entry.slot < i) {
-			pointer_to_current = &(current->entry.next);
-			current = current->entry.next;
+		// walk through the list until current_meta is either the required entry, or the first entry after the point of insertion
+		while (current_meta != NULL && current_meta->entry.slot < i) {
+			pointer_to_current_meta = &(current_meta->entry.next);
+			current_meta = current_meta->entry.next;
 		}
 		
 		// check if we found the necessary entry
-		if (current != NULL && current->entry.slot == i) {
-			// found the necessary root
-		} else {
+		if (current_meta == NULL || current_meta->entry.slot != i) {
 			// create new entry
 			union mm_meta *new_entry = slab_alloc(&(st->slab_alloc)); // this always allocates space for a full vnode struct instead of only an entry for pages
 			
 			new_entry->entry.slot = i; // set the slot of the new element
-			new_entry->entry.next = current; // set the next pointer of the new element
-			*pointer_to_current = new_entry; // link the new element into the list
+			new_entry->entry.next = current_meta; // set the next pointer of the new element
+			*pointer_to_current_meta = new_entry; // link the new element into the list
 			
-			// TODO: react to the depth of the current iteration
-			
-			err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
-			if (err_is_fail(err)) {
-				DEBUG_ERR(err, "pt_alloc failed");
-				return LIB_ERR_PMAP_NOT_MAPPED;
-			}
+			struct capref mapee;
+			if (depth < 3) {
+				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
+				if (err_is_fail(err)) {
+					DEBUG_ERR(err, "pt_alloc failed");
+					return LIB_ERR_PMAP_NOT_MAPPED;
+				}
+				mapee = new_entry->vnode.cap;
+			} else mapee = frame;			
 			
 			// allocate the mapping capability
 			err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "slot_alloc failed");
-				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
+				if (depth < 3) st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
 				return LIB_ERR_PMAP_NOT_MAPPED;
 			}
 			
 			// map the page
-			err = vnode_map(root->cap, new_entry->vnode.cap, i, flags, 0 /* for now this is always 0 */, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
+			err = vnode_map(root->cap, mapee, i, flags, 0 /* for now this is always 0 */, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "vnode_map failed");
 				st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
@@ -120,64 +107,18 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lva
 				return LIB_ERR_PMAP_NOT_MAPPED;
 			}
 			
-			// update current to be used later
-			current = new_entry;
-		}
-		
-		lvaddr_t new_rvaddr = rvaddr - i*sub_region_size;
-		
+			// update current_meta to be used later
+			current_meta = new_entry;
+		} else assert(depth < 3);
+				
 		if (depth < 3) {
 			// this is not the last level page table, so continue with the next layer
-			rec_map(st, current, new_rvaddr, MIN(sub_region_size, size - i*sub_region_size), frame, flags, frame_offset + i*sub_region_size, depth + 1);
+			rec_map(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + i*sub_region_size, flags, depth + 1);
 		}
 	}
-}
 
-/**
- * @brief Tries to find an entry reference, either in the form of a child vnode, or a child page in the case of an L3 root.
- *
- * @param root Non NULL
- * @param slot
- * @return union mm_meta*
- */
-static union mm_meta * find_or_insert_entry(struct paging_state *st, struct mm_vnode_meta *root, enum objtype type, int slot, uint64_t flags, struct capref *frame) {
-	// sanity checks
-	assert(root != NULL);
-	assert((type == ObjType_Frame) != (frame == NULL));
-	
-	union mm_meta *current = root->first;
-	union mm_meta **previous = &root->first;
-	
-	// walk through the list of entries until we find the correct slot, or know we have to insert one
-	while (current !=  NULL && current->entry.slot < slot) { 
-		previous = &current->entry.next;
-		current = current->entry.next;
-	}
-	
-	if (current != NULL && current->entry.slot == slot) {
-		return current;
-	} else {
-		// Create new page table and map it. Use it to create new vnode (pointer)
-		
-		union mm_meta *meta = slab_alloc(&(st->slab_alloc));	
-		st->slot_alloc->alloc(st->slot_alloc, &(meta->entry.map));
-		if (type == ObjType_Frame) {
-			
-		} else {
-			errval_t err = pt_alloc(st, type, &(meta->vnode.cap));
-			// error handling
-			
-			err = vnode_map(root->cap, meta->vnode.cap, slot, flags, 0, 1, meta->entry.map);
-			
-			if (current != NULL) meta->entry.next = current;
-			
-			*previous = meta;
-		}
-	}
-	
-	return NULL;
+	return SYS_ERR_OK;
 }
-
 
 /**
  * TODO(M2): Implement this function.
@@ -254,10 +195,11 @@ errval_t paging_init(void)
 	
 	current.slot_alloc = get_default_slot_allocator();
 	
-	current.root_page_tbl.cap = cap_vroot;
-	current.root_page_tbl.first = NULL;
-	current.root_page_tbl.last = NULL;
-	
+	current.root.cap = cap_vroot;
+	current.root.first = NULL;
+	current.root.this.map = NULL_CAP;
+	current.root.this.next = NULL;
+	current.root.this.slot = -1;	
 	
 	slab_init(&(current.slab_alloc), sizeof(union mm_meta), slab_default_refill);
 	slab_grow(&(current.slab_alloc), slab_init_buf, SLAB_INIT_BUF_LEN);
@@ -368,55 +310,15 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 		debug_printf("Slab Refilling error: %d\n", err_no(e));
 		slab_refilling = 1;
 	}
-	
-	// calculate the slots necessary for this mapping
-	capaddr_t slot[4];
-	slot[0] = (0x0000ff8000000000 & vaddr) >> 39;
-	slot[1] = (0x0000007fc0000000 & vaddr) >> 30;
-	slot[2] = (0x000000003fe00000 & vaddr) >> 21;
-	slot[3] = (0x00000000001ff000 & vaddr) >> 12;
-	
+		
 	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
-	
-	struct capref l1_cap, l2_cap, l3_cap;
-	
+		
 	errval_t err;
 	
-	union mm_meta *root = &(st->root);
-	
-	for (int i = 0; i < 4; i++) {
-		union mm_meta *current = root->first;
-		union mm_meta **previous = &root->first;
-		
-		// walk through the list of entries until we find the correct slot, or know we have to insert one
-		while (current !=  NULL && current->entry.slot < slot[i]) { 
-			previous = &current->entry.next;
-			current = current->entry.next;
-		}
-		
-		if (current != NULL && current->entry.slot == slot[i]) {
-			return current;
-		} else {
-			// Create new page table and map it. Use it to create new vnode (pointer)
-			
-			union mm_meta *meta = slab_alloc(&(st->slab_alloc));	
-			st->slot_alloc->alloc(st->slot_alloc, &(meta->entry.map));
-			
-			if (i < 3) {
-				errval_t err;
-				err = pt_alloc(st, vnode_types[i], &(meta->vnode.cap));
-				// error handling
-				
-				err = vnode_map(root->vnode.cap, meta->vnode.cap, slot[i], flags, 0, 1, meta->entry.map);
-				// error handling
-				
-				if (current != NULL) meta->entry.next = current;
-				
-				*previous = meta;
-			} else {
-				assert(i == 3);
-			}
-		}
+	err = rec_map(st, &st->root, vaddr, bytes, frame, 0, flags, 0); 
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "slot_alloc failed");
+		return LIB_ERR_PMAP_NOT_MAPPED;
 	}
 	
     return SYS_ERR_OK;

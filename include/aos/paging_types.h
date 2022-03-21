@@ -37,13 +37,7 @@
 
 typedef int paging_flags_t;
 
-struct mm_vnode_meta;
-struct mm_entry_meta;
-
-union mm_meta {
-	struct mm_entry_meta entry;
-	struct mm_vnode_meta vnode;
-};
+union mm_meta; 
 
 struct mm_entry_meta {
 	struct capref map;
@@ -57,58 +51,10 @@ struct mm_vnode_meta {
 	union mm_meta *first;
 };
 
-struct mm_l2_vnode_meta {
-	struct capref cap;
-	struct capref map;
-	struct mm_l3_vnode_meta *first;
-	struct mm_l3_vnode_meta *last;
-	struct mm_l2_vnode_meta *next;
-	struct mm_l2_vnode_meta *prev;
-	int slot;
+union mm_meta {
+	struct mm_entry_meta entry;
+	struct mm_vnode_meta vnode;
 };
-
-struct mm_l1_vnode_meta {
-	struct capref cap;
-	struct capref map;
-	struct mm_l2_vnode_meta *first;
-	struct mm_l2_vnode_meta *last;
-	struct mm_l1_vnode_meta *next;
-	struct mm_l1_vnode_meta *prev;
-	int slot;
-};
-
-struct mm_l0_vnode_meta {
-	struct capref cap; // stores the capability of the root node
-	struct mm_l1_vnode_meta *first;
-};
-
-/*
-inline struct mm_page_meta *find_page_meta(struct mm_l3_vnode_meta *root, int slot) {
-	struct mm_page_meta *c = root->first;
-	while (c && c->slot != slot) c = c->next;
-	return c;
-}
-
-
-inline struct mm_l3_vnode_meta *find_l3_vnode_meta(struct mm_l2_vnode_meta *root, int slot) {
-	struct mm_l3_vnode_meta *c = root->first;
-	while (c && c->slot != slot) c = c->next;
-	return c;
-}
-
-
-inline struct mm_l2_vnode_meta *find_l2_vnode_meta(struct mm_l1_vnode_meta *root, int slot) {
-	struct mm_l2_vnode_meta *c = root->first;
-	while (c && c->slot != slot) c = c->next;
-	return c;
-}
-
-inline struct mm_l1_vnode_meta *find_l1_vnode_meta(struct mm_l0_vnode_meta *root, int slot) {
-	struct mm_l1_vnode_meta *c = root->first;
-	while (c && c->slot != slot) c = c->next;
-	return c;
-}*/
-
 // struct to store the paging status of a process
 struct paging_state {
     struct slot_allocator *slot_alloc;
