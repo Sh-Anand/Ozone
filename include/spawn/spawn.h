@@ -32,6 +32,8 @@ struct spawninfo {
     //           e.g. references to the child's
     //           capabilities or paging state
 
+    //address of the mapped binary in the parent's address space
+    void *mapped_binary;
 };
 
 // Start a child process using the multiboot command line. Fills in si.
@@ -42,6 +44,8 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo * si,
 errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si,
                          domainid_t *pid);
 
+//allocator function for elf_load
+errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size, uint32_t flags, void **ret);
 
 
 
