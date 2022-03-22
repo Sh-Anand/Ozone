@@ -192,14 +192,16 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
         DEBUG_ERR(err, "failed to snip part of capability\n");
         return err_push(err, MM_ERR_CHUNK_NODE);
     }
-
-    err = paging_map_fixed_attr(get_current_paging_state(), addr, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
+	
+	lvaddr_t ra;
+	
+    err = paging_map_frame_attr(get_current_paging_state(), (void**)&ra, frame_bytes, frame, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to snip part of capability\n");
         return err_push(err, MM_ERR_CHUNK_NODE);
     }
 
-    slab_grow(slabs, (void *)addr, frame_bytes);
+    slab_grow(slabs, (void *)ra, frame_bytes);
     addr += frame_bytes;    
 
     return SYS_ERR_OK;
@@ -222,7 +224,9 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
 {
     // Refill the slot allocator without causing a page fault
     // Hint: you can't just use malloc here...
-    return LIB_ERR_NOT_IMPLEMENTED;
+    //return LIB_ERR_NOT_IMPLEMENTED;
+	
+	return slab_refill_pages(slabs, minbytes); // XXX: this not gud
 }
 
 /**

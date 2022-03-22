@@ -107,7 +107,7 @@ errval_t initialize_ram_alloc(void)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC_SET);
     }
-
+/*
     printf("dasdasd2\n");
     struct capref garbage;
     for (int i = 0; i < 5000; i++) {
@@ -162,7 +162,7 @@ errval_t initialize_ram_alloc(void)
         }
     }
 
-
+*/
 
 
     //struct capref cap;
