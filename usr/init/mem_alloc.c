@@ -110,7 +110,7 @@ errval_t initialize_ram_alloc(void)
 
     printf("dasdasd2\n");
     struct capref garbage;
-    for (int i = 0; i < 50000; i++) {
+    for (int i = 0; i < 5000; i++) {
         err = mm_alloc(&aos_mm, 1024 * 3, &garbage);
         if (err_is_ok(err)) debug_printf("Added %i\n", i);
         else {

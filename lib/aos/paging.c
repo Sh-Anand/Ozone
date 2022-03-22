@@ -49,7 +49,7 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
     return SYS_ERR_OK;
 }
 
-static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
+static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
 	// declare and define necessary variables
 	errval_t err;
 	capaddr_t start, end;
@@ -82,6 +82,7 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lva
 			
 			struct capref mapee;
 			if (depth < 3) {
+				new_entry->vnode.used = 0;
 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
 				if (err_is_fail(err)) {
 					DEBUG_ERR(err, "pt_alloc failed");
@@ -113,12 +114,94 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, lva
 				
 		if (depth < 3) {
 			// this is not the last level page table, so continue with the next layer
-			rec_map(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + i*sub_region_size, flags, depth + 1);
+			rec_map_fixed(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + i*sub_region_size, flags, depth + 1);
 		}
 	}
 
+	root->used += end - start + 1;
+	assert(root->used <= VMSAv8_64_PTABLE_NUM_ENTRIES);
+
 	return SYS_ERR_OK;
 }
+
+inline int lower_bound_empty_subsequent_blocks(int used) {
+	return VMSAv8_64_PTABLE_NUM_ENTRIES / (used + 1);
+}
+
+// static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
+// 	// declare and define necessary variables
+// 	// errval_t err;
+// 	// capaddr_t start, end;
+// 	// size_t bit_offset = 39 - 9*depth;
+// 	// size_t sub_region_size = 1UL << bit_offset;
+// 	// start = rvaddr >> (39 - depth*9);
+// 	// end = (rvaddr + size - 1) >> (39 - depth*9);
+// 	// printf("%ld, %ld, %ld, %ld, %ld, %d\n", rvaddr, size, bit_offset, sub_region_size, depth, flags);
+// 	// printf("%i, %i\n", start, end);
+// 	// assert(start < 512 && end < 512);
+	
+// 	// union mm_meta **pointer_to_current_meta = &(root->first); // this tracks the address of the pointer we need to write
+// 	// union mm_meta *current_meta = root->first; // this tracks the current_meta page table entry while walking through the list
+	
+// 	// for (int i = start; i <= end; i++) {
+// 	// 	// walk through the list until current_meta is either the required entry, or the first entry after the point of insertion
+// 	// 	while (current_meta != NULL && current_meta->entry.slot < i) {
+// 	// 		pointer_to_current_meta = &(current_meta->entry.next);
+// 	// 		current_meta = current_meta->entry.next;
+// 	// 	}
+		
+// 	// 	// check if we found the necessary entry
+// 	// 	if (current_meta == NULL || current_meta->entry.slot != i) {
+// 	// 		// create new entry
+// 	// 		union mm_meta *new_entry = slab_alloc(&(st->slab_alloc)); // this always allocates space for a full vnode struct instead of only an entry for pages
+			
+// 	// 		new_entry->entry.slot = i; // set the slot of the new element
+// 	// 		new_entry->entry.next = current_meta; // set the next pointer of the new element
+// 	// 		*pointer_to_current_meta = new_entry; // link the new element into the list
+			
+// 	// 		struct capref mapee;
+// 	// 		if (depth < 3) {
+// 	// 			new_entry->vnode.used = 0;
+// 	// 			err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
+// 	// 			if (err_is_fail(err)) {
+// 	// 				DEBUG_ERR(err, "pt_alloc failed");
+// 	// 				return LIB_ERR_PMAP_NOT_MAPPED;
+// 	// 			}
+// 	// 			mapee = new_entry->vnode.cap;
+// 	// 		} else mapee = frame;			
+			
+// 	// 		// allocate the mapping capability
+// 	// 		err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
+// 	// 		if (err_is_fail(err)) {
+// 	// 			DEBUG_ERR(err, "slot_alloc failed");
+// 	// 			if (depth < 3) st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
+// 	// 			return LIB_ERR_PMAP_NOT_MAPPED;
+// 	// 		}
+			
+// 	// 		// map the page
+// 	// 		err = vnode_map(root->cap, mapee, i, flags, 0 /* for now this is always 0 */, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
+// 	// 		if (err_is_fail(err)) {
+// 	// 			DEBUG_ERR(err, "vnode_map failed");
+// 	// 			st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
+// 	// 			st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
+// 	// 			return LIB_ERR_PMAP_NOT_MAPPED;
+// 	// 		}
+			
+// 	// 		// update current_meta to be used later
+// 	// 		current_meta = new_entry;
+// 	// 	} else assert(depth < 3);
+				
+// 	// 	if (depth < 3) {
+// 	// 		// this is not the last level page table, so continue with the next layer
+// 	// 		rec_map_fixed(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + i*sub_region_size, flags, depth + 1);
+// 	// 	}
+// 	// }
+
+// 	// root->used += end - start + 1;
+// 	// assert(root->used <= VMSAv8_64_PTABLE_NUM_ENTRIES);
+
+// 	// return SYS_ERR_OK;
+// }
 
 /**
  * TODO(M2): Implement this function.
@@ -199,7 +282,8 @@ errval_t paging_init(void)
 	current.root.first = NULL;
 	current.root.this.map = NULL_CAP;
 	current.root.this.next = NULL;
-	current.root.this.slot = -1;	
+	current.root.this.slot = -1;
+	current.root.used = 0;
 	
 	slab_init(&(current.slab_alloc), sizeof(union mm_meta), slab_default_refill);
 	slab_grow(&(current.slab_alloc), slab_init_buf, SLAB_INIT_BUF_LEN);
@@ -315,7 +399,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 		
 	errval_t err;
 	
-	err = rec_map(st, &st->root, vaddr, bytes, frame, 0, flags, 0); 
+	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0); 
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "slot_alloc failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;
