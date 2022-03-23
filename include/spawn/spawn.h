@@ -32,8 +32,10 @@ struct spawninfo {
     //           e.g. references to the child's
     //           capabilities or paging state
 
+    struct cnoderef rootcn_taskcn;
+
     struct capref dispframe;  // TODO: fill it with child's DISPFRAME capref
-    dispatcher_handle_t dispatcher;
+    dispatcher_handle_t local_dispatcher_handle;
 };
 
 // Start a child process using the multiboot command line. Fills in si.

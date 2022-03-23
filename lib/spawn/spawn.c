@@ -16,8 +16,6 @@
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
-#define CHILD_DISPFRAME_VADDR ((genvaddr_t) 0x200000)
-
 /**
  * \brief Set the base address of the .got (Global Offset Table) section of the ELF binary
  *
@@ -42,28 +40,52 @@ armv8_set_registers(void *arch_load_info, dispatcher_handle_t handle,
     disabled_area->regs[REG_OFFSET(PIC_REGISTER)] = got_base;
 }
 
-static errval_t setup_dispatcher(struct spawninfo *si, domainid_t *pid, const char *name,
+static errval_t alloc_zeroed_frame(size_t bytes, struct capref *frame_cap,
+                                   void **local_vaddr, errval_t alloc_errcode,
+                                   errval_t map_errcode)
+{
+    assert(frame_cap != NULL);
+    assert(local_vaddr != NULL);
+
+    errval_t err;
+
+    // Create the frame
+    struct capref frame;
+    err = frame_alloc(&frame, bytes, NULL);
+    if (err_is_fail(err)) {
+        return err_push(err, alloc_errcode);
+    }
+
+    // Map the frame to self
+    dispatcher_handle_t handle = 0;
+    err = paging_map_frame(get_current_paging_state(), (void **)&handle, bytes, frame);
+    if (err_is_fail(err)) {
+        return err_push(err, map_errcode);
+    }
+    assert(handle != 0);
+    memset((void *)handle, 0, bytes);
+
+    *frame_cap = frame;
+    *local_vaddr = (void *)handle;
+    return SYS_ERR_OK;
+}
+
+static errval_t setup_dispatcher(struct spawninfo *si, const char *name,
                                  genvaddr_t pc, genvaddr_t got_addr)
 {
     errval_t err;
 
-    // Create the dispatcher frame
+    // Alloc the dispatcher frame and map to self
     struct capref dispframe;
-    err = frame_alloc(&dispframe, DISPATCHER_FRAME_SIZE, NULL);
-    if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_CREATE_DISPATCHER_FRAME);
-    }
-
-    // Map the dispatcher frame to self
     dispatcher_handle_t handle = 0;
-    err = paging_map_frame(get_current_paging_state(), (void **)&handle,
-                           DISPATCHER_FRAME_SIZE, dispframe);
+    err = alloc_zeroed_frame(DISPATCHER_FRAME_SIZE, &dispframe, (void **)&handle,
+                             SPAWN_ERR_CREATE_DISPATCHER_FRAME,
+                             SPAWN_ERR_MAP_DISPATCHER_TO_SELF);
     if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_MAP_DISPATCHER_TO_SELF);
+        return err;
     }
     assert(handle != 0);
-    memset((void *) handle, 0, DISPATCHER_FRAME_SIZE);
-    si->dispatcher = handle;
+    si->local_dispatcher_handle = handle;
 
     // Setup the dispatcher
     struct dispatcher_shared_generic *disp = get_dispatcher_shared_generic(handle);
@@ -89,7 +111,7 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t *pid, const ch
     disabled_area->named.pc = pc;
 
     // Initialize offset registers
-    armv8_set_registers((void *) got_addr, handle, enabled_area, disabled_area);
+    armv8_set_registers((void *)got_addr, handle, enabled_area, disabled_area);
 
     // We won’t use error handling frames
     disp_gen->eh_frame = 0;
@@ -98,15 +120,77 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t *pid, const ch
     disp_gen->eh_frame_hdr_size = 0;
 
     // Install the frame to the child's VSpace
-    err = cap_copy(si->dispframe, dispframe);
+    struct capref child_dispframe_slot = {
+        .cnode = si->rootcn_taskcn,
+        .slot = TASKCN_SLOT_DISPFRAME,
+    };
+    err = cap_copy(child_dispframe_slot, dispframe);
     if (err_is_fail(err)) {
         // FIXME: no corresponding err or doing the wrong thing?
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
+    // TODO: map the frame to the child's vspace
+
     return SYS_ERR_OK;
 }
 
+
+static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
+{
+    errval_t err;
+
+
+    // Alloc the arg page and map to self
+    struct capref argpage;
+    struct spawn_domain_params *params = 0;
+    err = alloc_zeroed_frame(BASE_PAGE_SIZE, &argpage, (void **)&params,
+                             SPAWN_ERR_CREATE_ARGSPG,
+                             SPAWN_ERR_MAP_ARGSPG_TO_SELF);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    assert(params != 0);
+
+    // TODO: map the frame to the child's vspace
+
+    // Setup spawn_domain_params and copy arguments
+    params->argc = argc;
+    char *offset = TODO_CHILD_MAPPING_OFFSET + sizeof(spawn_domain_params);
+    for (int i = 0; i < argc; i++) {
+        size_t copy_len = strlen(argv[i]) + 1;  // NUL terminator
+        if (offset + copy_len >= (char *)(TODO_CHILD_MAPPING_OFFSET + BASE_PAGE_SIZE)) {
+            return SPAWN_ERR_ARGSPG_OVERFLOW;
+        }
+        strcpy(offset, argv[i]);
+        params->argv[i] = offset;
+
+        offset += copy_len;
+    }
+    params->argv[params->argc] = 0;  // NULL terminator for argv
+    // TODO: envp empty?
+    params->envp[0] = 0;  // NULL terminator for envp
+    // TODO: other fields?
+
+    // Install the frame to the child's VSpace
+    struct capref child_argspace_slot = {
+        .cnode = si->rootcn_taskcn,
+        .slot = TASKCN_SLOT_ARGSPAGE,
+    };
+    err = cap_copy(child_argspace_slot, argpage);
+    if (err_is_fail(err)) {
+        // FIXME: no corresponding err or doing the wrong thing?
+        return err_push(err, SPAWN_ERR_COPY_ARGCN);
+    }
+
+
+}
+
+static errval_t start_dispatcher(struct spawninfo *si) {
+    arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area(si->local_dispatcher_handle);
+    registers_set_param(enabled_area, TODO_CHILD_MAPPING_OFFSET);
+    invoke_dispatcher(si->)
+}
 
 /**
  * TODO(M2): Implement this function.
