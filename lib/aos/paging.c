@@ -210,9 +210,14 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, siz
 				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
 			return SYS_ERR_OK;
-		} else goto new_mapping;
+		} else {
+			pointer_to_current_meta = &(root->first);
+			current_meta = root->first;
+			goto new_mapping;
+		}
 	} else { // if either multiple tables are needed or we are at a leaf node, just find the first suitable region
 		//debug_printf("starting while\n");
+new_mapping:
 		while (current_meta != NULL && current_meta->entry.slot - last_slot < n_blocks_necessary) {
 			//debug_printf("current: %p, slot: %d: next: %p\n", current_meta, current_meta->entry.slot, current_meta->entry.next);
 			last_slot = current_meta->entry.slot + 1; // the next iteration should have a look at the region starting after the current slot
@@ -223,7 +228,6 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, siz
 		//debug_printf("last_slot: %d, current: %p, current->slot: %d\n", last_slot, current_meta, current_meta ? current_meta->entry.slot : -1);
 		//fflush(stdout);
 	
-new_mapping:
 		// there should now be space for the necessary mappings, so insert them now
 		// at this point, current should be the first element after the insertion
 		for (int i = 0; i < n_blocks_necessary; i++) {
