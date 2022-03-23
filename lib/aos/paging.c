@@ -134,6 +134,8 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			}
 			
 			// map the page
+			debug_printf("mapee croot: %p, roots croot(dest): %p\n", get_croot_addr(mapee), get_croot_addr(root->cap));
+			debug_printf("st->root: %p\n", get_croot_addr(st->root.cap));
 			err = vnode_map(root->cap, mapee, i, flags, off, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "vnode_map failed");
@@ -159,7 +161,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 
 	root->used += end - start + 1;
 	assert(root->used <= VMSAv8_64_PTABLE_NUM_ENTRIES);
-
+	
 	return SYS_ERR_OK;
 }
 
@@ -169,7 +171,6 @@ inline int lower_bound_empty_subsequent_blocks(int used) {
 
 //errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, size_t size, struct capref frame, void** buf, lvaddr_t base_addr, size_t frame_offset, uint64_t flags, int depth);
 static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, size_t size, struct capref frame, void** buf, lvaddr_t base_addr, size_t frame_offset, uint64_t flags, int depth) {
-	
 	// simple approach for now: just find the first fitting region
 	
 	// declare and define some necessary variables
@@ -305,7 +306,6 @@ new_mapping:
 	// return the mapped address
 	*buf = (void*)out_addr;
 	
-	
 	return SYS_ERR_OK;
 }
 
@@ -342,19 +342,23 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 	slab_grow(&(st->page_meta_alloc), slab_page_init_buf, SLAB_INIT_BUF_LEN);
 	
 	// XXX: temporary fix, but occupy the first L0 slot since mappings in there tend to be taken already
-	union mm_meta *slot0 = slab_alloc(&(current.vnode_meta_alloc));
+	union mm_meta *slot0 = slab_alloc(&(st->vnode_meta_alloc));
 	slot0->entry.slot = 0;
 	slot0->vnode.used = 512;
 	slot0->entry.next = NULL;
 	slot0->vnode.first = NULL;
 	
+	assert(get_croot_addr(pdir) == CPTR_ROOTCN);
+	
 	// populate the root vnode
-	current.root.cap = pdir;
-	current.root.first = slot0;
-	current.root.this.map = NULL_CAP;
-	current.root.this.next = NULL;
-	current.root.this.slot = -1;
-	current.root.used = 1;
+	st->root.cap = pdir;
+	st->root.first = slot0;
+	st->root.this.map = NULL_CAP;
+	st->root.this.next = NULL;
+	st->root.this.slot = -1;
+	st->root.used = 1;
+	
+	assert(get_croot_addr(st->root.cap) == CPTR_ROOTCN);
 	
     return SYS_ERR_OK;
 }
