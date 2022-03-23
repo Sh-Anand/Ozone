@@ -215,6 +215,9 @@ errors libaos LIB_ERR_ {
     failure CNODE_SLOTS         "#slots requested for cnode creation is invalid",
     failure CROOT_NULL          "Destination root cnode null in cnode_create_foreign_l2",
 
+    //paging
+    failure PAGING_MAP          "failed to create a page mapping",
+
     // nested errors in specific functions
     failure FRAME_ALLOC         "Failure in frame_alloc()",
     failure FRAME_CREATE        "Failure in frame_create()",
