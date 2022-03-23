@@ -33,10 +33,16 @@ struct spawninfo {
     //           capabilities or paging state
 
     //address of the mapped binary in the parent's address space
-    void *mapped_binary;
-    struct cnoderef rootcn_taskcn;
+    lvaddr_t mapped_binary;
+    struct cnoderef taskcn;
+    struct cnoderef pagecn;
 
-    struct capref dispframe;  // TODO: fill it with child's DISPFRAME capref
+    struct paging_state *child_paging_state;
+
+    struct mem_region * module;
+    struct Elf64_Shdr *got_addr;
+    genvaddr_t pc;
+
     dispatcher_handle_t local_dispatcher_handle;
 };
 

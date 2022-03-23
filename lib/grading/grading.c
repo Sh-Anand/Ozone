@@ -102,4 +102,10 @@ grading_test_early(void) {
 
 void
 grading_test_late(void) {
+    struct spawninfo info;
+    domainid_t pid = -1;
+    errval_t err;
+    err = spawn_load_by_name("/armv8/sbin/hello", &info, &pid);
+    assert(err_is_ok(err));
+    assert(pid != -1);  // TODO: will fail now
 }
