@@ -22,12 +22,36 @@
 #include <string.h>
 
 static struct paging_state current;
-static int slab_refilling = 0;
+static int slab_vnode_refilling = 0;
+static int slab_page_refilling = 0;
 
-#define SLAB_INIT_BUF_LEN 262144 // for starting out, 256kB should be enough for the memory manager to begin mapping some pages
-static char slab_init_buf[SLAB_INIT_BUF_LEN];
+#define SLAB_REFILL_THRESHOLD 32
+#define SLAB_INIT_BUF_LEN 65536 // for starting out, 64kB should be enough for the memory manager to begin mapping some pages
+static char slab_vnode_init_buf[SLAB_INIT_BUF_LEN];
+static char slab_page_init_buf[SLAB_INIT_BUF_LEN];
 
 const static enum objtype vnode_types[3] = { ObjType_VNode_AARCH64_l1, ObjType_VNode_AARCH64_l2, ObjType_VNode_AARCH64_l3 };
+
+/**
+ * @brief Small utility function to refill a slab allocator
+ * 
+ * @param refilling a reference to the flag prohibiting nested refills
+ * @param slabs a slab allocator reference
+ * @return errval_t 
+ */
+static inline errval_t refill_slab_alloc(int *refilling, struct slab_allocator *slabs) {
+	if (!(*refilling) && slab_freecount(slabs) < SLAB_REFILL_THRESHOLD) {
+		*refilling = 1;
+		errval_t e = slabs->refill_func(slabs);
+		if (err_is_fail(e)) {
+			DEBUG_ERR(e, "slab refilling failed");
+		}
+		*refilling = 0;
+		return e;
+	}
+	
+	return SYS_ERR_OK;
+}
 
 /**
  * \brief Helper function that allocates a slot and
@@ -74,41 +98,48 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 		
 		// check if we found the necessary entry
 		if (current_meta == NULL || current_meta->entry.slot != i) {
-			// create new entry
-			union mm_meta *new_entry = slab_alloc(&(st->slab_alloc)); // this always allocates space for a full vnode struct instead of only an entry for pages
-			
-			new_entry->entry.slot = i; // set the slot of the new element
-			new_entry->entry.next = current_meta; // set the next pointer of the new element
-			*pointer_to_current_meta = new_entry; // link the new element into the list
-			
+			// declare necessary variables
+			union mm_meta *new_entry; //
 			struct capref mapee;
+			size_t off;
 			
 			if (depth < 3) {
+				// this is another vnode to create
+				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
 				new_entry->vnode.used = 0;
 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
 				if (err_is_fail(err)) {
 					DEBUG_ERR(err, "pt_alloc failed");
-					return LIB_ERR_PMAP_NOT_MAPPED;
+					return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 				}
-				mapee = new_entry->vnode.cap;
-			} else mapee = frame;			
+				mapee = new_entry->vnode.cap; // a new vnode has to be mapped
+				off = 0; // there is no offset for vnodes
+			} else {
+				// this is a page entry to create
+				new_entry = slab_alloc(&(st->page_meta_alloc)); // allocate space for another struct mm_entry_meta
+				mapee = frame; // the frame is to be mapped here
+				off = frame_offset; // pages have a necessary frame offset if more than a single page is mapped
+			}
+			
+			new_entry->entry.slot = i; // set the slot of the new element
+			new_entry->entry.next = current_meta; // set the next pointer of the new element
+			*pointer_to_current_meta = new_entry; // link the new element into the list
 			
 			// allocate the mapping capability
 			err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "slot_alloc failed");
 				if (depth < 3) st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-				return LIB_ERR_PMAP_NOT_MAPPED;
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
 			
 			// map the page
-			// TODO: implement functionality for multiple mappings changing the offset
-			err = vnode_map(root->cap, mapee, i, flags, depth < 3 ? 0 : frame_offset, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
+			err = vnode_map(root->cap, mapee, i, flags, off, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "vnode_map failed");
 				st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
 				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-				return LIB_ERR_PMAP_NOT_MAPPED;
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
 			
 			// update current_meta to be used later
@@ -117,7 +148,12 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 				
 		if (depth < 3) {
 			// this is not the last level page table, so continue with the next layer
-			rec_map_fixed(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + (i-start)*sub_region_size, flags, depth + 1);
+			err = rec_map_fixed(st, &current_meta->vnode, rvaddr - i*sub_region_size, MIN(sub_region_size, size - (i-start)*sub_region_size), frame, frame_offset + (i-start)*sub_region_size, flags, depth + 1);
+			if (err_is_fail(err)) {
+				// TODO: verify no cleanup needed
+				DEBUG_ERR(err, "failed to map fixed address");
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
+			}
 		}
 	}
 
@@ -169,7 +205,10 @@ static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, siz
 		if (current_meta != NULL) {
 			//debug_printf("non mapped\n");
 			err = rec_map(st, &(current_meta->vnode), size, frame, buf, base_addr + current_meta->entry.slot * sub_region_size, frame_offset, flags, depth + 1);
-			
+			if (err_is_fail(err)) {
+				DEBUG_ERR(err, "allocation of virtual addresses failed");
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
+			}
 			return SYS_ERR_OK;
 		} else goto new_mapping;
 	} else { // if either multiple tables are needed or we are at a leaf node, just find the first suitable region
@@ -188,35 +227,41 @@ new_mapping:
 		// there should now be space for the necessary mappings, so insert them now
 		// at this point, current should be the first element after the insertion
 		for (int i = 0; i < n_blocks_necessary; i++) {
-			union mm_meta *new_entry = slab_alloc(&(st->slab_alloc));
-			
-			new_entry->entry.slot = last_slot + i;
-			new_entry->entry.next = current_meta;
-			*pointer_to_current_meta = new_entry;
-			pointer_to_current_meta = &(new_entry->entry.next);
+			union mm_meta *new_entry;
 			
 			struct capref mapee;
-			uint64_t off;
+			size_t off;
+			
 			if (depth < 3) {
+				// this is another vnode to create
+				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
 				new_entry->vnode.used = 0;
 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
 				if (err_is_fail(err)) {
 					DEBUG_ERR(err, "pt_alloc failed");
-					return LIB_ERR_PMAP_NOT_MAPPED;
+					return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 				}
-				mapee = new_entry->vnode.cap;
-				off = 0;
+				mapee = new_entry->vnode.cap; // a new vnode has to be mapped
+				off = 0; // there is no offset for vnodes
 			} else {
-				mapee = frame;
-				off = frame_offset;
+				// this is a page entry to create
+				new_entry = slab_alloc(&(st->page_meta_alloc)); // allocate space for another struct mm_entry_meta
+				mapee = frame; // the frame is to be mapped here
+				off = frame_offset; // pages have a necessary frame offset if more than a single page is mapped
 			}
+			
+			// initialize the entry
+			new_entry->entry.slot = last_slot + i;
+			new_entry->entry.next = current_meta;
+			*pointer_to_current_meta = new_entry;
+			pointer_to_current_meta = &(new_entry->entry.next);
 			
 			// allocate the mapping capability
 			err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
 			if (err_is_fail(err)) {
 				DEBUG_ERR(err, "slot_alloc failed");
 				if (depth < 3) st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-				return LIB_ERR_PMAP_NOT_MAPPED;
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
 			
 			// map the page
@@ -226,7 +271,7 @@ new_mapping:
 				DEBUG_ERR(err, "vnode_map failed");
 				st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
 				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-				return LIB_ERR_PMAP_NOT_MAPPED;
+				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
 			
 			// descend and map the children of this new entry (only needs to happen for vnodes, not for pages)
@@ -236,7 +281,7 @@ new_mapping:
 				if (err_is_fail(err)) {
 					// TODO: perform possible and necessary cleanup here
 					DEBUG_ERR(err, "rec_map failed");
-					return LIB_ERR_PMAP_NOT_MAPPED;
+					return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 				}
 				if (i == 0) {
 					//debug_printf("ra: %ld\n", ra);
@@ -280,7 +325,34 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     // TODO (M2): Implement state struct initialization
     // TODO (M4): Implement page fault handler that installs frames when a page fault
     // occurs and keeps track of the virtual address space.
-    return LIB_ERR_NOT_IMPLEMENTED;
+	
+	// TODO: react to start_vaddr
+	
+	st->slot_alloc = ca;
+	
+	// initialize and grow the slab allocators for struct mm_entry_meta and struct mm_vnode_meta
+	slab_init(&(st->vnode_meta_alloc), sizeof(struct mm_vnode_meta), slab_default_refill);
+	slab_grow(&(st->vnode_meta_alloc), slab_vnode_init_buf, SLAB_INIT_BUF_LEN);
+	
+	slab_init(&(st->page_meta_alloc), sizeof(struct mm_entry_meta), slab_default_refill);
+	slab_grow(&(st->page_meta_alloc), slab_page_init_buf, SLAB_INIT_BUF_LEN);
+	
+	// XXX: temporary fix, but occupy the first L0 slot since mappings in there tend to be taken already
+	union mm_meta *slot0 = slab_alloc(&(current.vnode_meta_alloc));
+	slot0->entry.slot = 0;
+	slot0->vnode.used = 512;
+	slot0->entry.next = NULL;
+	slot0->vnode.first = NULL;
+	
+	// populate the root vnode
+	current.root.cap = pdir;
+	current.root.first = slot0;
+	current.root.this.map = NULL_CAP;
+	current.root.this.next = NULL;
+	current.root.this.slot = -1;
+	current.root.used = 1;
+	
+    return SYS_ERR_OK;
 }
 
 /**
@@ -303,7 +375,9 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
     // TODO (M2): Implement state struct initialization
     // TODO (M4): Implement page fault handler that installs frames when a page fault
     // occurs and keeps track of the virtual address space.
-    return LIB_ERR_NOT_IMPLEMENTED;
+    //return LIB_ERR_NOT_IMPLEMENTED;
+	
+	return paging_init_state(st, start_vaddr, pdir, ca);
 }
 
 /**
@@ -322,34 +396,11 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
 	
-	//errval_t err;
-	//err = slot_alloc_init();
-	//DEBUG_ERR(err, "slot_alloc_init");
-	
-	//err = two_level_slot_alloc_init(&msa);
-	//if (err_is_fail(err)) {
-	//	USER_PANIC_ERR(err, "Failed to init slot_alloc");
-	//	return err;
-	//}
-	//current.slot_alloc = &(msa.a);
-	
-	current.slot_alloc = get_default_slot_allocator();
-	
-	slab_init(&(current.slab_alloc), sizeof(union mm_meta), slab_default_refill);
-	slab_grow(&(current.slab_alloc), slab_init_buf, SLAB_INIT_BUF_LEN);
-	
-	union mm_meta *slot0 = slab_alloc(&(current.slab_alloc));
-	slot0->entry.slot = 0;
-	slot0->vnode.used = 512;
-	slot0->entry.next = NULL;
-	slot0->vnode.first = NULL;
-	
-	current.root.cap = cap_vroot;
-	current.root.first = slot0;
-	current.root.this.map = NULL_CAP;
-	current.root.this.next = NULL;
-	current.root.this.slot = -1;
-	current.root.used = 1;
+	errval_t err = paging_init_state(&current, 0, cap_vroot, get_default_slot_allocator());
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "failed to init paging state\n");
+		return err_push(err, LIB_ERR_PMAP_INIT);
+	}
 	
     set_current_paging_state(&current);
     return SYS_ERR_OK;
@@ -419,18 +470,24 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
     // Hint:
     //  - think about what mapping configurations are actually possible
 
-    //return LIB_ERR_NOT_IMPLEMENTED;
+	errval_t err;
 	
-	if (!slab_refilling && slab_freecount(&(st->slab_alloc)) < 64) {
-		slab_refilling = 1;
-		debug_printf("Refilling Paging slabs...");
-		errval_t e = slab_default_refill(&(st->slab_alloc));
-		debug_printf("Slab Refilling error: %d\n", err_no(e));
-		slab_refilling = 1;
+	// refill the slab allocators if necessary
+	err = refill_slab_alloc(&slab_page_refilling, &(st->page_meta_alloc));
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "refilling the page meta slab allocator failed");
+	}
+	err = refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "refilling the vnode meta slab allocator failed");
 	}
 	
 	// for testing only now, should be error handled and stuff
-	rec_map(st, &(st->root), bytes, frame, buf, 0, 0, flags, 0);
+	err = rec_map(st, &(st->root), bytes, frame, buf, 0, 0, flags, 0);
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "allocation of virtual addresses failed");
+		return LIB_ERR_PMAP_NOT_MAPPED;
+	}
 	
 	return SYS_ERR_OK;
 }
@@ -462,21 +519,24 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      *  - think about what mapping configurations are actually possible
      */
 	
-	if (!slab_refilling && slab_freecount(&(st->slab_alloc)) < 64) {
-		slab_refilling = 1;
-		debug_printf("Refilling Paging slabs...");
-		errval_t e = slab_default_refill(&(st->slab_alloc));
-		debug_printf("Slab Refilling error: %d\n", err_no(e));
-		slab_refilling = 1;
+	errval_t err;
+	
+	// refill the slab allocators if necessary
+	err = refill_slab_alloc(&slab_page_refilling, &(st->page_meta_alloc));
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "refilling the page meta slab allocator failed");
+	}
+	err = refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "refilling the vnode meta slab allocator failed");
 	}
 		
 	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
 		
-	errval_t err;
-	
+	// map the necessary pages using the recursive helper function
 	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0); 
 	if (err_is_fail(err)) {
-		DEBUG_ERR(err, "slot_alloc failed");
+		DEBUG_ERR(err, "mapping of fixed address failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;
 	}
 	

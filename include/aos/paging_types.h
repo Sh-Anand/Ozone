@@ -67,7 +67,8 @@ struct paging_state {
 	//struct mm_l0_vnode_meta root_page_tbl;
 	struct mm_vnode_meta root;
 	
-	struct slab_allocator slab_alloc;
+	struct slab_allocator vnode_meta_alloc;
+	struct slab_allocator page_meta_alloc;
 };
 
 
