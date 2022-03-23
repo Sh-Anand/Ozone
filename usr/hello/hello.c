@@ -17,14 +17,18 @@
 #include <stdio.h>
 
 #include <aos/aos.h>
+#include <unistd.h>
 
 int main(int argc, char *argv[])
 {
     printf("Hello, world! from userspace, presented by AOS team 1\n");
-    if (argc != 2) {
-        printf("ERROR: expecting argc = 2 but actual = %d\n", argc);
-    } else {
-        printf("%s\n", argv[1]);
+    for (int i = 0; i < argc; i++) {
+        printf("arg[%d]: %s\n", i, argv[i]);
     }
+    for (int i = 5; i >= 0; i--) {
+        printf("Countdown %d/5...\n", i);
+        sleep(1);
+    }
+    printf("Goodbye, world!\n");
     return EXIT_SUCCESS;
 }

@@ -82,7 +82,16 @@ handle_dispatcher_setup(
     return sys_dispatcher_setup(to, root, level, vptr, dptr, run, odptr);
 }
 
-
+static struct sysret
+handle_dispatcher_stop(
+    struct capability* to,
+    arch_registers_state_t* context,
+    int argc
+)
+{
+    assert(2 == argc);
+    return sys_dispatcher_stop(to);
+}
 
 
 static struct sysret
@@ -943,7 +952,8 @@ static invocation_t invocations[ObjType_Num][CAP_MAX_CMD] = {
         [DispatcherCmd_Properties]  = handle_dispatcher_properties,
         [DispatcherCmd_PerfMon]     = handle_dispatcher_perfmon,
         [DispatcherCmd_DumpPTables]  = dispatcher_dump_ptables,
-        [DispatcherCmd_DumpCapabilities] = dispatcher_dump_capabilities
+        [DispatcherCmd_DumpCapabilities] = dispatcher_dump_capabilities,
+        [DispatcherCmd_Stop]        = handle_dispatcher_stop,
     },
     [ObjType_KernelControlBlock] = {
         [KCBCmd_Identify] = handle_kcb_identify

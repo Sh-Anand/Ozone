@@ -17,7 +17,7 @@
 
 #include "aos/slot_alloc.h"
 #include "aos/paging.h"
-
+#include "proc_manage.h"
 
 
 struct spawninfo {

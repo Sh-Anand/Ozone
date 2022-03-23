@@ -185,6 +185,22 @@ sys_dispatcher_setup(struct capability *to, capaddr_t cptr, uint8_t level,
 }
 
 struct sysret
+sys_dispatcher_stop(struct capability *to)
+{
+    assert(to->type == ObjType_Dispatcher);
+
+#ifdef CONFIG_SCHEDULER_RBED
+    struct dcb *dcb = to->u.dispatcher.dcb;
+
+    trace_event(TRACE_SUBSYS_KERNEL, TRACE_EVENT_KERNEL_SCHED_REMOVE,
+                153);  // XXX: what is this arg
+    scheduler_remove(dcb);
+#endif
+
+    return SYSRET(SYS_ERR_OK);
+}
+
+struct sysret
 sys_dispatcher_properties(struct capability *to,
                           enum task_type type, unsigned long deadline,
                           unsigned long wcet, unsigned long period,

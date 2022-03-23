@@ -393,6 +393,7 @@ static errval_t setup_elf(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
+    DEBUG_PRINTF("si->module->mrmod_size = %lu\n", si->module->mrmod_size);
     assert(si->mapped_binary != 0);
 
     // Verify that the mapped binary contains 0xELF
