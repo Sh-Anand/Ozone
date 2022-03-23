@@ -14,7 +14,7 @@ struct proc_node {
     LIST_ENTRY(proc_node) link;
 };
 
-errval_t proc_state_init(struct proc_state *ps)
+errval_t proc_list_init(struct proc_list *ps)
 {
     LIST_INIT(&ps->running);
     LIST_INIT(&ps->free_list);
@@ -23,28 +23,22 @@ errval_t proc_state_init(struct proc_state *ps)
     return SYS_ERR_OK;
 }
 
-errval_t proc_state_create(struct proc_state *ps, domainid_t *retpid,
+errval_t proc_list_insert(struct proc_list *ps, domainid_t pid,
                            struct capref dispatcher, const char *name)
 {
-    if (retpid == NULL) {
-        return ERR_INVALID_ARGS;
-    }
-
     struct proc_node *node = NULL;
     if (LIST_EMPTY(&ps->free_list)) {
         node = slab_alloc(&ps->slabs);
         if (node == NULL) {
             return LIB_ERR_SLAB_ALLOC_FAIL;
         }
-        node->pid = ps->pid_upper++;
     } else {
         node = LIST_FIRST(&ps->free_list);
         LIST_REMOVE(node, link);
-        // Reuse node->pid
     }
     assert(node != NULL);
 
-    *retpid = node->pid;
+    node->pid = pid;
     node->dispatcher = dispatcher;
     strncpy(node->name, name, DISP_NAME_LEN);
     node->name[DISP_NAME_LEN - 1] = '\0';
@@ -53,7 +47,7 @@ errval_t proc_state_create(struct proc_state *ps, domainid_t *retpid,
     return SYS_ERR_OK;
 }
 
-errval_t proc_state_remove(struct proc_state *ps, domainid_t pid)
+errval_t proc_list_remove(struct proc_list *ps, domainid_t pid)
 {
     struct proc_node *node = NULL;
     LIST_FOREACH(node, &ps->running, link)
@@ -71,7 +65,7 @@ errval_t proc_state_remove(struct proc_state *ps, domainid_t pid)
     }
 }
 
-errval_t proc_state_enum(struct proc_state *ps, proc_enum_callback_t callback)
+errval_t proc_list_enum(struct proc_list *ps, proc_enum_callback_t callback)
 {
     if (callback == NULL) {
         return ERR_INVALID_ARGS;

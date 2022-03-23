@@ -32,8 +32,11 @@ struct spawninfo {
     //           e.g. references to the child's
     //           capabilities or paging state
 
-    //address of the mapped binary in the parent's address space
+    domainid_t pid;
+
+    // Address of the mapped binary in the parent's address space
     lvaddr_t mapped_binary;
+
     struct cnoderef taskcn;
     struct cnoderef pagecn;
 
@@ -43,6 +46,7 @@ struct spawninfo {
     void *got_addr;
     genvaddr_t pc;
 
+    struct capref dispatcher;
     dispatcher_handle_t local_dispatcher_handle;
 };
 
@@ -54,7 +58,7 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo * si,
 errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si,
                          domainid_t *pid);
 
-
+extern struct proc_list proc_list;
 
 
 #endif /* _INIT_SPAWN_H_ */
