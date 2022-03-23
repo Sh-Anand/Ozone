@@ -40,7 +40,7 @@ struct spawninfo {
     struct paging_state *child_paging_state;
 
     struct mem_region * module;
-    struct Elf64_Shdr *got_addr;
+    void *got_addr;
     genvaddr_t pc;
 
     dispatcher_handle_t local_dispatcher_handle;

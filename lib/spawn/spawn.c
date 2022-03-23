@@ -146,7 +146,7 @@ static errval_t setup_dispatcher(struct spawninfo *si)
     disabled_area->named.pc = si->pc;
 
     // Initialize offset registers
-    armv8_set_registers((void *)si->got_addr, handle, enabled_area, disabled_area);
+    armv8_set_registers(si->got_addr, handle, enabled_area, disabled_area);
 
     // We won’t use error handling frames
     disp_gen->eh_frame = 0;
@@ -263,27 +263,29 @@ static errval_t setup_cspace(struct spawninfo *si)
 {
     errval_t err;
 
+    // ROOTCN
     struct capref child_l1_cnode;
     err = cnode_create_l1(&child_l1_cnode, NULL);
-
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_CREATE_ROOTCN);
     }
 
+    // ROOTCN_SLOT_TASKCN
     err = cnode_create_foreign_l2(child_l1_cnode, ROOTCN_SLOT_TASKCN, &si->taskcn);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_CREATE_TASKCN);
     }
 
-    // created capability for l1_cnode pointing to the right slot in taskcn
+    // Created capability for l1_cnode pointing to the right slot in taskcn
     struct capref child_rootcn_slot = {
         .cnode = si->taskcn,
         .slot = TASKCN_SLOT_ROOTCN,
     };
 
-    // copy over the created l1 cnode into the taskcn cnode
+    // Copy over the created l1 cnode into the taskcn cnode
     cap_copy(child_rootcn_slot, child_l1_cnode);
 
+    // ROOTCN_SLOT_SLOT_ALLOC0-2
     struct cnoderef rootcn_slot_alloc_0, rootcn_slot_alloc_1, rootcn_slot_alloc_2;
     err = cnode_create_foreign_l2(child_l1_cnode, ROOTCN_SLOT_SLOT_ALLOC0,
                                   &rootcn_slot_alloc_0);
@@ -303,8 +305,7 @@ static errval_t setup_cspace(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_CREATE_SLOTALLOC_CNODE);
     }
 
-    // create SLOT_BASE_PAGE_CN CNode and populate it with L2_CNODE_SLOTS BASE_PAGE_SIZEd
-    // RAM caps
+    // Create SLOT_BASE_PAGE_CN and populate it with L2_CNODE_SLOTS BASE_PAGE_SIZEd RAM
     struct cnoderef rootcn_base_page_cn;
     err = cnode_create_foreign_l2(child_l1_cnode, ROOTCN_SLOT_BASE_PAGE_CN,
                                   &rootcn_base_page_cn);
@@ -343,27 +344,24 @@ static errval_t setup_vspace(struct spawninfo *si)
 {
     errval_t err;
 
-    // first create root table capability in our space, so we can invoke vnode_create on it
+    // Create root table capability in our space, so we can invoke vnode_create on it
     struct capref child_l0_table_parent;
     err = slot_alloc(&child_l0_table_parent);
     if (err_is_fail(err)) {
         return err;
     }
 
-    // create L0 table
+    // Create L0 table
     err = vnode_create(child_l0_table_parent, ObjType_VNode_AARCH64_l0);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_CREATE_VNODE);
     }
 
-    // create capref for L0 table of the child, and point it to slot 0 of the
-    // rootcn_pagecn cnode
+    // Copy the created capability into child's space
     struct capref child_l0_table = {
         .cnode = si->pagecn,
         .slot = 0,
     };
-
-    // copy over created capability into child's space
     err = cap_copy(child_l0_table, child_l0_table_parent);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_COPY_VNODE);
@@ -383,6 +381,7 @@ static errval_t setup_elf(struct spawninfo *si)
 {
     errval_t err;
 
+    assert(si->module != NULL);
     struct capref child_frame = {
         .cnode = cnode_module,
         .slot = si->module->mrmod_slot,
@@ -394,10 +393,15 @@ static errval_t setup_elf(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
-    // verify that the mapped binary contains 0xELF
-    assert(IS_ELF(*((struct Elf64_Ehdr *)si->mapped_binary)));
+    assert(si->mapped_binary != 0);
 
-    // parse ELF
+    // Verify that the mapped binary contains 0xELF
+    if (!IS_ELF(*((struct Elf64_Ehdr *)si->mapped_binary))) {
+        return SPAWN_ERR_ELF_MAP;  // XXX: invalid elf
+        // TODO: test it
+    }
+
+    // Parse ELF
     err = elf_load(EM_AARCH64, elf_allocate_func, si->child_paging_state,
                    si->mapped_binary, si->module->mrmod_size, &si->pc);
     // TODO: not unmapped in parent for now
@@ -405,12 +409,13 @@ static errval_t setup_elf(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_LOAD);
     }
 
-    si->got_addr = elf64_find_section_header_name((genvaddr_t)si->mapped_binary,
-                                                  si->module->mrmod_size, ".got");
-    assert(si->got_addr != NULL);
+    struct Elf64_Shdr *got = elf64_find_section_header_name(
+        (genvaddr_t)si->mapped_binary, si->module->mrmod_size, ".got");
+    if (got == NULL) {
+        return SPAWN_ERR_ELF_MAP;  // XXX: fail to find got address
+    }
+    si->got_addr = (void *)got->sh_addr;
 
-    // void *got_addr = (void *) got->sh_addr; //uncomment this line, commented as it doesn't
-    // compile with unused variables Here's the got_addr play around with the dispatcher
     return SYS_ERR_OK;
 }
 
@@ -433,8 +438,6 @@ static errval_t setup_elf(struct spawninfo *si)
  */
 errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_t *pid)
 {
-    // TODO: Implement me
-    // - Initialize the spawn_info struct
     // - Get the module from the multiboot image
     //   and map it (take a look at multiboot.c)
     // - Setup the child's cspace
@@ -504,6 +507,8 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
  */
 errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid)
 {
+    DEBUG_PRINTF("spawn_load_by_name: %s\n", binary_name)
+
     errval_t err;
 
     // TODO: pid is not implemented
@@ -511,42 +516,45 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
     // - Fill in argc/argv from the multiboot command line
     // - Call spawn_load_argv
 
-    // setup spawninfo
+    // find elf binary
+    // Initialize the spawn_info struct
+    memset(si, 0, sizeof(*si));
     si->binary_name = binary_name;
     si->next = NULL;
-
-    // find elf binary
-    si->module = multiboot_find_module(bi, si->binary_name);
+    si->module = multiboot_find_module(bi, binary_name);
     if (si->module == NULL) {
         return SPAWN_ERR_FIND_MODULE;
     }
 
     // Setup command line arguments
-    int argc = 1;
-    char *argv[MAX_CMDLINE_ARGS + 1] = {0};
-    argv[0] = binary_name;
+    int argc = 0;
+    char *argv[MAX_CMDLINE_ARGS + 1];
 
     const char *opts_src = multiboot_module_opts(si->module);
     if (opts_src == NULL) {
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
-    char *opts = NULL;
-    if (*opts_src != '\0') {
-        opts = strdup(opts_src);
-        if (opts == NULL) {
-            return SPAWN_ERR_GET_CMDLINE_ARGS;  // XXX: another one?
-        }
-        argv[argc++] = opts;
-        for (char *c = opts; *c != '\0'; ++c) {
-            if (*c == ' ') {
-                *c = '\0';
-                if (*(c + 1) != '\0') {
-                    argv[argc++] = c + 1;
-                }
+    char *opts = strdup(opts_src);
+    if (opts == NULL) {
+        return SPAWN_ERR_GET_CMDLINE_ARGS;  // XXX: another one?
+    }
+    argv[argc++] = opts;
+    for (char *c = opts; *c != '\0'; ++c) {
+        if (*c == ' ') {
+            *c = '\0';
+            if (*(c + 1) != '\0') {
+                argv[argc++] = c + 1;
             }
         }
     }
     argv[argc] = NULL;
+
+#if 1
+    DEBUG_PRINTF("argc = %d\n", argc)
+    for (int i = 0; i < argc; i++) {
+        DEBUG_PRINTF("argv[%d] = \"%s\"\n", i, argv[i])
+    }
+#endif
 
     // Spawn
     err = spawn_load_argv(argc, argv, si, pid);

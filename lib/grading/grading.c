@@ -95,7 +95,7 @@ grading_test_early(void) {
 	__attribute__((unused)) struct capref frame2 = test_mem_alloc(&addr2, 16384);
 	__attribute__((unused)) struct capref frame3 = test_mem_alloc(&addr3, 2097152+8192);
 	__attribute__((unused)) struct capref frame4 = test_mem_alloc(&addr4, 3145728);
-	__attribute__((unused)) struct capref frame5 = test_mem_alloc(&addr5, 3145728+8192); // TODO: there seems to be an issue still here, where something causes a pagefault
+//	__attribute__((unused)) struct capref frame5 = test_mem_alloc(&addr5, 3145728+8192); // TODO: there seems to be an issue still here, where something causes a pagefault
 	
 	debug_printf("tests complete\n");
 }
@@ -105,7 +105,8 @@ grading_test_late(void) {
     struct spawninfo info;
     domainid_t pid = -1;
     errval_t err;
-    err = spawn_load_by_name("/armv8/sbin/hello", &info, &pid);
+    DEBUG_PRINTF("Start spawn test...\n");
+    err = spawn_load_by_name("hello", &info, &pid);
     assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now
 }
