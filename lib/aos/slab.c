@@ -183,6 +183,8 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
 	printf("Slab refill pages %d %p\n", slabs->blocksize, slabs);
     bytes = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
+	
+	static lvaddr_t address = 64UL << 39;
 
     struct capref frame;
     size_t frame_bytes;
@@ -193,15 +195,17 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
         return err_push(err, MM_ERR_CHUNK_NODE);
     }
 	
-	lvaddr_t ra;
+	//lvaddr_t ra;
 
-    err = paging_map_frame_attr(get_current_paging_state(), (void**)&ra, frame_bytes, frame, VREGION_FLAGS_READ_WRITE);
+    //err = paging_map_frame_attr(get_current_paging_state(), (void**)&ra, frame_bytes, frame, VREGION_FLAGS_READ_WRITE);
+    err = paging_map_fixed_attr(get_current_paging_state(), address, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to snip part of capability\n");
         return err_push(err, MM_ERR_CHUNK_NODE);
     }
 
-    slab_grow(slabs, (void *)ra, frame_bytes);
+    slab_grow(slabs, (void *)address, frame_bytes);
+	address += frame_bytes + BASE_PAGE_SIZE;
 
     return SYS_ERR_OK;
 }

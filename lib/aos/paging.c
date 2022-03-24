@@ -22,11 +22,11 @@
 #include <string.h>
 
 static struct paging_state current;
-// static int slab_vnode_refilling = 0;
-// static int slab_page_refilling = 0;
+static int slab_vnode_refilling = 0;
+static int slab_page_refilling = 0;
 
-#define SLAB_REFILL_THRESHOLD 32
-#define SLAB_INIT_BUF_LEN 3276800 // for starting out, 64kB should be enough for the memory manager to begin mapping some pages
+#define SLAB_REFILL_THRESHOLD 64
+#define SLAB_INIT_BUF_LEN 65536 // for starting out, 64kB should be enough for the memory manager to begin mapping some pages
 static char slab_vnode_init_buf[SLAB_INIT_BUF_LEN];
 static char slab_page_init_buf[SLAB_INIT_BUF_LEN];
 
@@ -39,20 +39,19 @@ const static enum objtype vnode_types[3] = { ObjType_VNode_AARCH64_l1, ObjType_V
  * @param slabs a slab allocator reference
  * @return errval_t 
  */
-// static inline errval_t refill_slab_alloc(int *refilling, struct slab_allocator *slabs) {
-// 	assert(false);
-// 	if (!(*refilling) && slab_freecount(slabs) < SLAB_REFILL_THRESHOLD) {
-// 		*refilling = 1;
-// 		errval_t e = slabs->refill_func(slabs);
-// 		if (err_is_fail(e)) {
-// 			DEBUG_ERR(e, "slab refilling failed");
-// 		}
-// 		*refilling = 0;
-// 		return e;
-// 	}
+static inline errval_t refill_slab_alloc(int *refilling, struct slab_allocator *slabs) {
+	if (!(*refilling) && slab_freecount(slabs) < SLAB_REFILL_THRESHOLD) {
+		*refilling = 1;
+		errval_t e = slabs->refill_func(slabs);
+		if (err_is_fail(e)) {
+			DEBUG_ERR(e, "slab refilling failed");
+		}
+		*refilling = 0;
+		return e;
+	}
 	
-// 	return SYS_ERR_OK;
-// }
+	return SYS_ERR_OK;
+}
 
 /**
  * \brief Helper function that allocates a slot and
@@ -88,7 +87,7 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
  * @param depth the depth of the recursive call
  * @return errval_t 
  */
-static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth) {
+static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth, lvaddr_t abs_addr, uint64_t slots) {
 	assert(rvaddr % BASE_PAGE_SIZE == 0);
 	assert(size % BASE_PAGE_SIZE == 0);
 	assert(size > 0);
@@ -119,6 +118,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			
 			if (depth < 3) {
 				// this is another vnode to create
+				refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
 				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
 				new_entry->vnode.used = 0;
 				new_entry->vnode.first = NULL;
@@ -132,6 +132,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 				off = 0; // there is no offset for vnodes
 			} else {
 				// this is a page entry to create
+				refill_slab_alloc(&slab_page_refilling, &(st->page_meta_alloc));
 				new_entry = slab_alloc(&(st->page_meta_alloc)); // allocate space for another struct mm_entry_meta
 				mapee = frame; // the frame is to be mapped here
 				off = frame_offset + (i - start) * sub_region_size; // pages have a necessary frame offset if more than a single page is mapped
@@ -164,8 +165,10 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			// update current_meta to be used later
 			current_meta = new_entry;
 		} else {
-			assert(depth < 3);
-			assert(current_meta->vnode.used < PTABLE_ENTRIES);
+			debug_printf("i: %d, current_meta %p, current->slot: %d\n", i, current_meta, current_meta->entry.slot);
+			if (depth >= 3) debug_printf("USEFUL INFORMATION: size: %d, Depth %d trying to map address: %020p slots: %016ld capaddr current: %p\n", size, depth, abs_addr, slots*10000 + i, get_cap_addr(current_meta->entry.map));
+			//assert(depth < 3);
+			//assert(current_meta->vnode.used < PTABLE_ENTRIES);
 		}
 				
 		if (depth < 3) {
@@ -174,18 +177,21 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			lvaddr_t i_end = MIN(rvaddr + size, (i + 1) * sub_region_size); // end of the subregion to allocate
 
 			current_meta->vnode.blocked = true;
-			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1);
+			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1, abs_addr, slots*10000 + i);
 			current_meta->vnode.blocked = false;
 			if (err_is_fail(err)) {
 				// TODO: verify no cleanup needed
 				DEBUG_ERR(err, "failed to map fixed address");
 				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
 			}
+		} else {
+			//printf("\x1b[1;31;47m USEFUL INFORMATION: successfully mapped address %016p slot %016ld capaddr current: %p\x1b[0m\n", abs_addr, slots*10000 + i, get_cap_addr(current_meta->entry.map));
 		}
 	}
 
 	root->used += end - start + 1;
 	assert(root->used <= PTABLE_ENTRIES);
+	
 	
 	return SYS_ERR_OK;
 }
@@ -425,7 +431,7 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
 	// TODO: react to start_vaddr
 	printf("Init foreign %p %p\n", &st->vnode_meta_alloc, &st->page_meta_alloc);
 	st->slot_alloc = ca;
-
+	
 	//st->vnode_meta_alloc = current.vnode_meta_alloc;
 	//st->page_meta_alloc = current.page_meta_alloc;
 	
@@ -556,20 +562,21 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
 	// if (err_is_fail(err)) {
 	// 	DEBUG_ERR(err, "refilling the vnode meta slab allocator failed");
 	// }
-	int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
+	/*int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
 	int slab_vnodes_required = slab_pages_required + 5;
 	printf("MAP REQUIRES PAGES %d/%d, VNODES %d/%d\n", slab_pages_required, slab_freecount(&st->page_meta_alloc), slab_vnodes_required, slab_freecount(&st->vnode_meta_alloc));
 	while (slab_freecount(&st->page_meta_alloc) < slab_pages_required || slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) {
 		if (slab_freecount(&st->page_meta_alloc) < slab_pages_required) st->page_meta_alloc.refill_func(&(st->page_meta_alloc));
 		if (slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) st->vnode_meta_alloc.refill_func(&(st->vnode_meta_alloc));
 	} 
-	printf("ACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));
+	printf("ACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));*/
 	
 	// for testing only now, should be error handled and stuff
 	//err = rec_map(st, &(st->root), bytes, frame, buf, 0, 0, flags, 0);
 	*buf = (void*)st->offset;
 	st->offset += 1UL << 32;
-	err = rec_map_fixed(st, &(st->root), (lvaddr_t)*buf, bytes, frame, 0, flags, 0);
+	uint64_t t = 0;
+	err = rec_map_fixed(st, &(st->root), (lvaddr_t)*buf, bytes, frame, 0, flags, 0, (lvaddr_t)*buf, t);
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "allocation of virtual addresses failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;
@@ -608,7 +615,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      *  - think about what mapping configurations are actually possible
      */
 	
-	int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
+	/*int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
 	int slab_vnodes_required = slab_pages_required + 5;
 	printf("RMAP REQUIRES PAGES %d, VNODES %d\n", slab_pages_required, slab_vnodes_required);
 	while (slab_freecount(&st->page_meta_alloc) < slab_pages_required || slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) {
@@ -616,7 +623,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 		if (slab_freecount(&st->page_meta_alloc) < slab_pages_required) st->page_meta_alloc.refill_func(&(st->page_meta_alloc));
 		if (slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) st->vnode_meta_alloc.refill_func(&(st->vnode_meta_alloc));
 	} 
-	printf("RACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));
+	printf("RACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));*/
 
 	errval_t err;
 	
@@ -633,7 +640,8 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
 		
 	// map the necessary pages using the recursive helper function
-	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0); 
+	uint64_t t = 0;
+	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0, vaddr, t); 
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "mapping of fixed address failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;

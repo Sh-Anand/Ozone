@@ -140,6 +140,15 @@ grading_test_late(void) {
     DEBUG_PRINTF("Start another hello...\n");
     err = spawn_load_by_name("hello", &info, &pid);
 	printf("2nd call succeed\n");
+    DEBUG_PRINTF("Start another hello...\n");
+    err = spawn_load_by_name("hello", &info, &pid);
+	printf("3rd call succeed\n");
+    DEBUG_PRINTF("Start another hello...\n");
+    err = spawn_load_by_name("hello", &info, &pid);
+	printf("4th call succeed\n");
+    DEBUG_PRINTF("Start another hello...\n");
+    err = spawn_load_by_name("hello", &info, &pid);
+	printf("5th call succeed\n");
 	while(1);
     assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now
