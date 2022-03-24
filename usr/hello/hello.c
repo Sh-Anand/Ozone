@@ -29,6 +29,10 @@ int main(int argc, char *argv[])
         printf("Countdown %d/5...\n", i);
         // sleep(1);
     }
+    printf("Ready to print INFINITELY!!!\n");
+    while(1) {
+        printf("hello\n");
+    }
     printf("Goodbye, world!\n");
     return EXIT_SUCCESS;
 }
