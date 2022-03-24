@@ -223,7 +223,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
         strcpy(((char *) params + offset), argv[i]);  // parent address
-        params->argv[i] = (char *)(CHILD_DISPFRAME_VADDR + offset);  // child address
+        params->argv[i] = (char *)(CHILD_ARGFRAME_VADDR + offset);  // child address
 
         offset += copy_len;
     }
@@ -560,27 +560,14 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
     }
 
     // Setup command line arguments
-    int argc = 0;
-    char *argv[MAX_CMDLINE_ARGS + 1];
-
     const char *opts_src = multiboot_module_opts(si->module);
     if (opts_src == NULL) {
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
-    char *opts = strdup(opts_src);
-    if (opts == NULL) {
-        return SPAWN_ERR_GET_CMDLINE_ARGS;  // XXX: another one?
-    }
-    argv[argc++] = opts;
-    for (char *c = opts; *c != '\0'; ++c) {
-        if (*c == ' ') {
-            *c = '\0';
-            if (*(c + 1) != '\0') {
-                argv[argc++] = c + 1;
-            }
-        }
-    }
-    argv[argc] = NULL;
+
+    int argc = 0;
+    char *buf;
+    char **argv = make_argv(opts_src, &argc, &buf);
 
     // Spawn
     err = spawn_load_argv(argc, argv, si, pid);
@@ -588,7 +575,8 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
         return err;
     }
 
-    free(opts);
+    free(argv);
+    free(buf);
 
     return SYS_ERR_OK;
 }
