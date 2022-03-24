@@ -520,6 +520,7 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
     size_t rela_size = rela ? rela->sh_size : 0, new_rela_size = 0;
     struct Elf64_Shdr *new_rela = NULL;
 
+
     // Find dynamic program header, if any
     struct Elf64_Phdr *phead =
         (struct Elf64_Phdr *)(base + (uintptr_t)head->e_phoff);

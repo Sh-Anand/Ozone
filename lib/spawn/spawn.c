@@ -203,6 +203,8 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
     // Map the arg page to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_ARGFRAME_VADDR, argpage,
                                 BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
+    printf("%p\n", params);
+
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_MAP_ARGSPG_TO_NEW);
     }
@@ -215,7 +217,9 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
         if (offset + copy_len >= BASE_PAGE_SIZE) {
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
-        strcpy((char *)(params + offset), argv[i]);                  // parent address
+        printf("a%s\n", argv[i]);
+        strcpy((char *)((char*)params + offset), argv[i]);                  // parent address
+        printf("b\n");
         params->argv[i] = (char *)(CHILD_DISPFRAME_VADDR + offset);  // child address
 
         offset += copy_len;
@@ -418,7 +422,6 @@ static errval_t setup_elf(struct spawninfo *si)
     err = elf_load(EM_AARCH64, elf_allocate_func, si->child_paging_state,
                    si->mapped_binary, si->module->mrmod_size, &si->pc);
     printf("loaded eld%p\n", si->mapped_binary);
-    //while(1);
     // TODO: not unmapped in parent for now
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_LOAD);

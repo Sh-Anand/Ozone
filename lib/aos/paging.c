@@ -84,7 +84,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 	size_t sub_region_size = 1UL << bit_offset;
 	start = rvaddr >> (39 - depth*9);
 	end = (rvaddr + size - 1) >> (39 - depth*9);
-	printf("%ld, %ld, %ld, %ld, %d\n", rvaddr, size, frame_offset, sub_region_size, flags);
+	printf("%ld, %ld, %ld, %ld, %d\n", rvaddr, size, frame_offset, sub_region_size, depth);
 	printf("%i, %i\n", start, end);
 	assert(start < 512 && end < 512);
 	
@@ -626,7 +626,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 	}
 	printf("RDONE\n");
 
-	while (bytes == 17084416);
+	//while (bytes == 17084416);
 	
     return SYS_ERR_OK;
 }
