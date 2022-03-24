@@ -212,12 +212,9 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
     }
     assert(params != 0);
 
-    printf("eeee\n");
     // Map the arg page to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_ARGFRAME_VADDR, argpage,
                                 BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
-    printf("%p\n", params);
-
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_MAP_ARGSPG_TO_NEW);
     }
@@ -231,7 +228,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
         printf("a%s\n", argv[i]);
-        strcpy((char *)((char *)params + offset), argv[i]);  // parent address
+        strcpy(((char *) params + offset), argv[i]);  // parent address
         printf("b\n");
         params->argv[i] = (char *)(CHILD_DISPFRAME_VADDR + offset);  // child address
 
@@ -435,7 +432,6 @@ static errval_t setup_elf(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
-    printf("Mapped for elf\n");
     DEBUG_PRINTF("si->module->mrmod_size = %lu\n", si->module->mrmod_size);
     assert(si->mapped_binary != 0);
 
@@ -445,21 +441,18 @@ static errval_t setup_elf(struct spawninfo *si)
         // TODO: test it
     }
 
-    printf("Starting loading elf\n");
     // Parse ELF
+    DEBUG_PRINTF("spawn: loading elf...\n");
     err = elf_load(EM_AARCH64, elf_allocate_func, si->child_paging_state,
                    si->mapped_binary, si->module->mrmod_size, &si->pc);
-    printf("loaded eld%p\n", si->mapped_binary);
+    DEBUG_PRINTF("spawn: elf loaded\n");
     // TODO: not unmapped in parent for now
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_LOAD);
     }
 
-    printf("%d\n", *((char *)si->mapped_binary + si->module->mrmod_size - 1));
-    printf("loaded eld2\n");
     struct Elf64_Shdr *got = elf64_find_section_header_name(
         (genvaddr_t)si->mapped_binary, si->module->mrmod_size, ".got");
-    printf("loaded eld3\n");
     if (got == NULL) {
         return SPAWN_ERR_ELF_MAP;  // XXX: fail to find got address
     }
@@ -502,40 +495,47 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     // TODO: for now use a static counter for pid, can wrap around though
     static domainid_t pid_upper = 1;
     si->pid = pid_upper++;
+    *pid = si->pid;
 
     errval_t err;
 
     // Setup CSpace
+    DEBUG_PRINTF("spawn: setup cspace...\n")
     err = setup_cspace(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_SETUP_CSPACE);
     }
 
     // Setup VSpace
+    DEBUG_PRINTF("spawn: setup vspace...\n")
     err = setup_vspace(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_VSPACE_INIT);
     }
 
     // Setup ELF
+    DEBUG_PRINTF("spawn: setup elf...\n")
     err = setup_elf(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
 
     // Setup dispatcher
+    DEBUG_PRINTF("spawn: setup dispatcher...\n")
     err = setup_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
 
     // Setup arguments
+    DEBUG_PRINTF("spawn: setup argument...\n")
     err = setup_arguments(si, argc, argv);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_GET_CMDLINE_ARGS);  // XXX: not this one
     }
 
     // Start
+    DEBUG_PRINTF("spawn: start dispatcher...\n")
     err = start_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);

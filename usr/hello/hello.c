@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
     }
     for (int i = 5; i >= 0; i--) {
         printf("Countdown %d/5...\n", i);
-        sleep(1);
+        // sleep(1);
     }
     printf("Goodbye, world!\n");
     return EXIT_SUCCESS;

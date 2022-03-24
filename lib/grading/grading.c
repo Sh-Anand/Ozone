@@ -126,5 +126,8 @@ grading_test_late(void) {
     DEBUG_PRINTF("Start spawn test...\n");
     err = spawn_load_by_name("hello", &info, &pid);
     assert(err_is_ok(err));
+    DEBUG_PRINTF("Start another hello...\n");
+    err = spawn_load_by_name("hello", &info, &pid);
+    assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now
 }
