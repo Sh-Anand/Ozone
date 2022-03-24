@@ -37,6 +37,7 @@ struct spawninfo {
     // Address of the mapped binary in the parent's address space
     lvaddr_t mapped_binary;
 
+    struct capref rootcn;
     struct cnoderef taskcn;
     struct cnoderef pagecn;
 

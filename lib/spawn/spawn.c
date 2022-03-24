@@ -84,7 +84,8 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
     struct paging_state *child_state = (struct paging_state *)state;
 
     genvaddr_t fbase = base / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
-    size_t esize = (size + base - fbase + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
+    size_t esize = (size + base - fbase + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE
+                   * BASE_PAGE_SIZE;
     // Allocate a frame of the requested size
     struct capref frame_cap;
     err = frame_alloc(&frame_cap, esize, NULL);
@@ -99,15 +100,17 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
 
     // Map frame into an arbitrary location in our page table
     void *res;
-	printf("cccc\n");
-	printf("%d\n", flags);
-    err = paging_map_frame_attr(get_current_paging_state(), &res, esize, frame_cap, VREGION_FLAGS_READ_WRITE);
-    if (err_is_fail(err)) return err_push(err, LIB_ERR_PAGING_MAP);
+    printf("cccc\n");
+    printf("%d\n", flags);
+    err = paging_map_frame_attr(get_current_paging_state(), &res, esize, frame_cap,
+                                VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err))
+        return err_push(err, LIB_ERR_PAGING_MAP);
 
-	printf("base %p, size %ld\n", base, size);
-	printf("fbase %p, esize %ld\n", fbase, esize);
-	printf("%p, %ld\n", res, size);
-	printf("%ld\n", *((char*)res + size-1));
+    printf("base %p, size %ld\n", base, size);
+    printf("fbase %p, esize %ld\n", fbase, esize);
+    printf("%p, %ld\n", res, size);
+    printf("%ld\n", *((char *)res + size - 1));
     *ret = res + base - fbase;
 
     return SYS_ERR_OK;
@@ -209,7 +212,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
     }
     assert(params != 0);
 
-	printf("eeee\n");
+    printf("eeee\n");
     // Map the arg page to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_ARGFRAME_VADDR, argpage,
                                 BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
@@ -228,7 +231,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
         printf("a%s\n", argv[i]);
-        strcpy((char *)((char*)params + offset), argv[i]);                  // parent address
+        strcpy((char *)((char *)params + offset), argv[i]);  // parent address
         printf("b\n");
         params->argv[i] = (char *)(CHILD_DISPFRAME_VADDR + offset);  // child address
 
@@ -264,10 +267,21 @@ static errval_t start_dispatcher(struct spawninfo *si)
         .slot = TASKCN_SLOT_DISPATCHER,
     };
 
-    struct capref child_rootcn_cap = {
-        .cnode = si->taskcn,
-        .slot = TASKCN_SLOT_ROOTCN,
-    };
+    errval_t err;
+
+    struct capref child_dispatcher_parent_slot;
+    err = slot_alloc(&child_dispatcher_parent_slot);
+    if (err_is_fail(err)) {
+        // FIXME: no corresponding err or doing the wrong thing?
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
+    }
+
+    err = cap_copy(child_dispatcher_parent_slot, child_dispatcher_cap);
+    if (err_is_fail(err)) {
+        // FIXME: no corresponding err or doing the wrong thing?
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
+    }
+
 
     struct capref child_rootvn_cap = {
         .cnode = si->pagecn,
@@ -279,7 +293,7 @@ static errval_t start_dispatcher(struct spawninfo *si)
         .slot = TASKCN_SLOT_DISPFRAME,
     };
 
-    return invoke_dispatcher(child_dispatcher_cap, cap_dispatcher, child_rootcn_cap,
+    return invoke_dispatcher(child_dispatcher_parent_slot, cap_dispatcher, si->rootcn,
                              child_rootvn_cap, child_dispframe_cap, true);
 }
 
@@ -293,6 +307,7 @@ static errval_t setup_cspace(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_CREATE_ROOTCN);
     }
+    si->rootcn = child_l1_cnode;
 
     // ROOTCN_SLOT_TASKCN
     err = cnode_create_foreign_l2(child_l1_cnode, ROOTCN_SLOT_TASKCN, &si->taskcn);
@@ -414,7 +429,9 @@ static errval_t setup_elf(struct spawninfo *si)
     printf("Mapping for elf\n");
     // map binary to our page table
     err = paging_map_frame(get_current_paging_state(), (void **)&si->mapped_binary,
-                           (si->module->mrmod_size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE * BASE_PAGE_SIZE, child_frame);
+                           (si->module->mrmod_size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE
+                               * BASE_PAGE_SIZE,
+                           child_frame);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
@@ -438,7 +455,7 @@ static errval_t setup_elf(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_LOAD);
     }
 
-    printf("%d\n", *((char*)si->mapped_binary + si->module->mrmod_size - 1));
+    printf("%d\n", *((char *)si->mapped_binary + si->module->mrmod_size - 1));
     printf("loaded eld2\n");
     struct Elf64_Shdr *got = elf64_find_section_header_name(
         (genvaddr_t)si->mapped_binary, si->module->mrmod_size, ".got");
