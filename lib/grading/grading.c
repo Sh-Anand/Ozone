@@ -102,10 +102,20 @@ __attribute__((unused)) static struct capref test_mem_alloc(lvaddr_t *addr, size
 void
 grading_test_early(void) {
 	// test some fixed memory mapping (freeing not yet tested)
-	__attribute__((unused)) lvaddr_t base = 3UL << 39;
-	__attribute__((unused)) lvaddr_t addr0, addr1, addr2, addr3, addr4, addr5;
+	// __attribute__((unused)) lvaddr_t base = 3UL << 39;
+	// __attribute__((unused)) lvaddr_t addr0, addr1, addr2, addr3, addr4, addr5;
 	// __attribute__((unused)) struct capref fixed_frame0 = test_mem_map_fixed(base, 8192);
-	// __attribute__((unused)) struct capref fixed_frame1 = test_mem_map_fixed(base + 8192, 1 << 21);
+	// base += 8192;
+	// __attribute__((unused)) struct capref fixed_frame1 = test_mem_map_fixed(base, 1 << 21);
+	// base += 1 << 21;
+	// __attribute__((unused)) struct capref fixed_frame2 = test_mem_map_fixed(base, 16384);
+	// base += 16384;
+	// __attribute__((unused)) struct capref fixed_frame3 = test_mem_map_fixed(base, 1 << 21);
+	// base += 1 << 21;
+	// __attribute__((unused)) struct capref fixed_frame4 = test_mem_map_fixed(base, 3 << 20);
+	// base += 3 << 20;
+	// __attribute__((unused)) struct capref fixed_frame5 = test_mem_map_fixed(base, 1 << 21);
+	// base += 1 << 21;
 	
 	// __attribute__((unused)) struct capref frame0 = test_mem_alloc(&addr0, 4096);
 	// __attribute__((unused)) struct capref frame1 = test_mem_alloc(&addr1, 8192);
@@ -113,9 +123,10 @@ grading_test_early(void) {
 	// __attribute__((unused)) struct capref frame3 = test_mem_alloc(&addr3, 2097152+8192);
 	// __attribute__((unused)) struct capref frame4 = test_mem_alloc(&addr4, 3145728);
 	// __attribute__((unused)) struct capref frame5 = test_mem_alloc(&addr5, 3145728+8192); // TODO: there seems to be an issue still here, where something causes a pagefault
-	// //while(1);
+	
+	// debug_printf("tests complete\n");
+	// while(1);
 
-	debug_printf("tests complete\n");
 }
 
 void
@@ -128,6 +139,8 @@ grading_test_late(void) {
     assert(err_is_ok(err));
     DEBUG_PRINTF("Start another hello...\n");
     err = spawn_load_by_name("hello", &info, &pid);
+	printf("2nd call succeed\n");
+	while(1);
     assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now
 }

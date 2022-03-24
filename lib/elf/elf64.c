@@ -582,6 +582,7 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
 
             // Map segment in user-space memory
             void *dest = NULL;
+            printf("it %p\n", dest);
             err = allocate_func(state, p->p_vaddr, p->p_memsz, p->p_flags, &dest);
             printf("passed pointer %p\n", dest);
             if (err_is_fail(err)) {
@@ -595,7 +596,7 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
 
             // Initialize rest of memory segment (ie. BSS) with all zeroes
             memset((char *)dest + p->p_filesz, 0, p->p_memsz - p->p_filesz);
-            printf("passed pointer %p\n", dest);
+            printf("1passed pointer %p\n", dest);
 
             // Apply relocations
             if (rela != NULL && symtab != NULL) {
@@ -609,6 +610,7 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
             }
             printf("passed pointer %p\n", dest);
         } else if (p->p_type == PT_TLS) {
+            printf("--passed pointer\n");
             assert(p->p_vaddr != 0);
             assert(tls_base == 0); // if not we have multiple TLS sections!
             tls_base = p->p_vaddr;
