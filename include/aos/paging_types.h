@@ -49,7 +49,7 @@ struct mm_vnode_meta {
 	struct mm_entry_meta this;
 	struct capref cap;
 	union mm_meta *first;
-	int used;
+	int used; bool blocked;
 };
 
 union mm_meta {
