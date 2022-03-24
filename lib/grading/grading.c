@@ -134,21 +134,12 @@ grading_test_late(void) {
     struct spawninfo info;
     domainid_t pid = -1;
     errval_t err;
-    DEBUG_PRINTF("Start spawn test...\n");
-    err = spawn_load_by_name("hello", &info, &pid);
-    assert(err_is_ok(err));
-    DEBUG_PRINTF("Start another hello...\n");
-    err = spawn_load_by_name("hello", &info, &pid);
-	printf("2nd call succeed\n");
-    DEBUG_PRINTF("Start another hello...\n");
-    err = spawn_load_by_name("hello", &info, &pid);
-	printf("3rd call succeed\n");
-    DEBUG_PRINTF("Start another hello...\n");
-    err = spawn_load_by_name("hello", &info, &pid);
-	printf("4th call succeed\n");
-    DEBUG_PRINTF("Start another hello...\n");
-    err = spawn_load_by_name("hello", &info, &pid);
-	printf("5th call succeed\n");
+	for (int i = 0; i < 20; i++) {
+		DEBUG_PRINTF("Start spawn test...\n");
+		err = spawn_load_by_name("hello", &info, &pid);
+		assert(err_is_ok(err));
+		printf("%i-th call succeed\n", i);
+	}
 	while(1);
     assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now

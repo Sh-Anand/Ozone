@@ -39,7 +39,7 @@ void slab_init(struct slab_allocator *slabs, size_t blocksize,
     slabs->slabs = NULL;
     slabs->blocksize = SLAB_REAL_BLOCKSIZE(blocksize);
     slabs->refill_func = refill_func;
-	printf("Slab alloc %d %p\n", slabs->blocksize, slabs);
+	//printf("Slab alloc %d %p\n", slabs->blocksize, slabs);
 }
 
 
@@ -181,7 +181,7 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-	printf("Slab refill pages %d %p\n", slabs->blocksize, slabs);
+	//printf("Slab refill pages %d %p\n", slabs->blocksize, slabs);
     bytes = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
 	
 	static lvaddr_t address = 64UL << 39;
@@ -196,16 +196,17 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
     }
 	
 	//lvaddr_t ra;
+    lvaddr_t maddr = address;
+	address += frame_bytes + BASE_PAGE_SIZE;
 
     //err = paging_map_frame_attr(get_current_paging_state(), (void**)&ra, frame_bytes, frame, VREGION_FLAGS_READ_WRITE);
-    err = paging_map_fixed_attr(get_current_paging_state(), address, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
+    err = paging_map_fixed_attr(get_current_paging_state(), maddr, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to snip part of capability\n");
         return err_push(err, MM_ERR_CHUNK_NODE);
     }
 
-    slab_grow(slabs, (void *)address, frame_bytes);
-	address += frame_bytes + BASE_PAGE_SIZE;
+    slab_grow(slabs, (void *)maddr, frame_bytes);
 
     return SYS_ERR_OK;
 }

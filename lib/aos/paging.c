@@ -88,6 +88,7 @@ static errval_t pt_alloc(struct paging_state * st, enum objtype type,
  * @return errval_t 
  */
 static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *root, lvaddr_t rvaddr, size_t size, struct capref frame, size_t frame_offset, uint64_t flags, int depth, lvaddr_t abs_addr, uint64_t slots) {
+	
 	assert(rvaddr % BASE_PAGE_SIZE == 0);
 	assert(size % BASE_PAGE_SIZE == 0);
 	assert(size > 0);
@@ -98,6 +99,8 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 	capaddr_t start = rvaddr >> bit_offset;
 	capaddr_t end = (rvaddr + size - 1) >> bit_offset;	
 	assert(start < 512 && end < 512);
+	printf("%ld, %ld, %ld, %ld, %d\n", rvaddr, size, frame_offset, sub_region_size, depth);
+	printf("%i, %i\n", start, end);
 
 	union mm_meta **pointer_to_current_meta = &(root->first); // this tracks the address of the pointer we need to write
 	union mm_meta *current_meta = root->first; // this tracks the current_meta page table entry while walking through the list
@@ -120,7 +123,6 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 				// this is another vnode to create
 				refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
 				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
-				new_entry->vnode.used = 0;
 				new_entry->vnode.first = NULL;
 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
 				if (err_is_fail(err)) {
@@ -164,10 +166,9 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			// update current_meta to be used later
 			current_meta = new_entry;
 		} else {
-			debug_printf("i: %d, current_meta %p, current->slot: %d\n", i, current_meta, current_meta->entry.slot);
+			//debug_printf("i: %d, current_meta %p, current->slot: %d\n", i, current_meta, current_meta->entry.slot);
 			if (depth >= 3) debug_printf("USEFUL INFORMATION: size: %d, Depth %d trying to map address: %020p slots: %016ld capaddr current: %p\n", size, depth, abs_addr, slots*10000 + i, get_cap_addr(current_meta->entry.map));
-			//assert(depth < 3);
-			//assert(current_meta->vnode.used < PTABLE_ENTRIES);
+			assert(depth < 3);
 		}
 				
 		if (depth < 3) {
@@ -175,7 +176,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			lvaddr_t i_start = MAX(rvaddr, i * sub_region_size); // start of the subregion to allocate
 			lvaddr_t i_end = MIN(rvaddr + size, (i + 1) * sub_region_size); // end of the subregion to allocate
 
-			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1);
+			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1, abs_addr, slots*10000 + i);
 			if (err_is_fail(err)) {
 				// TODO: verify no cleanup needed
 				DEBUG_ERR(err, "failed to map fixed address");
@@ -185,167 +186,10 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			//printf("\x1b[1;31;47m USEFUL INFORMATION: successfully mapped address %016p slot %016ld capaddr current: %p\x1b[0m\n", abs_addr, slots*10000 + i, get_cap_addr(current_meta->entry.map));
 		}
 	}
-
-	root->used += end - start + 1;
-	assert(root->used <= PTABLE_ENTRIES);
 	
 	
 	return SYS_ERR_OK;
 }
-
-inline int lower_bound_empty_subsequent_blocks(int used) {
-	assert(used >= 0 && used <= PTABLE_ENTRIES);
-	return PTABLE_ENTRIES / (used + 1);
-}
-
-//errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, size_t size, struct capref frame, void** buf, lvaddr_t base_addr, size_t frame_offset, uint64_t flags, int depth);
-// static errval_t rec_map(struct paging_state *st, struct mm_vnode_meta *root, size_t size, struct capref frame, void** buf, lvaddr_t base_addr, size_t frame_offset, uint64_t flags, int depth) {
-// 	assert(rvaddr % BASE_PAGE_SIZE == 0);
-// 	assert(size % BASE_PAGE_SIZE == 0);
-	
-// 	// simple approach for now: just find the first fitting region
-	
-// 	// declare and define some necessary variables
-// 	errval_t err;
-	
-// 	lvaddr_t out_addr = 0;
-// 	size_t bit_offset = 39 - 9*depth;
-// 	size_t sub_region_size = 1UL << bit_offset;
-// 	size_t next_sub_region_size = 1UL << (bit_offset - 9);
-	
-// 	int n_free_blocks = lower_bound_empty_subsequent_blocks(root->used);
-// 	int n_blocks_necessary = (size + sub_region_size - 1) / sub_region_size;
-// 	int n_next_blocks_necessary = (size + next_sub_region_size - 1) / next_sub_region_size;
-	
-	
-// 	//printf("size %ld, bit_offset %ld, sub_region_size %ld, depth %ld, flags %ld, base_addr %ld\n", size, bit_offset, sub_region_size, depth, flags, base_addr);
-	
-// 	// small sanity check: if there is not enough space here, then something is not right
-// 	assert(size <= sub_region_size * n_free_blocks); // this right?
-	
-// 	union mm_meta **pointer_to_current_meta = &(root->first); // this tracks the address of the pointer we need to write
-// 	union mm_meta *current_meta = root->first; // this tracks the current_meta page table entry while walking through the list
-// 	int last_slot = 0; // keep track of the beginning of the free region delimited by current
-
-// 	// find a large enough free region, this should always be possible here
-// 	if (depth < 3 && n_blocks_necessary == 1) { // only one block is necessary, so it is possible to reuse an already mapped vnode if it has enough children
-// 		while (current_meta != NULL && (lower_bound_empty_subsequent_blocks(current_meta->vnode.used) < n_next_blocks_necessary || current_meta->vnode.blocked)) {
-// 			last_slot = current_meta->entry.slot + 1; // the next iteration should have a look at the region starting after the current slot
-// 			pointer_to_current_meta = &(current_meta->entry.next);
-// 			current_meta = current_meta->entry.next;
-// 		}
-// 		// current is either NULL or the desired vnode
-// 		if (current_meta != NULL) {
-// 			//debug_printf("non mapped\n");
-			
-// 			current_meta->vnode.blocked = true;
-// 			err = rec_map(st, &(current_meta->vnode), rvaddr % sub_region_size, frame, buf, base_addr + current_meta->entry.slot * sub_region_size, frame_offset, flags, depth + 1);
-// 			current_meta->vnode.blocked = false;
-// 			if (err_is_fail(err)) {
-// 				DEBUG_ERR(err, "allocation of virtual addresses failed");
-// 				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
-// 			}
-// 			return SYS_ERR_OK;
-// 		} else {
-// 			pointer_to_current_meta = &(root->first);
-// 			current_meta = root->first;
-// 			last_slot = 0;
-// 			goto new_mapping;
-// 		}
-// 	} else { // if either multiple tables are needed or we are at a leaf node, just find the first suitable region
-// 		//debug_printf("starting while\n");
-// 		new_mapping:
-// 		while (current_meta != NULL && current_meta->entry.slot - last_slot < n_blocks_necessary) {
-// 			//debug_printf("current: %p, slot: %d: next: %p\n", current_meta, current_meta->entry.slot, current_meta->entry.next);
-// 			last_slot = current_meta->entry.slot + 1; // the next iteration should have a look at the region starting after the current slot
-// 			pointer_to_current_meta = &(current_meta->entry.next);
-// 			current_meta = current_meta->entry.next;
-// 		}
-		
-// 		debug_printf("last_slot: %d, current: %p, current->slot: %d, current_p: %p\n", last_slot, current_meta, current_meta ? current_meta->entry.slot : -1, pointer_to_current_meta);
-// 		//fflush(stdout);
-// 		debug_printf("nec. blocks: %d\n", n_blocks_necessary);
-	
-// 		// there should now be space for the necessary mappings, so insert them now
-// 		// at this point, current should be the first element after the insertion
-// 		for (int i = 0; i < n_blocks_necessary; i++) {
-// 			//debug_printf("%d/%d\n", i, n_blocks_necessary);
-// 			union mm_meta *new_entry;
-			
-// 			struct capref mapee;
-// 			size_t off;
-			
-// 			if (depth < 3) {
-// 				// this is another vnode to create
-// 				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
-// 				new_entry->vnode.used = 0;
-// 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
-// 				if (err_is_fail(err)) {
-// 					DEBUG_ERR(err, "pt_alloc failed");
-// 					return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
-// 				}
-// 				mapee = new_entry->vnode.cap; // a new vnode has to be mapped
-// 				off = 0; // there is no offset for vnodes
-// 			} else {
-// 				// this is a page entry to create
-// 				new_entry = slab_alloc(&(st->page_meta_alloc)); // allocate space for another struct mm_entry_meta
-// 				mapee = frame; // the frame is to be mapped here
-// 				off = frame_offset + (i - start) * sub_region_size; // pages have a necessary frame offset if more than a single page is mapped
-// 			}
-			
-// 			// initialize the entry
-// 			new_entry->entry.slot = last_slot + i;
-// 			new_entry->entry.next = current_meta;
-// 			*pointer_to_current_meta = new_entry;
-// 			pointer_to_current_meta = &(new_entry->entry.next);
-			
-// 			// allocate the mapping capability
-// 			err = st->slot_alloc->alloc(st->slot_alloc, &(new_entry->entry.map));
-// 			if (err_is_fail(err)) {
-// 				DEBUG_ERR(err, "slot_alloc failed");
-// 				if (depth < 3) st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-// 				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
-// 			}
-			
-// 			// map the page
-// 			err = vnode_map(root->cap, mapee, last_slot + i, flags, off /* TODO: verify the offset */, 1 /* for now we only map one page at a time in all cases */, new_entry->entry.map);
-// 			//debug_printf("mapping of slot %d at depth %d in pt %p failed\n", last_slot + i, depth, get_cap_addr(root->cap));
-// 			if (err_is_fail(err)) {
-// 				DEBUG_ERR(err, "vnode_map failed");
-// 				st->slot_alloc->free(st->slot_alloc, new_entry->entry.map);
-// 				st->slot_alloc->free(st->slot_alloc, new_entry->vnode.cap);
-// 				return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
-// 			}
-			
-// 			// descend and map the children of this new entry (only needs to happen for vnodes, not for pages)
-// 			if (depth < 3) {
-// 				lvaddr_t ra;
-// 				err = rec_map(st, &(new_entry->vnode), MIN(sub_region_size, size - i*sub_region_size), frame, (void**)&ra, base_addr + new_entry->entry.slot*sub_region_size, frame_offset + i*sub_region_size, flags, depth+1);
-// 				if (err_is_fail(err)) {
-// 					// TODO: perform possible and necessary cleanup here
-// 					DEBUG_ERR(err, "rec_map failed");
-// 					return err_push(err, LIB_ERR_PMAP_NOT_MAPPED);
-// 				}
-// 				if (i == 0) {
-// 					//debug_printf("ra: %ld\n", ra);
-// 					out_addr = ra; // set base_addr to first mapped address in this sub tree (only in the first iteration)
-// 				}
-// 			} else {
-// 				if (i == 0) out_addr = base_addr + (last_slot + i) * 4096;
-// 			}
-// 		}
-		
-// 		// since weded need to map new vnodes, update the used count of the root node of this subtree
-// 		root->used += n_blocks_necessary; 
-// 	}
-	
-// 	//printf("out_addr %ld\n", out_addr);
-	
-// 	// return the mapped address
-// 	*buf = (void*)out_addr;
-	
-// 	return SYS_ERR_OK;
-// }
 
 /**
  * TODO(M2): Implement this function.
@@ -384,7 +228,6 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 	// XXX: temporary fix, but occupy the first L0 slot since mappings in there tend to be taken already
 	union mm_meta *slot0 = slab_alloc(&(st->vnode_meta_alloc));
 	slot0->entry.slot = 0;
-	slot0->vnode.used = 512;
 	slot0->entry.next = NULL;
 	slot0->vnode.first = NULL;
 	
@@ -396,7 +239,6 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 	st->root.this.map = NULL_CAP;
 	st->root.this.next = NULL;
 	st->root.this.slot = -1;
-	st->root.used = 1;
 	st->offset = 10UL << 39;
 	
 	assert(get_croot_addr(st->root.cap) == CPTR_ROOTCN);
@@ -451,7 +293,6 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
 	st->root.this.map = NULL_CAP;
 	st->root.this.next = NULL;
 	st->root.this.slot = -1;
-	st->root.used = 1;
 	st->offset = 1UL << 39;
 	
 	assert(get_croot_addr(st->root.cap) == CPTR_ROOTCN);
@@ -514,14 +355,11 @@ errval_t paging_init_onthread(struct thread *t)
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t alignment)
 {
-    /**
-     * TODO(M2): Implement this function
-     *   - Find a region of free virtual address space that is large enough to
-     *     accomodate a buffer of size `bytes`.
-     */
-    *buf = NULL;
+    st->offset = (st->offset + alignment - 1) / alignment * alignment;	
+    *buf = (void*)st->offset;
+	st->offset += bytes;
 
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return SYS_ERR_OK;
 }
 
 
@@ -549,38 +387,14 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
     //  - think about what mapping configurations are actually possible
 
 	errval_t err;
+
 	
-	// refill the slab allocators if necessary
-	// err = refill_slab_alloc(&slab_page_refilling, &(st->page_meta_alloc));
-	// if (err_is_fail(err)) {
-	// 	DEBUG_ERR(err, "refilling the page meta slab allocator failed");
-	// }
-	// err = refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
-	// if (err_is_fail(err)) {
-	// 	DEBUG_ERR(err, "refilling the vnode meta slab allocator failed");
-	// }
-	/*int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
-	int slab_vnodes_required = slab_pages_required + 5;
-	printf("MAP REQUIRES PAGES %d/%d, VNODES %d/%d\n", slab_pages_required, slab_freecount(&st->page_meta_alloc), slab_vnodes_required, slab_freecount(&st->vnode_meta_alloc));
-	while (slab_freecount(&st->page_meta_alloc) < slab_pages_required || slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) {
-		if (slab_freecount(&st->page_meta_alloc) < slab_pages_required) st->page_meta_alloc.refill_func(&(st->page_meta_alloc));
-		if (slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) st->vnode_meta_alloc.refill_func(&(st->vnode_meta_alloc));
-	} 
-	printf("ACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));*/
-	
-	// for testing only now, should be error handled and stuff
-	//err = rec_map(st, &(st->root), bytes, frame, buf, 0, 0, flags, 0);
-	*buf = (void*)st->offset;
-	st->offset += 1UL << 32;
-	uint64_t t = 0;
-	err = rec_map_fixed(st, &(st->root), (lvaddr_t)*buf, bytes, frame, 0, flags, 0, (lvaddr_t)*buf, t);
+	paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
+	err = paging_map_fixed_attr(st, (lvaddr_t)*buf, frame, bytes, flags);
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "allocation of virtual addresses failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;
-	}
-	printf("DONE\n");
-
-	
+	}	
 	
 	return SYS_ERR_OK;
 }
@@ -601,6 +415,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
                                struct capref frame, size_t bytes, int flags)
 {
+
     /*
      * TODO(M1):
      *    - Map a frame assuming all mappings will fit into one leaf page table (L3)
@@ -611,41 +426,17 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      * Hint:
      *  - think about what mapping configurations are actually possible
      */
-	
-	/*int slab_pages_required = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE + SLAB_REFILL_THRESHOLD;
-	int slab_vnodes_required = slab_pages_required + 5;
-	printf("RMAP REQUIRES PAGES %d, VNODES %d\n", slab_pages_required, slab_vnodes_required);
-	while (slab_freecount(&st->page_meta_alloc) < slab_pages_required || slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) {
-		printf("Free %d, %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));
-		if (slab_freecount(&st->page_meta_alloc) < slab_pages_required) st->page_meta_alloc.refill_func(&(st->page_meta_alloc));
-		if (slab_freecount(&st->vnode_meta_alloc) < slab_vnodes_required) st->vnode_meta_alloc.refill_func(&(st->vnode_meta_alloc));
-	} 
-	printf("RACQUIRED PAGES %d, VNODES %d\n", slab_freecount(&st->page_meta_alloc), slab_freecount(&st->vnode_meta_alloc));*/
+
+	printf("%p: gave %p\n", st, vaddr);
 
 	errval_t err;
-	
-	// // refill the slab allocators if necessary
-	// err = refill_slab_alloc(&slab_page_refilling, &(st->page_meta_alloc));
-	// if (err_is_fail(err)) {
-	// 	DEBUG_ERR(err, "refilling the page meta slab allocator failed");
-	// }
-	// err = refill_slab_alloc(&slab_vnode_refilling, &(st->vnode_meta_alloc));
-	// if (err_is_fail(err)) {
-	// 	DEBUG_ERR(err, "refilling the vnode meta slab allocator failed");
-	// }
-		
-	//debug_printf("Default Slot Alloc Space: %d, NSlots: %d\n", get_default_slot_allocator()->space, get_default_slot_allocator()->nslots);
 		
 	// map the necessary pages using the recursive helper function
-	uint64_t t = 0;
-	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0, vaddr, t); 
+	err = rec_map_fixed(st, &st->root, vaddr, bytes, frame, 0, flags, 0, vaddr, 0); 
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "mapping of fixed address failed");
 		return LIB_ERR_PMAP_NOT_MAPPED;
 	}
-	printf("RDONE\n");
-
-	//while (bytes == 17084416);
 	
     return SYS_ERR_OK;
 }
