@@ -52,6 +52,7 @@ const char *multiboot_module_rawstring(struct mem_region *region)
     if (multiboot_strings == NULL) {
         errval_t err;
         /* Map in multiboot module strings area */
+	printf("b\n");
         err = paging_map_frame_attr(get_current_paging_state(),
             (void **)&multiboot_strings, BASE_PAGE_SIZE, cap_mmstrings,
             VREGION_FLAGS_READ);

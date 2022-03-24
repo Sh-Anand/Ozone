@@ -59,7 +59,7 @@ errval_t elf_load_tls(uint16_t em_machine, elf_allocator_fn allocate_func,
     case ELFCLASS64:
         return elf64_load(em_machine, allocate_func, state, base, size,
                           retentry, ret_tlsbase, ret_tlsinitlen, ret_tlstotallen);
-    }
+    }   
 
     return ELF_ERR_HEADER;
 }

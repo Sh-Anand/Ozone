@@ -83,24 +83,32 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
 
     struct paging_state *child_state = (struct paging_state *)state;
 
+    genvaddr_t fbase = base / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
+    size_t esize = (size + base - fbase + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
     // Allocate a frame of the requested size
     struct capref frame_cap;
-    err = frame_alloc(&frame_cap, size, NULL);
+    err = frame_alloc(&frame_cap, esize, NULL);
     if (err_is_fail(err))
         return err_push(err, LIB_ERR_FRAME_ALLOC);
 
+
     // Map frame into specified location in the child's table
-    err = paging_map_fixed_attr(child_state, base, frame_cap, size, flags);
+    err = paging_map_fixed_attr(child_state, fbase, frame_cap, esize, flags);
     if (err_is_fail(err))
         return err_push(err, LIB_ERR_PAGING_MAP);
 
     // Map frame into an arbitrary location in our page table
     void *res;
-    err = paging_map_frame_attr(get_current_paging_state(), &res, size, frame_cap, flags);
-    if (err_is_fail(err))
-        return err_push(err, LIB_ERR_PAGING_MAP);
+	printf("cccc\n");
+	printf("%d\n", flags);
+    err = paging_map_frame_attr(get_current_paging_state(), &res, esize, frame_cap, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) return err_push(err, LIB_ERR_PAGING_MAP);
 
-    *ret = res;
+	printf("base %p, size %ld\n", base, size);
+	printf("fbase %p, esize %ld\n", fbase, esize);
+	printf("%p, %ld\n", res, size);
+	printf("%ld\n", *((char*)res + size-1));
+    *ret = res + base - fbase;
 
     return SYS_ERR_OK;
 }
@@ -130,7 +138,7 @@ static errval_t setup_dispatcher(struct spawninfo *si)
 
     // Core id of the process
     disp_gen->core_id = my_core_id;
-
+    disp_gen->domain_id = 1;
     // Virtual address of the dispatcher frame in child’s VSpace
     disp->udisp = CHILD_DISPFRAME_VADDR;
 
@@ -165,6 +173,7 @@ static errval_t setup_dispatcher(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
+	printf("dddd\n");
     // Map the frame to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_DISPFRAME_VADDR, dispframe,
                                 DISPATCHER_FRAME_SIZE, VREGION_FLAGS_READ_WRITE);
@@ -190,6 +199,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
     }
     assert(params != 0);
 
+	printf("eeee\n");
     // Map the arg page to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_ARGFRAME_VADDR, argpage,
                                 BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
@@ -387,12 +397,14 @@ static errval_t setup_elf(struct spawninfo *si)
         .slot = si->module->mrmod_slot,
     };
 
+    printf("Mapping for elf\n");
     // map binary to our page table
     err = paging_map_frame(get_current_paging_state(), (void **)&si->mapped_binary,
-                           si->module->mrmod_size, child_frame);
+                           (si->module->mrmod_size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE * BASE_PAGE_SIZE, child_frame);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
+    printf("Mapped for elf\n");
     assert(si->mapped_binary != 0);
 
     // Verify that the mapped binary contains 0xELF
@@ -401,16 +413,22 @@ static errval_t setup_elf(struct spawninfo *si)
         // TODO: test it
     }
 
+    printf("Starting loading elf\n");
     // Parse ELF
     err = elf_load(EM_AARCH64, elf_allocate_func, si->child_paging_state,
                    si->mapped_binary, si->module->mrmod_size, &si->pc);
+    printf("loaded eld%p\n", si->mapped_binary);
+    //while(1);
     // TODO: not unmapped in parent for now
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_LOAD);
     }
 
+    printf("%d\n", *((char*)si->mapped_binary + si->module->mrmod_size - 1));
+    printf("loaded eld2\n");
     struct Elf64_Shdr *got = elf64_find_section_header_name(
         (genvaddr_t)si->mapped_binary, si->module->mrmod_size, ".got");
+    printf("loaded eld3\n");
     if (got == NULL) {
         return SPAWN_ERR_ELF_MAP;  // XXX: fail to find got address
     }
