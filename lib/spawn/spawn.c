@@ -118,6 +118,14 @@ static errval_t setup_dispatcher(struct spawninfo *si)
 {
     errval_t err;
 
+    // Create the dispatcher cap
+    si->dispatcher.cnode = si->taskcn;
+    si->dispatcher.slot = TASKCN_SLOT_DISPATCHER;
+    err = dispatcher_create(si->dispatcher);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
     // Alloc the dispatcher frame and map to self
     struct capref dispframe;
     dispatcher_handle_t handle = 0;
@@ -130,7 +138,7 @@ static errval_t setup_dispatcher(struct spawninfo *si)
     assert(handle != 0);
     si->local_dispatcher_handle = handle;
 
-    // Setup the dispatcher
+    // Setup the dispatcher control block
     struct dispatcher_shared_generic *disp = get_dispatcher_shared_generic(handle);
     struct dispatcher_generic *disp_gen = get_dispatcher_generic(handle);
     arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area(handle);
@@ -138,7 +146,10 @@ static errval_t setup_dispatcher(struct spawninfo *si)
 
     // Core id of the process
     disp_gen->core_id = my_core_id;
-    disp_gen->domain_id = 1;
+
+    // PID
+    disp_gen->domain_id = si->pid;
+
     // Virtual address of the dispatcher frame in child’s VSpace
     disp->udisp = CHILD_DISPFRAME_VADDR;
 
@@ -173,7 +184,6 @@ static errval_t setup_dispatcher(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
-	printf("dddd\n");
     // Map the frame to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_DISPFRAME_VADDR, dispframe,
                                 DISPATCHER_FRAME_SIZE, VREGION_FLAGS_READ_WRITE);
@@ -409,6 +419,7 @@ static errval_t setup_elf(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
     printf("Mapped for elf\n");
+    DEBUG_PRINTF("si->module->mrmod_size = %lu\n", si->module->mrmod_size);
     assert(si->mapped_binary != 0);
 
     // Verify that the mapped binary contains 0xELF
@@ -471,6 +482,10 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     assert(si != NULL);
     assert(pid != NULL);
 
+    // TODO: for now use a static counter for pid, can wrap around though
+    static domainid_t pid_upper = 1;
+    si->pid = pid_upper++;
+
     errval_t err;
 
     // Setup CSpace
@@ -532,7 +547,6 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
 
     errval_t err;
 
-    // TODO: pid is not implemented
     // - Get the mem_region from the multiboot image
     // - Fill in argc/argv from the multiboot command line
     // - Call spawn_load_argv

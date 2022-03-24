@@ -459,7 +459,7 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
 	
-	errval_t err = paging_init_state(&current, 0, cap_vroot, get_default_slot_allocator());
+	errval_t err = paging_init_state(&current, VMSAv8_64_L1_BLOCK_SIZE, cap_vroot, get_default_slot_allocator());
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "failed to init paging state\n");
 		return err_push(err, LIB_ERR_PMAP_INIT);

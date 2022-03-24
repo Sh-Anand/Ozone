@@ -354,6 +354,20 @@ invoke_dispatcher(struct capref dispatcher, struct capref domdispatcher,
                        dd_caddr).error;
 }
 
+/**
+ * \brief Stop a dispatcher
+ *
+ * \param dispatcher    Address of dispatcher capability relative to own
+ *                      cspace
+ * \return Error code
+ */
+static inline errval_t
+invoke_dispatcher_stop(struct capref dispatcher)
+{
+    assert(get_croot_addr(dispatcher) == CPTR_ROOTCN);
+    return cap_invoke1(dispatcher, DispatcherCmd_Stop).error;
+}
+
 
 static inline errval_t
 invoke_dispatcher_properties(struct capref dispatcher,

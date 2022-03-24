@@ -28,6 +28,8 @@ struct sysret
 sys_dispatcher_setup(struct capability *to, capaddr_t cptr, uint8_t level,
                      capaddr_t vptr, capaddr_t dptr, bool run, capaddr_t odptr);
 struct sysret
+sys_dispatcher_stop(struct capability *to);
+struct sysret
 sys_dispatcher_properties(struct capability *to,
                           enum task_type type, unsigned long deadline,
                           unsigned long wcet, unsigned long period,
