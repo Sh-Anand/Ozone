@@ -122,7 +122,6 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 				new_entry = slab_alloc(&(st->vnode_meta_alloc)); // allocate space for another struct mm_vnode_meta
 				new_entry->vnode.used = 0;
 				new_entry->vnode.first = NULL;
-				new_entry->vnode.blocked = false;
 				err = pt_alloc(st, vnode_types[depth], &(new_entry->vnode.cap));
 				if (err_is_fail(err)) {
 					DEBUG_ERR(err, "pt_alloc failed");
@@ -176,9 +175,7 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 			lvaddr_t i_start = MAX(rvaddr, i * sub_region_size); // start of the subregion to allocate
 			lvaddr_t i_end = MIN(rvaddr + size, (i + 1) * sub_region_size); // end of the subregion to allocate
 
-			current_meta->vnode.blocked = true;
-			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1, abs_addr, slots*10000 + i);
-			current_meta->vnode.blocked = false;
+			err = rec_map_fixed(st, &current_meta->vnode, i_start % sub_region_size, i_end - i_start, frame, frame_offset + i_start - rvaddr, flags, depth + 1);
 			if (err_is_fail(err)) {
 				// TODO: verify no cleanup needed
 				DEBUG_ERR(err, "failed to map fixed address");
