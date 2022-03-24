@@ -208,7 +208,6 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
                            struct capref pdir, struct slot_allocator *ca)
 {
-	printf("Init non-foreign %p %p\n", &st->vnode_meta_alloc, &st->page_meta_alloc);
     // TODO (M2): Implement state struct initialization
     // TODO (M4): Implement page fault handler that installs frames when a page fault
     // occurs and keeps track of the virtual address space.
@@ -268,7 +267,6 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
     // occurs and keeps track of the virtual address space.
 	
 	// TODO: react to start_vaddr
-	printf("Init foreign %p %p\n", &st->vnode_meta_alloc, &st->page_meta_alloc);
 	st->slot_alloc = ca;
 	
 	//st->vnode_meta_alloc = current.vnode_meta_alloc;

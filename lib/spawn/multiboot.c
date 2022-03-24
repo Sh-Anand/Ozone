@@ -52,15 +52,14 @@ const char *multiboot_module_rawstring(struct mem_region *region)
     if (multiboot_strings == NULL) {
         errval_t err;
         /* Map in multiboot module strings area */
-	printf("b\n");
-        err = paging_map_frame_attr(get_current_paging_state(),
-            (void **)&multiboot_strings, BASE_PAGE_SIZE, cap_mmstrings,
-            VREGION_FLAGS_READ);
+    err = paging_map_frame_attr(get_current_paging_state(),
+        (void **)&multiboot_strings, BASE_PAGE_SIZE, cap_mmstrings,
+        VREGION_FLAGS_READ);
 
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "vspace_map failed");
-	        return NULL;
-        }
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "vspace_map failed");
+        return NULL;
+    }
 #if 0
         printf("Mapped multiboot_strings at %p\n", multiboot_strings);
         for (int i = 0; i < 256; i++) {

@@ -36,7 +36,6 @@ __attribute__((unused)) static struct capref test_mem_map_fixed(lvaddr_t addr, s
 	ca->alloc(ca, &frame);
 	frame_create(frame, size, &actual);
 	assert(actual >= size);
-	printf("aaaa\n");
 	err = paging_map_fixed_attr(get_current_paging_state(), addr, frame, size, VREGION_FLAGS_READ_WRITE);
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "paging_map_fixed_attr");
@@ -73,7 +72,6 @@ __attribute__((unused)) static struct capref test_mem_alloc(lvaddr_t *addr, size
 	ca->alloc(ca, &frame);
 	frame_create(frame, size, &actual);
 	assert(actual >= size);
-	printf("a\n");
 	err = paging_map_frame_attr(get_current_paging_state(), (void**)addr, size, frame, VREGION_FLAGS_READ_WRITE);
 	if (err_is_fail(err)) {
 		DEBUG_ERR(err, "paging_map_fixed_attr");
