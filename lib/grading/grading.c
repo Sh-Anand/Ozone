@@ -149,12 +149,12 @@ grading_test_late(void) {
     }
     DEBUG_PRINTF("Killing the first...\n");
     invoke_dispatcher_stop(info[0].dispatcher_in_parent);
-    for (int i = 0; i < 20; i++) {
-        DEBUG_PRINTF("Start spawn test...\n");
-        err = spawn_load_by_name("hello", &info, &pid);
-        assert(err_is_ok(err));
-        printf("%i-th call succeed\n", i);
-    }
+//    for (int i = 0; i < 20; i++) {
+//        DEBUG_PRINTF("Start spawn test...\n");
+//        err = spawn_load_by_name("hello", &info[0], &pid);
+//        assert(err_is_ok(err));
+//        printf("%i-th call succeed\n", i);
+//    }
     DEBUG_PRINTF("Spawn test hangs\n");
 	while(1);
     assert(err_is_ok(err));
