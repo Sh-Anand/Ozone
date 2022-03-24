@@ -131,15 +131,31 @@ grading_test_early(void) {
 
 void
 grading_test_late(void) {
-    struct spawninfo info;
+    struct spawninfo info[2];
     domainid_t pid = -1;
     errval_t err;
-	for (int i = 0; i < 20; i++) {
-		DEBUG_PRINTF("Start spawn test...\n");
-		err = spawn_load_by_name("hello", &info, &pid);
-		assert(err_is_ok(err));
-		printf("%i-th call succeed\n", i);
-	}
+    DEBUG_PRINTF("Start spawn test...\n");
+    err = spawn_load_by_name("hello", &info[0], &pid);
+    assert(err_is_ok(err));
+//    DEBUG_PRINTF("Start another hello...\n");
+//    err = spawn_load_by_name("hello", &info[1], &pid);
+//    assert(err_is_ok(err));
+//	printf("2nd call succeed\n");
+    volatile int a[3]= {0, 1};
+    for (int i = 0; i < 10000000; i++) {
+        a[2] = a[0];
+        a[0] = a[1];
+        a[1] = a[2];
+    }
+    DEBUG_PRINTF("Killing the first...\n");
+    invoke_dispatcher_stop(info[0].dispatcher_in_parent);
+    for (int i = 0; i < 20; i++) {
+        DEBUG_PRINTF("Start spawn test...\n");
+        err = spawn_load_by_name("hello", &info, &pid);
+        assert(err_is_ok(err));
+        printf("%i-th call succeed\n", i);
+    }
+    DEBUG_PRINTF("Spawn test hangs\n");
 	while(1);
     assert(err_is_ok(err));
     assert(pid != -1);  // TODO: will fail now

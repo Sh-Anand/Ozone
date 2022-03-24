@@ -259,14 +259,13 @@ static errval_t start_dispatcher(struct spawninfo *si)
 
     errval_t err;
 
-    struct capref child_dispatcher_parent_slot;
-    err = slot_alloc(&child_dispatcher_parent_slot);
+    err = slot_alloc(&si->dispatcher_in_parent);
     if (err_is_fail(err)) {
         // FIXME: no corresponding err or doing the wrong thing?
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
-    err = cap_copy(child_dispatcher_parent_slot, child_dispatcher_cap);
+    err = cap_copy(si->dispatcher_in_parent, child_dispatcher_cap);
     if (err_is_fail(err)) {
         // FIXME: no corresponding err or doing the wrong thing?
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
@@ -283,7 +282,7 @@ static errval_t start_dispatcher(struct spawninfo *si)
         .slot = TASKCN_SLOT_DISPFRAME,
     };
 
-    return invoke_dispatcher(child_dispatcher_parent_slot, cap_dispatcher, si->rootcn,
+    return invoke_dispatcher(si->dispatcher_in_parent, cap_dispatcher, si->rootcn,
                              child_rootvn_cap, child_dispframe_cap, true);
 }
 

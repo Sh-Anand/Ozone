@@ -48,6 +48,7 @@ struct spawninfo {
     genvaddr_t pc;
 
     struct capref dispatcher;
+    struct capref dispatcher_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
 };
 
