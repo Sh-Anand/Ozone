@@ -100,7 +100,6 @@ elf64_find_section_header_name(genvaddr_t  elf_base,
                                size_t      elf_bytes,
                                const char* section_name)
 {
-    printf("%p, %ld\n", elf_base, elf_bytes);
     lvaddr_t elf_lbase = (lvaddr_t)elf_base;
     struct Elf64_Ehdr *head = (struct Elf64_Ehdr *)elf_lbase;
 
@@ -109,16 +108,11 @@ elf64_find_section_header_name(genvaddr_t  elf_base,
         return NULL;
     }
 
-    // for (int i = 0; i < elf_bytes; i++) {
-    //     if (*(char*)(elf_base + i) >= 32 && *(char*)(elf_base + i) < 127) printf("%c", *(char*)(elf_base + i));
-    // }
-    printf("%p, %ld\n", elf_base, elf_bytes);
-
     struct Elf64_Shdr *shead =
         (struct Elf64_Shdr *)(elf_lbase + (uintptr_t)head->e_shoff);
 
     assert(head->e_shstrndx < head->e_shnum);
-    printf("%p, %ld, %p, %ld, %ld    asdasd\n", elf_lbase, (uintptr_t)head->e_shoff, shead, head->e_shstrndx, head->e_shentsize);
+
     struct Elf64_Shdr *strtab =
         ((void *)shead) + head->e_shstrndx * head->e_shentsize;
 
@@ -131,7 +125,7 @@ elf64_find_section_header_name(genvaddr_t  elf_base,
     {
         const char* strings = (const char*)(elf_lbase +
                                             (size_t)strtab->sh_offset);
-        printf("%p, %ld, %p, %p\n", elf_lbase, (size_t)strtab->sh_offset, strings, strings + shead[i].sh_name);
+
         if (!strcmp(section_name, strings + shead[i].sh_name)) {
             return &shead[i];
         }
@@ -520,7 +514,6 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
     size_t rela_size = rela ? rela->sh_size : 0, new_rela_size = 0;
     struct Elf64_Shdr *new_rela = NULL;
 
-
     // Find dynamic program header, if any
     struct Elf64_Phdr *phead =
         (struct Elf64_Phdr *)(base + (uintptr_t)head->e_phoff);
@@ -575,16 +568,12 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
         struct Elf64_Phdr *p = &phead[i];
 
         if (p->p_type == PT_LOAD) {
-            //printf("Loading segment: start=0x%" PRIx64 ", size=0x%" PRIx64
-            //       ", flags=0x%" PRIx32 "\n", p->p_vaddr, p->p_memsz,
-            //       p->p_flags);
-
 
             // Map segment in user-space memory
             void *dest = NULL;
-            printf("it %p\n", dest);
+
             err = allocate_func(state, p->p_vaddr, p->p_memsz, p->p_flags, &dest);
-            printf("passed pointer %p\n", dest);
+
             if (err_is_fail(err)) {
                 return err_push(err, ELF_ERR_ALLOCATE);
             }
@@ -592,11 +581,9 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
 
             // Copy file segment into memory
             memcpy(dest, (void *)(base + (uintptr_t)p->p_offset), p->p_filesz);
-            printf("passed pointer %p\n", dest);
 
             // Initialize rest of memory segment (ie. BSS) with all zeroes
             memset((char *)dest + p->p_filesz, 0, p->p_memsz - p->p_filesz);
-            printf("1passed pointer %p\n", dest);
 
             // Apply relocations
             if (rela != NULL && symtab != NULL) {
@@ -608,9 +595,7 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
                                (base + (uintptr_t)symtab->sh_offset),
                                symtab->sh_size, p->p_vaddr, dest);
             }
-            printf("passed pointer %p\n", dest);
         } else if (p->p_type == PT_TLS) {
-            printf("--passed pointer\n");
             assert(p->p_vaddr != 0);
             assert(tls_base == 0); // if not we have multiple TLS sections!
             tls_base = p->p_vaddr;
@@ -618,7 +603,6 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
             tls_total_len = p->p_memsz;
         }
     }
-    printf("passed pointer --\n");
 
     if (retentry != NULL) {
         *retentry = head->e_entry;

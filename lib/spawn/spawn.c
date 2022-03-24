@@ -80,7 +80,7 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
                                   uint32_t flags, void **ret)
 {
     errval_t err;
-
+    //we page align the base address and the size
     struct paging_state *child_state = (struct paging_state *)state;
 
     genvaddr_t fbase = base / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
@@ -100,17 +100,12 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
 
     // Map frame into an arbitrary location in our page table
     void *res;
-    printf("cccc\n");
-    printf("%d\n", flags);
+
     err = paging_map_frame_attr(get_current_paging_state(), &res, esize, frame_cap,
                                 VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err))
         return err_push(err, LIB_ERR_PAGING_MAP);
 
-    printf("base %p, size %ld\n", base, size);
-    printf("fbase %p, esize %ld\n", fbase, esize);
-    printf("%p, %ld\n", res, size);
-    printf("%ld\n", *((char *)res + size - 1));
     *ret = res + base - fbase;
 
     return SYS_ERR_OK;
@@ -227,9 +222,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
         if (offset + copy_len >= BASE_PAGE_SIZE) {
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
-        printf("a%s\n", argv[i]);
         strcpy(((char *) params + offset), argv[i]);  // parent address
-        printf("b\n");
         params->argv[i] = (char *)(CHILD_DISPFRAME_VADDR + offset);  // child address
 
         offset += copy_len;
@@ -423,7 +416,6 @@ static errval_t setup_elf(struct spawninfo *si)
         .slot = si->module->mrmod_slot,
     };
 
-    printf("Mapping for elf\n");
     // map binary to our page table
     err = paging_map_frame(get_current_paging_state(), (void **)&si->mapped_binary,
                            (si->module->mrmod_size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE
@@ -432,7 +424,6 @@ static errval_t setup_elf(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
-    DEBUG_PRINTF("si->module->mrmod_size = %lu\n", si->module->mrmod_size);
     assert(si->mapped_binary != 0);
 
     // Verify that the mapped binary contains 0xELF
@@ -442,10 +433,8 @@ static errval_t setup_elf(struct spawninfo *si)
     }
 
     // Parse ELF
-    DEBUG_PRINTF("spawn: loading elf...\n");
     err = elf_load(EM_AARCH64, elf_allocate_func, si->child_paging_state,
                    si->mapped_binary, si->module->mrmod_size, &si->pc);
-    DEBUG_PRINTF("spawn: elf loaded\n");
     // TODO: not unmapped in parent for now
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_LOAD);
@@ -500,42 +489,36 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     errval_t err;
 
     // Setup CSpace
-    DEBUG_PRINTF("spawn: setup cspace...\n")
     err = setup_cspace(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_SETUP_CSPACE);
     }
 
     // Setup VSpace
-    DEBUG_PRINTF("spawn: setup vspace...\n")
     err = setup_vspace(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_VSPACE_INIT);
     }
 
     // Setup ELF
-    DEBUG_PRINTF("spawn: setup elf...\n")
     err = setup_elf(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
 
     // Setup dispatcher
-    DEBUG_PRINTF("spawn: setup dispatcher...\n")
     err = setup_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
     }
 
     // Setup arguments
-    DEBUG_PRINTF("spawn: setup argument...\n")
     err = setup_arguments(si, argc, argv);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_GET_CMDLINE_ARGS);  // XXX: not this one
     }
 
     // Start
-    DEBUG_PRINTF("spawn: start dispatcher...\n")
     err = start_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
@@ -560,7 +543,6 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
  */
 errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid)
 {
-    DEBUG_PRINTF("spawn_load_by_name: %s\n", binary_name)
 
     errval_t err;
 
@@ -600,13 +582,6 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
         }
     }
     argv[argc] = NULL;
-
-#if 1
-    DEBUG_PRINTF("argc = %d\n", argc)
-    for (int i = 0; i < argc; i++) {
-        DEBUG_PRINTF("argv[%d] = \"%s\"\n", i, argv[i])
-    }
-#endif
 
     // Spawn
     err = spawn_load_argv(argc, argv, si, pid);

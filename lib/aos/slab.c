@@ -39,7 +39,6 @@ void slab_init(struct slab_allocator *slabs, size_t blocksize,
     slabs->slabs = NULL;
     slabs->blocksize = SLAB_REAL_BLOCKSIZE(blocksize);
     slabs->refill_func = refill_func;
-	//printf("Slab alloc %d %p\n", slabs->blocksize, slabs);
 }
 
 
@@ -181,7 +180,6 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-	//printf("Slab refill pages %d %p\n", slabs->blocksize, slabs);
     bytes = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
 	
 	static lvaddr_t address = 64UL << 39;

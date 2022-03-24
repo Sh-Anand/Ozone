@@ -99,8 +99,8 @@ static errval_t rec_map_fixed(struct paging_state *st, struct mm_vnode_meta *roo
 	capaddr_t start = rvaddr >> bit_offset;
 	capaddr_t end = (rvaddr + size - 1) >> bit_offset;	
 	assert(start < 512 && end < 512);
-	printf("%ld, %ld, %ld, %ld, %d\n", rvaddr, size, frame_offset, sub_region_size, depth);
-	printf("%i, %i\n", start, end);
+	// printf("%ld, %ld, %ld, %ld, %d\n", rvaddr, size, frame_offset, sub_region_size, depth);
+	// printf("%i, %i\n", start, end);
 
 	union mm_meta **pointer_to_current_meta = &(root->first); // this tracks the address of the pointer we need to write
 	union mm_meta *current_meta = root->first; // this tracks the current_meta page table entry while walking through the list
@@ -427,7 +427,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
      *  - think about what mapping configurations are actually possible
      */
 
-	printf("%p: gave %p\n", st, vaddr);
+	// printf("%p: gave %p\n", st, vaddr);
 
 	errval_t err;
 		
