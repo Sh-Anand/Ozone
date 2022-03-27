@@ -33,7 +33,11 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 
 
+void handle_general_recv(uintptr_t identifier) {
+    switch (identifier) {
 
+    }
+}
 
 static int
 bsp_main(int argc, char *argv[]) {

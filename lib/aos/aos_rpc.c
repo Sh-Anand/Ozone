@@ -31,14 +31,38 @@ errval_t
 aos_rpc_send_string(struct aos_rpc *rpc, const char *string) {
     // TODO: implement functionality to send a string over the given channel
     // and wait for a response.
+
+    aos_rpc_get_ram_cap(&ram_cap);
+
+    aos_rpc_send_general(STRING_IDENTIFIER);
+
     return SYS_ERR_OK;
 }
+
+/**
+ *
+ * @param rpc
+ * @param identifier
+ * @param buf
+ * @param size        Must be < 8 * 4
+ * @return
+ */
+errval_t
+aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, void *buf, size_t size) {
+    while () {
+        // Call ONE raw LMP until success
+    }
+}
+
 
 errval_t
 aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                     struct capref *ret_cap, size_t *ret_bytes) {
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
+
+    aos_rpc_send_general(RAM_IDENTIFIER)
+
     return SYS_ERR_OK;
 }
 
