@@ -32,26 +32,28 @@ aos_rpc_send_string(struct aos_rpc *rpc, const char *string) {
     // TODO: implement functionality to send a string over the given channel
     // and wait for a response.
 
-    aos_rpc_get_ram_cap(&ram_cap);
+    // aos_rpc_get_ram_cap(&ram_cap);
 
-    aos_rpc_send_general(STRING_IDENTIFIER);
+    // aos_rpc_send_general(STRING_IDENTIFIER);
 
     return SYS_ERR_OK;
 }
 
 /**
- *
+ * Unified interface of sending a message.
  * @param rpc
  * @param identifier
  * @param buf
- * @param size        Must be < 8 * 4
+ * @param size
  * @return
+ * @note For M3, only sending ONE LMP message is supported. That is, size should be at
+ *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
  */
-errval_t
+__attribute__((unused))
+static errval_t
 aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, void *buf, size_t size) {
-    while () {
-        // Call ONE raw LMP until success
-    }
+    // Call ONE raw LMP until success
+    return SYS_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -61,7 +63,7 @@ aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
 
-    aos_rpc_send_general(RAM_IDENTIFIER)
+    // aos_rpc_send_general(RAM_IDENTIFIER)
 
     return SYS_ERR_OK;
 }

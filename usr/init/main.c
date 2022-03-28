@@ -32,8 +32,8 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
-
-void handle_general_recv(uintptr_t identifier) {
+__attribute__((unused))
+static void handle_general_recv(uintptr_t identifier) {
     switch (identifier) {
 
     }
