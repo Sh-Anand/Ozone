@@ -150,16 +150,16 @@ grading_test_late(void) {
     domainid_t pid = -1;
     errval_t err;
 
-    DEBUG_PRINTF("Start first hello...\n");
+    DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
     err = spawn_load_by_name("hello", &info[0], &pid);
     assert(err_is_ok(err));
     assert(pid != -1);
-    proc_list_insert(&list, pid, info[0].dispatcher_in_parent, info[0].binary_name);
+    proc_list_insert(&list, pid, info[0].dispatcher_cap_in_parent, info[0].binary_name);
 
     delay(80000000);
 
-    DEBUG_PRINTF("Killing the first hello...\n");
-    err = invoke_dispatcher_stop(info[0].dispatcher_in_parent);
+    DEBUG_PRINTF("Kill the first hello...\n");
+    err = invoke_dispatcher_stop(info[0].dispatcher_cap_in_parent);
     assert(err_is_ok(err));
     proc_list_remove(&list, pid);
 
@@ -168,11 +168,14 @@ grading_test_late(void) {
     DEBUG_PRINTF("Print proc list...\n");
     proc_list_enum(&list, print_proc);
 
-    DEBUG_PRINTF("Start 4 hello...\n");
+    DEBUG_PRINTF("Start 4 hello with spawn_load_argv...\n");
+    char *binary_name = "hello";
+    char *arg = "welcome";
+    char *argv[] = {binary_name, arg, NULL};
     for (int i = 1; i <= 4; i++) {
-        err = spawn_load_by_name("hello", &info[i], &pid);
+        err = spawn_load_argv(2, argv, &info[i], &pid);
         assert(err_is_ok(err));
-        proc_list_insert(&list, pid, info[i].dispatcher_in_parent, info[i].binary_name);
+        proc_list_insert(&list, pid, info[i].dispatcher_cap_in_parent, info[i].binary_name);
         printf("%d-th call succeed\n", i);
     }
 
@@ -180,7 +183,7 @@ grading_test_late(void) {
     proc_list_enum(&list, print_proc);
 
     for (int i = 1; i <= 4; i++) {
-        err = invoke_dispatcher_stop(info[i].dispatcher_in_parent);
+        err = invoke_dispatcher_stop(info[i].dispatcher_cap_in_parent);
         assert(err_is_ok(err));
         proc_list_remove(&list, info[i].pid);
     }
