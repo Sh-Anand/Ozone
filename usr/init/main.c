@@ -33,7 +33,7 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 
 __attribute__((unused))
-static void handle_general_recv(uintptr_t identifier, struct capref cap) {
+static void handle_general_recv(uintptr_t identifier, struct capref cap, void *buf, size_t size) {
     switch (identifier) {
 
     }
