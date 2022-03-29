@@ -43,6 +43,7 @@ aos_rpc_send_string(struct aos_rpc *rpc, const char *string) {
  * Unified interface of sending a message.
  * @param rpc
  * @param identifier
+ * @param cap
  * @param buf
  * @param size
  * @return
@@ -51,7 +52,7 @@ aos_rpc_send_string(struct aos_rpc *rpc, const char *string) {
  */
 __attribute__((unused))
 static errval_t
-aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, void *buf, size_t size) {
+aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, struct capref cap, void *buf, size_t size) {
     // Call ONE raw LMP until success
     return SYS_ERR_NOT_IMPLEMENTED;
 }
