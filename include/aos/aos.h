@@ -71,4 +71,12 @@ void __attribute__((noreturn)) messages_handler_loop(void);
 
 typedef void *CONST_CAST;
 
+enum msg_type {
+    NUM_MSG,
+    STR_MSG,
+    RAM_MSG,
+    SPAWN_MSG,
+    TERMINAL_MSG,
+}; // Maybe this can moved somewhere else?
+
 #endif

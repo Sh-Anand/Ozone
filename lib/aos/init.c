@@ -122,8 +122,19 @@ static void init_accept_recv_handler(void *arg)
                        "unhandled error in init_accept_recv_handler");
     }
 
-    if (capref_is_null(cap)) {
-        USER_PANIC_ERR(LIB_ERR_BIND_INIT_NO_NEW_EP, "not receiving new ep cap from init");
+    //TODO FILL IN CALLS TO NECESSARY FUNCTIONS HERE
+    //Protocol : words[0] has the type, words[1] has the size, and words[2],words[3] contain the rest of the data IFF cap is NULL, otherwise the cap contains everything
+    switch(msg.words[0]) {
+        case NUM_MSG:
+            break;
+        case STR_MSG:
+            break;
+        case RAM_MSG:
+            break;
+        case SPAWN_MSG:
+            break;
+        case TERMINAL_MSG:
+            break;
     }
 
     assert(capcmp(lc->remote_cap, cap_initep));  // should be the original one

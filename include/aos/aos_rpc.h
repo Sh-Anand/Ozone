@@ -17,10 +17,22 @@
 
 #include <aos/aos.h>
 
+enum rpc_type {
+    TYPE_LMP,
+    TYPE_UMP,
+};
+
+struct aos_rpc_msg {
+    size_t size;
+    enum msg_type type;
+    void *buff;
+};
 
 /* An RPC binding, which may be transported over LMP or UMP. */
 struct aos_rpc {
     // TODO(M3): Add state
+    struct lmp_chan *chan;
+    enum rpc_type type;
 };
 
 /**
@@ -28,7 +40,11 @@ struct aos_rpc {
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-
+/**
+ * @brief Send a general RPC message
+ * 
+ */
+errval_t aos_rpc_send_message(struct aos_rpc *chan, struct aos_rpc_msg rpc_msg);
 /**
  * \brief Send a number.
  */

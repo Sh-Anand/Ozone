@@ -15,10 +15,54 @@
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
 
+#define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 2)*8
 
 
+errval_t 
+aos_rpc_send_message(struct aos_rpc *rpc, struct aos_rpc_msg rpc_msg) {
 
+    errval_t err;
+    uintptr_t words[LMP_MSG_LENGTH];
+    words[0] = rpc_msg.type;
+    words[1] = rpc_msg.size;
+    words[2] = 0;
+    words[3] = 0;
+    struct capref cap = NULL_CAP;
 
+    //buffer fits in the remaining two words 
+    if(rpc_msg.size <= 16) {
+        memcpy(words+2, rpc_msg.buff, rpc_msg.size);
+    }
+
+    //buffer doesn't fit, make and map frame cap
+    else {
+        err = frame_alloc(&cap, rpc_msg.size, NULL);
+        if(err_is_fail(err))
+            err_push(err, LIB_ERR_FRAME_ALLOC);
+        void *addr;
+        err = paging_map_frame(get_current_paging_state(), &addr, ROUND_UP(rpc_msg.size, BASE_PAGE_SIZE), cap);
+        if(err_is_fail(err))
+            err_push(err, LIB_ERR_PAGING_MAP);
+        memcpy(addr, rpc_msg.buff, rpc_msg.size);
+    }
+
+    //send or die
+    while(true) {
+        err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1], words[2], words[3]);
+
+        if(lmp_err_is_transient(err))
+            thread_yield(); //TODO : Does this really do what I think it does? (yields thread so another dispatcher can run immediately instead of busy waiting) there are dangers to this though, we may starve
+        else
+            break;
+    }
+
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "LMP Sending failed!!!");
+        return err;
+    }
+
+    return SYS_ERR_OK;
+}
 
 errval_t
 aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num) {
