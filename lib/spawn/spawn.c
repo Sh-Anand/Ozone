@@ -13,6 +13,12 @@
 #include <spawn/multiboot.h>
 #include <spawn/argv.h>
 
+struct spawn_domain {
+    LIST_HEAD(, spawninfo) running;
+    LIST_HEAD(, spawninfo) free_list;
+    domainid_t pid_upper;
+};
+
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
@@ -44,6 +50,7 @@ armv8_set_registers(void *arch_load_info, dispatcher_handle_t handle,
     disabled_area->regs[REG_OFFSET(PIC_REGISTER)] = got_base;
 }
 
+// Allocate a frame, memset with 0, and map to self
 static errval_t alloc_zeroed_frame(size_t bytes, struct capref *frame_cap,
                                    void **local_vaddr, errval_t alloc_errcode,
                                    errval_t map_errcode)
@@ -116,12 +123,26 @@ static errval_t setup_dispatcher(struct spawninfo *si)
 {
     errval_t err;
 
-    // Create the dispatcher cap
-    si->dispatcher.cnode = si->taskcn;
-    si->dispatcher.slot = TASKCN_SLOT_DISPATCHER;
-    err = dispatcher_create(si->dispatcher);
+    // Create the dispatcher cap in child and copy to parent
+    struct capref child_dispatcher_slot = {
+        .cnode = si->taskcn,
+        .slot = TASKCN_SLOT_DISPATCHER,
+    };
+    err = dispatcher_create(child_dispatcher_slot);
     if (err_is_fail(err)) {
         return err;
+    }
+
+    err = slot_alloc(&si->dispatcher_cap_in_parent);
+    if (err_is_fail(err)) {
+        // FIXME: no corresponding err or doing the wrong thing?
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
+    }
+
+    err = cap_copy(si->dispatcher_cap_in_parent, child_dispatcher_slot);
+    if (err_is_fail(err)) {
+        // FIXME: no corresponding err or doing the wrong thing?
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
     // Alloc the dispatcher frame and map to self
@@ -252,26 +273,6 @@ static errval_t start_dispatcher(struct spawninfo *si)
         si->local_dispatcher_handle);
     registers_set_param(enabled_area, CHILD_ARGFRAME_VADDR);
 
-    struct capref child_dispatcher_cap = {
-        .cnode = si->taskcn,
-        .slot = TASKCN_SLOT_DISPATCHER,
-    };
-
-    errval_t err;
-
-    err = slot_alloc(&si->dispatcher_in_parent);
-    if (err_is_fail(err)) {
-        // FIXME: no corresponding err or doing the wrong thing?
-        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
-    }
-
-    err = cap_copy(si->dispatcher_in_parent, child_dispatcher_cap);
-    if (err_is_fail(err)) {
-        // FIXME: no corresponding err or doing the wrong thing?
-        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
-    }
-
-
     struct capref child_rootvn_cap = {
         .cnode = si->pagecn,
         .slot = 0,
@@ -282,7 +283,7 @@ static errval_t start_dispatcher(struct spawninfo *si)
         .slot = TASKCN_SLOT_DISPFRAME,
     };
 
-    return invoke_dispatcher(si->dispatcher_in_parent, cap_dispatcher, si->rootcn,
+    return invoke_dispatcher(si->dispatcher_cap_in_parent, cap_dispatcher, si->rootcn,
                              child_rootvn_cap, child_dispframe_cap, true);
 }
 
@@ -450,7 +451,6 @@ static errval_t setup_elf(struct spawninfo *si)
 }
 
 /**
- * TODO(M2): Implement this function.
  * \brief Spawn a new dispatcher called 'argv[0]' with 'argc' arguments.
  *
  * This function spawns a new dispatcher running the ELF binary called
@@ -479,6 +479,12 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
 
     assert(si != NULL);
     assert(pid != NULL);
+
+    si->binary_name = argv[0];
+    si->module = multiboot_find_module(bi, argv[0]);
+    if (si->module == NULL) {
+        return SPAWN_ERR_FIND_MODULE;
+    }
 
     // TODO: for now use a static counter for pid, can wrap around though
     static domainid_t pid_upper = 1;
@@ -528,7 +534,6 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
 
 
 /**
- * TODO(M2): Implement this function.
  * \brief Spawn a new dispatcher executing 'binary_name'
  *
  * \param binary_name The name of the binary.
@@ -551,23 +556,20 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
 
     // find elf binary
     // Initialize the spawn_info struct
-    memset(si, 0, sizeof(*si));
-    si->binary_name = binary_name;
-    si->next = NULL;
-    si->module = multiboot_find_module(bi, binary_name);
-    if (si->module == NULL) {
+    struct mem_region * module = multiboot_find_module(bi, binary_name);
+    if (module == NULL) {
         return SPAWN_ERR_FIND_MODULE;
     }
 
     // Setup command line arguments
-    const char *opts_src = multiboot_module_opts(si->module);
-    if (opts_src == NULL) {
+    const char *opts = multiboot_module_opts(module);
+    if (opts == NULL) {
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
 
     int argc = 0;
     char *buf;
-    char **argv = make_argv(opts_src, &argc, &buf);
+    char **argv = make_argv(opts, &argc, &buf);
 
     // Spawn
     err = spawn_load_argv(argc, argv, si, pid);
@@ -579,4 +581,16 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
     free(buf);
 
     return SYS_ERR_OK;
+}
+
+errval_t spawn_init(void) {
+    return SYS_ERR_NOT_IMPLEMENTED;
+}
+
+errval_t spawn_lookup_by_pid(domainid_t pid, struct spawninfo **ret_si) {
+    return SYS_ERR_NOT_IMPLEMENTED;
+}
+
+errval_t spawn_kill_by_pid(domainid_t pid) {
+    return SYS_ERR_NOT_IMPLEMENTED;
 }
