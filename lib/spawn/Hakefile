@@ -23,7 +23,7 @@
     },
     build library {
         target = "multiboot",
-        cFiles = [ "multiboot.c", "proc_manage.c" ],
+        cFiles = [ "multiboot.c", "proc_list.c" ],
         addLibraries = []
     }
 ]

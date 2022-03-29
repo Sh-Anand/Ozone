@@ -17,15 +17,14 @@
 
 #include "aos/slot_alloc.h"
 #include "aos/paging.h"
-#include "proc_manage.h"
 
 
 struct spawninfo {
     // the next in the list of spawned domains
-    struct spawninfo *next; 
+    struct spawninfo *next;
 
     // Information about the binary
-    char * binary_name;     // Name of the binary
+    char *binary_name;  // Name of the binary
 
     domainid_t pid;
 
@@ -36,7 +35,7 @@ struct spawninfo {
     struct cnoderef taskcn;
     struct cnoderef pagecn;
 
-    struct paging_state *child_paging_state;
+    struct paging_state *child_paging_state;  // XXX: to be free
 
     struct mem_region *module;
     void *got_addr;
@@ -44,20 +43,23 @@ struct spawninfo {
 
     struct capref dispatcher_cap_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
+
+    struct lmp_chan *lc;
 };
 
-errval_t spawn_init(void);
+errval_t spawn_kill(domainid_t pid);
+
+errval_t spawn_get_name(domainid_t pid, char **name);
+
+errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count);
 
 // Start a child process using the multiboot command line. Fills in si.
-errval_t spawn_load_by_name(char *binary_name, struct spawninfo * si,
-                            domainid_t *pid);
+errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid);
+
+// Start a child process using the input command line. Fills in si.
+errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid);
 
 // Start a child with an explicit command line. Fills in si.
-errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si,
-                         domainid_t *pid);
-
-errval_t spawn_lookup_by_pid(domainid_t pid, struct spawninfo **ret_si);
-
-errval_t spawn_kill_by_pid(domainid_t pid);
+errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_t *pid);
 
 #endif /* _INIT_SPAWN_H_ */

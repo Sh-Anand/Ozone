@@ -32,6 +32,8 @@
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;
 
+#define LOCAL_ENDPOINT_BUF_SIZE  1024  // XXX: a good number?
+
 extern size_t (*_libc_terminal_read_func)(char *, size_t);
 extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 extern void (*_libc_exit_func)(int);
@@ -100,6 +102,34 @@ void barrelfish_libc_glue_init(void)
     setvbuf(stdout, buf, _IOLBF, sizeof(buf));
 }
 
+static void init_accept_recv_handler(void *arg)
+{
+    struct lmp_chan *lc = arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t err;
+
+    // Try to receive a message
+    err = lmp_chan_recv(lc, &msg, &cap);
+    if (err_is_fail(err)) {
+        if (lmp_err_is_transient(err)) {
+            // Re-register
+            err = lmp_chan_register_recv(lc, get_default_waitset(),
+                                         MKCLOSURE(init_accept_recv_handler, arg));
+            if (err_is_ok(err)) return;  // otherwise, fall through
+        }
+        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV),
+                       "unhandled error in init_accept_recv_handler");
+    }
+
+    if (capref_is_null(cap)) {
+        USER_PANIC_ERR(LIB_ERR_BIND_INIT_NO_NEW_EP, "not receiving new ep cap from init");
+    }
+
+    assert(capcmp(lc->remote_cap, cap_initep));  // should be the original one
+    lc->remote_cap = cap;
+    lc->connstate = LMP_CONNECTED;
+}
 
 /** \brief Initialise libbarrelfish.
  *
@@ -147,18 +177,68 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
     // HINT: Use init_domain to check if we are the init domain.
 
-    // TODO MILESTONE 3: register ourselves with init
-    /* allocate lmp channel structure */
-    /* create local endpoint */
-    /* set remote endpoint to init's endpoint */
-    /* set receive handler */
-    /* send local ep to init */
-    /* wait for init to acknowledge receiving the endpoint */
-    /* initialize init RPC client with lmp channel */
-    /* set init RPC client in our program state */
 
-    /* TODO MILESTONE 3: now we should have a channel with init set up and can
-     * use it for the ram allocator */
+    /* create local endpoint */
+    err = cap_retype(cap_selfep, cap_dispatcher, 0, ObjType_EndPointLMP, 0, 1);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_ENDPOINT_CREATE);
+    }
+    assert(!capref_is_null(cap_selfep));
+
+    if (!init_domain) {
+
+        /* allocate lmp channel structure */
+        struct lmp_chan *init_chan = malloc(sizeof(*init_chan));
+        if (init_chan == NULL) {
+            return err_push(err, LIB_ERR_LMP_ENDPOINT_REGISTER);
+        }
+        lmp_chan_init(init_chan);
+
+        /* set remote endpoint to init's endpoint */
+        assert(!capref_is_null(cap_initep) && "init ep not available");
+        err = lmp_chan_accept(init_chan, LOCAL_ENDPOINT_BUF_SIZE, cap_initep);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_BIND_INIT_ACCEPT);
+        }
+        init_chan->connstate = LMP_BIND_WAIT;
+
+        /* set receive handler */
+        struct capref new_init_ep_slot;
+        err = slot_alloc(&new_init_ep_slot);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
+        }
+        lmp_chan_set_recv_slot(init_chan, new_init_ep_slot);
+        err = lmp_chan_register_recv(init_chan, get_default_waitset(),
+                                     MKCLOSURE(init_accept_recv_handler, init_chan));
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
+        }
+
+        /* send local ep to init */
+        err = lmp_chan_send1(init_chan, LMP_SEND_FLAGS_DEFAULT, init_chan->local_cap,
+                             get_dispatcher_generic(curdispatcher())->domain_id);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_BIND_INIT_SEND_EP);
+        }
+
+        /* wait for init to acknowledge receiving the endpoint */
+        while (init_chan->connstate != LMP_CONNECTED) {
+            err = event_dispatch(get_default_waitset());
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "in init event_dispatch loop");
+                return err_push(err, LIB_ERR_BIND_INIT_WAITING);
+            }
+        }
+
+        /* initialize init RPC client with lmp channel */
+        // TODO: use init_chan to setup RPC
+
+        /* set init RPC client in our program state */
+
+        /* TODO MILESTONE 3: now we should have a channel with init set up and can
+        * use it for the ram allocator */
+    }
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here

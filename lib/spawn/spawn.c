@@ -13,14 +13,24 @@
 #include <spawn/multiboot.h>
 #include <spawn/argv.h>
 
-struct spawn_domain {
-    LIST_HEAD(, spawninfo) running;
-    LIST_HEAD(, spawninfo) free_list;
-    domainid_t pid_upper;
-};
+#include "proc_list.h"
 
+extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
+
+static struct capref local_endpoint_cap;
+static struct lmp_endpoint *local_lmp_endpoint = NULL;
+#define LOCAL_ENDPOINT_BUF_LEN 1024
+
+#define PID_START 1000
+static struct proc_list pl = {
+    .running = LIST_HEAD_INITIALIZER(),
+    .free_list = LIST_HEAD_INITIALIZER(),
+    .pid_upper = PID_START,
+    .running_count = 0,
+};
+#define PROC_ENDPOINT_BUF_LEN 128
 
 // TODO: these address works?
 #define CHILD_DISPFRAME_VADDR (0x200000)
@@ -87,7 +97,7 @@ static errval_t elf_allocate_func(void *state, genvaddr_t base, size_t size,
                                   uint32_t flags, void **ret)
 {
     errval_t err;
-    //we page align the base address and the size
+    // we page align the base address and the size
     struct paging_state *child_state = (struct paging_state *)state;
 
     genvaddr_t fbase = base / BASE_PAGE_SIZE * BASE_PAGE_SIZE;
@@ -177,8 +187,10 @@ static errval_t setup_dispatcher(struct spawninfo *si)
 
     // A name (for debugging)
     // TODO: test a name with len >= DISP_NAME_LEN
-    strncpy(disp->name, si->binary_name, DISP_NAME_LEN - 1);  // NUL terminator
+    strncpy(disp->name, si->binary_name, DISP_NAME_LEN - 1 /* NUL terminator */);
     // The frame is memset to 0 so there should be NUL at the end
+
+    si->binary_name = disp->name;  // reset the pointer to this persisting storage
 
     // Set program counter (where it should start to execute)
     disabled_area->named.pc = si->pc;
@@ -213,6 +225,90 @@ static errval_t setup_dispatcher(struct spawninfo *si)
     return SYS_ERR_OK;
 }
 
+static errval_t refill_ep_recv_slot(void)
+{
+    struct capref ep_recv_slot;
+    errval_t err = slot_alloc(&ep_recv_slot);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    lmp_endpoint_set_recv_slot(local_lmp_endpoint, ep_recv_slot);
+    return SYS_ERR_OK;
+}
+
+static void binding_handler(void *arg)
+{
+    struct spawninfo *si = arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t err;
+
+    // Try to receive a message
+    err = lmp_endpoint_recv(local_lmp_endpoint, &msg.buf, &cap);
+    if (err_is_fail(err)) {
+        if (lmp_err_is_transient(err)) {
+            // Re-register
+            err = lmp_endpoint_register(local_lmp_endpoint, get_default_waitset(),
+                                        MKCLOSURE(binding_handler, arg));
+            if (err_is_ok(err))
+                return;  // otherwise, fall through
+        }
+        USER_PANIC_ERR(err_push(err, MON_ERR_IDC_BIND_LOCAL),  // XXX: another error
+                       "unhandled error in binding_handler");
+    }
+
+    // XXX: no checking for now, might be risky if user program exploit this endpoint
+    DEBUG_PRINTF("spawn: receive ep cap from process %lu\n", msg.words[0])
+    err = lmp_chan_accept(si->lc, PROC_ENDPOINT_BUF_LEN, cap);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "binding_handler: fail to accept");
+    }
+    err = lmp_chan_send0(si->lc, LMP_SEND_FLAGS_DEFAULT, si->lc->local_cap);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "binding_handler: fail to send");
+    }
+    // No need to re-register
+}
+
+static errval_t setup_endpoint(struct spawninfo *si)
+{
+    errval_t err;
+
+    // Create local endpoint if not done yet
+    if (local_lmp_endpoint == NULL) {
+        err = endpoint_create(LOCAL_ENDPOINT_BUF_LEN, &local_endpoint_cap,
+                              &local_lmp_endpoint);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        assert(!capref_is_null(local_endpoint_cap));
+        assert(local_lmp_endpoint != NULL);
+
+        // Setup initial recv slot (recv handler will refill automatically)
+        refill_ep_recv_slot();
+    }
+
+    // Set receiver on the endpoint
+    assert(si->lc != NULL);
+    si->lc->connstate = LMP_BIND_WAIT;
+    err = lmp_endpoint_register(local_lmp_endpoint, get_default_waitset(),
+                                MKCLOSURE(binding_handler, si));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    struct capref child_initep_slot = {
+        .cnode = si->taskcn,
+        .slot = TASKCN_SLOT_INITEP,
+    };
+    err = cap_copy(child_initep_slot, local_endpoint_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);  // XXX: not this one
+    }
+
+    return SYS_ERR_OK;
+}
+
 
 static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
 {
@@ -235,23 +331,34 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
         return err_push(err, SPAWN_ERR_MAP_ARGSPG_TO_NEW);
     }
 
-    // Setup spawn_domain_params and copy arguments
-    params->argc = argc;
+    // Setup spawn_domain_params and copy arguments and envs
     size_t offset = sizeof(struct spawn_domain_params);
-    for (int i = 0; i < argc; i++) {
+    int i;
+
+    params->argc = argc;
+    for (i = 0; i < argc; i++) {
         size_t copy_len = strlen(argv[i]) + 1;  // NUL terminator
         if (offset + copy_len >= BASE_PAGE_SIZE) {
             return SPAWN_ERR_ARGSPG_OVERFLOW;
         }
-        strcpy(((char *) params + offset), argv[i]);  // parent address
+        strcpy(((char *)params + offset), argv[i]);                 // parent address
         params->argv[i] = (char *)(CHILD_ARGFRAME_VADDR + offset);  // child address
 
         offset += copy_len;
     }
     params->argv[params->argc] = 0;  // NULL terminator for argv
-    // XXX: envp empty?
-    params->envp[0] = 0;  // NULL terminator for envp
-    // XXX: other fields?
+
+    for (i = 0; i < MAX_ENVIRON_VARS && environ[i] != 0; i++) {
+        size_t copy_len = strlen(environ[i]) + 1;  // NUL terminator
+        if (offset + copy_len >= BASE_PAGE_SIZE) {
+            return SPAWN_ERR_ARGSPG_OVERFLOW;
+        }
+        strcpy(((char *)params + offset), environ[i]);              // parent address
+        params->envp[i] = (char *)(CHILD_ARGFRAME_VADDR + offset);  // child address
+
+        offset += copy_len;
+    }
+    params->envp[i] = 0;  // NULL terminator for envp
 
     // Install the frame to the child's VSpace
     struct capref child_argspace_slot = {
@@ -481,17 +588,26 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     assert(pid != NULL);
 
     si->binary_name = argv[0];
+    // Temporary, will be set to persisting string in setup_dispatcher
+
+    // Get the module from the multiboot image
     si->module = multiboot_find_module(bi, argv[0]);
     if (si->module == NULL) {
         return SPAWN_ERR_FIND_MODULE;
     }
 
-    // TODO: for now use a static counter for pid, can wrap around though
-    static domainid_t pid_upper = 1;
-    si->pid = pid_upper++;
-    *pid = si->pid;
-
     errval_t err;
+    struct proc_node *node;
+    err = proc_list_alloc(&pl, &node);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    strncpy(node->name, si->binary_name, DISP_NAME_LEN - 1);
+    node->name[DISP_NAME_LEN - 1] = '\0';
+    si->pid = node->pid;
+    *pid = si->pid;
+    assert(node->lc.connstate == LMP_DISCONNECTED);
+    si->lc = &node->lc;  // will be filled by setup_endpoint()
 
     // Setup CSpace
     err = setup_cspace(si);
@@ -514,8 +630,16 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     // Setup dispatcher
     err = setup_dispatcher(si);
     if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_ELF_MAP);
+        return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);
     }
+    node->dispatcher = si->dispatcher_cap_in_parent;
+
+    // Setup endpoint
+    err = setup_endpoint(si);
+    if (err_is_fail(err)) {
+        return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);  // XXX: not this one
+    }
+    assert(node->lc.connstate == LMP_BIND_WAIT);
 
     // Setup arguments
     err = setup_arguments(si, argc, argv);
@@ -527,6 +651,15 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     err = start_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
+    }
+
+    assert(si->lc->connstate == LMP_BIND_WAIT);
+    while (si->lc->connstate != LMP_CONNECTED) {
+        err = event_dispatch(get_default_waitset());
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "in spawn event_dispatch loop");
+            return err_push(err, LIB_ERR_BIND_LMP_REQ);  // XXX: not this one
+        }
     }
 
     return SYS_ERR_OK;
@@ -547,50 +680,29 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
  */
 errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid)
 {
-
-    errval_t err;
-
-    // - Get the mem_region from the multiboot image
-    // - Fill in argc/argv from the multiboot command line
-    // - Call spawn_load_argv
-
-    // find elf binary
-    // Initialize the spawn_info struct
-    struct mem_region * module = multiboot_find_module(bi, binary_name);
+    struct mem_region *module = multiboot_find_module(bi, binary_name);
     if (module == NULL) {
         return SPAWN_ERR_FIND_MODULE;
     }
 
-    // Setup command line arguments
+    // Get command line arguments
     const char *opts = multiboot_module_opts(module);
     if (opts == NULL) {
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
 
+    return spawn_load_cmdline(opts, si, pid);
+}
+
+errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid)
+{
     int argc = 0;
     char *buf;
-    char **argv = make_argv(opts, &argc, &buf);
+    char **argv = make_argv(cmdline, &argc, &buf);
 
-    // Spawn
-    err = spawn_load_argv(argc, argv, si, pid);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
+    errval_t err = spawn_load_argv(argc, argv, si, pid);
+    // Fall through on either success or failure
     free(argv);
     free(buf);
-
-    return SYS_ERR_OK;
-}
-
-errval_t spawn_init(void) {
-    return SYS_ERR_NOT_IMPLEMENTED;
-}
-
-errval_t spawn_lookup_by_pid(domainid_t pid, struct spawninfo **ret_si) {
-    return SYS_ERR_NOT_IMPLEMENTED;
-}
-
-errval_t spawn_kill_by_pid(domainid_t pid) {
-    return SYS_ERR_NOT_IMPLEMENTED;
+    return err;
 }

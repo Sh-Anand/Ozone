@@ -375,6 +375,14 @@ errors libaos LIB_ERR_ {
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",
 
+    // Binding to init
+    failure BIND_INIT_ACCEPT        "Failure accepting init ep for init binding",
+    failure BIND_INIT_SET_RECV        "Failure setting receiver for init binding",
+    failure BIND_INIT_SEND_EP        "Failure sending local ep for init binding",
+    failure BIND_INIT_WAITING        "Failure waiting reply from init for binding",
+    failure BIND_INIT_RECV        "Failure receiving for init binding",
+    failure BIND_INIT_NO_NEW_EP        "Got no new ep cap from init",
+
     // IDC binding/export and Monitor client interface
     failure MONITOR_CLIENT_BIND "Error in monitor_client_lmp_bind()",
     failure MONITOR_CLIENT_ACCEPT "Error in monitor_client_lmp_accept()",
@@ -681,6 +689,15 @@ errors spawn SPAWN_ERR_ {
 
     failure FIND_SPAWNDS       "Unable to find spawn daemons",
     failure MALFORMED_SPAWND_RECORD "Spawn record without ID found?",
+};
+
+// errors related to the process list
+errors proc_list PROC_LIST_ERR_ {
+    failure ALLOC                "Failed to alloc proc node",
+    failure NOT_FOUND            "Failed to find proc node with given pid",
+    failure DELETE               "Failed to delete proc node",
+    failure GET_NAME             "Failed to get name of the process",
+    failure OUT_OF_PID           "Ran out of pid",
 };
 
 // errors related to the process manager
