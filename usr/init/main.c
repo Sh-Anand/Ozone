@@ -78,7 +78,15 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         break;
     case STR_MSG:
         break;
-    case RAM_MSG:
+    case RAM_MSG:;
+        //assert(size == sizeof(struct aos_rpc_msg_ram));
+        struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram*)buf;
+        struct capref ram;
+        err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
+        if (err_is_fail(err)) {
+            // TODO pass error back?
+        }
+        rpc_reply(rpc, ram, NULL, 0);
         break;
     case RPC_PROCESS_SPAWN_MSG:
     {

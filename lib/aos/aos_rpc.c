@@ -165,6 +165,13 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
 
+    struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
+    errval_t err = aos_rpc_send_general(rpc, RAM_MSG, NULL_CAP, &msg, sizeof(msg), ret_cap, NULL, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to receive RAM\n");
+        return err;
+    }
+
     // aos_rpc_send_general(RAM_IDENTIFIER)
 
     return SYS_ERR_OK;
