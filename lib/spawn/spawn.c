@@ -276,6 +276,7 @@ static void binding_handler(void *arg)
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to send");
     }
+    refill_ep_recv_slot();
     // No need to re-register
 }
 

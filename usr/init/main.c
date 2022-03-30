@@ -32,7 +32,6 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
-__attribute__((unused))
 static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
     struct lmp_chan *lc = rpc;
     errval_t err;
@@ -62,7 +61,6 @@ static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) 
 }
 
 //size is unreliable for non-fixed size messages.
-__attribute__((unused))
 static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct capref cap, void *buf, size_t size) {
     errval_t err;
     //we have a frame cap, map into our space and set buf to mapped address
