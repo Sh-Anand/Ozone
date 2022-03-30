@@ -23,6 +23,8 @@ static struct capref local_endpoint_cap;
 static struct lmp_endpoint *binding_recv_ep = NULL;
 #define LOCAL_ENDPOINT_BUF_LEN 1024
 
+static void (*rpc_handler)(void *) = NULL;
+
 #define PID_START 1000
 static struct proc_list pl = {
     .running = LIST_HEAD_INITIALIZER(),
@@ -263,6 +265,13 @@ static void binding_handler(void *arg)
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to accept");
     }
+
+    err = lmp_chan_register_recv(si->lc, get_default_waitset(),
+                                MKCLOSURE(rpc_handler, si->lc));
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "binding_handler: fail to register channel recv");
+    }
+
     err = lmp_chan_send0(si->lc, LMP_SEND_FLAGS_DEFAULT, si->lc->local_cap);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to send");
@@ -291,6 +300,10 @@ static errval_t create_local_lmp_ep_if_not_yet(void) {
 
 static errval_t setup_endpoint(struct spawninfo *si)
 {
+    if (rpc_handler == NULL) {
+        return SPAWN_ERR_RPC_HANDLER_NOT_SET;
+    }
+
     errval_t err;
 
     // Create local endpoint if not done yet
@@ -717,4 +730,8 @@ errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_
     free(argv);
     free(buf);
     return err;
+}
+
+void spawn_set_rpc_handler(void (*handler)(void *)) {
+    rpc_handler = handler;
 }

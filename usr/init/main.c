@@ -24,7 +24,7 @@
 #include <grading.h>
 
 #include "mem_alloc.h"
-
+#include <spawn/spawn.h>
 
 
 
@@ -32,6 +32,7 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
+__attribute__((unused))
 static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
     struct lmp_chan *lc = rpc;
     errval_t err;
@@ -86,6 +87,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     case TERMINAL_MSG:
         break;
     }
+
+    return SYS_ERR_OK;
 }
 
 //Register this function after spawning a process to register a receive handler to that child process
@@ -145,6 +148,8 @@ bsp_main(int argc, char *argv[]) {
     if(err_is_fail(err)){
         DEBUG_ERR(err, "initialize_ram_alloc");
     }
+
+    spawn_set_rpc_handler(rpc_recv_handler);
 
     // TODO: initialize mem allocator, vspace management here
 

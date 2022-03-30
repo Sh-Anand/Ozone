@@ -47,6 +47,8 @@ struct spawninfo {
     struct lmp_chan *lc;
 };
 
+void spawn_set_rpc_handler(void (*handler)(void *));
+
 errval_t spawn_kill(domainid_t pid);
 
 errval_t spawn_get_name(domainid_t pid, char **name);

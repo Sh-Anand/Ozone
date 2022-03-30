@@ -691,6 +691,8 @@ errors spawn SPAWN_ERR_ {
 
     failure FIND_SPAWNDS       "Unable to find spawn daemons",
     failure MALFORMED_SPAWND_RECORD "Spawn record without ID found?",
+
+    failure RPC_HANDLER_NOT_SET  "RPC handler is not set",
 };
 
 // errors related to the process list
