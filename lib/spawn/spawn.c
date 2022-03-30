@@ -20,7 +20,7 @@ extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
 static struct capref local_endpoint_cap;
-static struct lmp_endpoint *local_lmp_endpoint = NULL;
+static struct lmp_endpoint *binding_recv_ep = NULL;
 #define LOCAL_ENDPOINT_BUF_LEN 1024
 
 #define PID_START 1000
@@ -232,7 +232,7 @@ static errval_t refill_ep_recv_slot(void)
     if (err_is_fail(err)) {
         return err;
     }
-    lmp_endpoint_set_recv_slot(local_lmp_endpoint, ep_recv_slot);
+    lmp_endpoint_set_recv_slot(binding_recv_ep, ep_recv_slot);
     return SYS_ERR_OK;
 }
 
@@ -244,11 +244,11 @@ static void binding_handler(void *arg)
     errval_t err;
 
     // Try to receive a message
-    err = lmp_endpoint_recv(local_lmp_endpoint, &msg.buf, &cap);
+    err = lmp_endpoint_recv(binding_recv_ep, &msg.buf, &cap);
     if (err_is_fail(err)) {
         if (lmp_err_is_transient(err)) {
             // Re-register
-            err = lmp_endpoint_register(local_lmp_endpoint, get_default_waitset(),
+            err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
                                         MKCLOSURE(binding_handler, arg));
             if (err_is_ok(err))
                 return;  // otherwise, fall through
@@ -270,28 +270,40 @@ static void binding_handler(void *arg)
     // No need to re-register
 }
 
+static errval_t create_local_lmp_ep_if_not_yet() {
+    errval_t err;
+
+    // Create local endpoint if not done yet
+    if (binding_recv_ep == NULL) {
+        err = endpoint_create(LOCAL_ENDPOINT_BUF_LEN, &local_endpoint_cap,
+                              &binding_recv_ep);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        assert(!capref_is_null(local_endpoint_cap));
+        assert(binding_recv_ep != NULL);
+
+        // Setup initial recv slot (recv handler will refill automatically)
+        refill_ep_recv_slot();
+    }
+    return SYS_ERR_OK;
+}
+
 static errval_t setup_endpoint(struct spawninfo *si)
 {
     errval_t err;
 
     // Create local endpoint if not done yet
-    if (local_lmp_endpoint == NULL) {
-        err = endpoint_create(LOCAL_ENDPOINT_BUF_LEN, &local_endpoint_cap,
-                              &local_lmp_endpoint);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        assert(!capref_is_null(local_endpoint_cap));
-        assert(local_lmp_endpoint != NULL);
-
-        // Setup initial recv slot (recv handler will refill automatically)
-        refill_ep_recv_slot();
+    err = create_local_lmp_ep_if_not_yet();
+    if (err_is_fail(err)) {
+        return err;
     }
+    assert(binding_recv_ep != NULL);
 
     // Set receiver on the endpoint
     assert(si->lc != NULL);
     si->lc->connstate = LMP_BIND_WAIT;
-    err = lmp_endpoint_register(local_lmp_endpoint, get_default_waitset(),
+    err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
                                 MKCLOSURE(binding_handler, si));
     if (err_is_fail(err)) {
         return err;

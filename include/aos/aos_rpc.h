@@ -17,6 +17,11 @@
 
 #include <aos/aos.h>
 
+// For now, lmp chan can be directly cast to aos_chan
+struct aos_chan {
+    struct lmp_chan lc;
+};
+
 enum rpc_type {
     TYPE_LMP,
     TYPE_UMP,

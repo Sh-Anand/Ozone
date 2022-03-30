@@ -32,7 +32,7 @@
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;
 
-#define LOCAL_ENDPOINT_BUF_SIZE  1024  // XXX: a good number?
+#define LOCAL_ENDPOINT_BUF_SIZE  256  // XXX: a good number?
 
 extern size_t (*_libc_terminal_read_func)(char *, size_t);
 extern size_t (*_libc_terminal_write_func)(const char *, size_t);
@@ -102,7 +102,7 @@ void barrelfish_libc_glue_init(void)
     setvbuf(stdout, buf, _IOLBF, sizeof(buf));
 }
 
-static void init_accept_recv_handler(void *arg)
+static void init_ack_handler(void *arg)
 {
     struct lmp_chan *lc = arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
@@ -115,11 +115,11 @@ static void init_accept_recv_handler(void *arg)
         if (lmp_err_is_transient(err)) {
             // Re-register
             err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                         MKCLOSURE(init_accept_recv_handler, arg));
+                                         MKCLOSURE(init_ack_handler, arg));
             if (err_is_ok(err)) return;  // otherwise, fall through
         }
         USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV),
-                       "unhandled error in init_accept_recv_handler");
+                       "unhandled error in init_ack_handler");
     }
 
     //TODO FILL IN CALLS TO NECESSARY FUNCTIONS HERE
@@ -221,12 +221,13 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
         lmp_chan_set_recv_slot(init_chan, new_init_ep_slot);
         err = lmp_chan_register_recv(init_chan, get_default_waitset(),
-                                     MKCLOSURE(init_accept_recv_handler, init_chan));
+                                     MKCLOSURE(init_ack_handler, init_chan));
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
         }
 
         /* send local ep to init */
+        // TODO: change to special format since we are reusing
         err = lmp_chan_send1(init_chan, LMP_SEND_FLAGS_DEFAULT, init_chan->local_cap,
                              get_dispatcher_generic(curdispatcher())->domain_id);
         if (err_is_fail(err)) {
@@ -242,8 +243,11 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
             }
         }
 
+        // XXX: For now, lmp chan can be directly cast to aos_chan
+        set_init_chan((struct aos_chan *) init_chan);
+
         /* initialize init RPC client with lmp channel */
-        // TODO: use init_chan to setup RPC
+        // TODO: use init_chan or get_init_chan() to setup RPC
 
         /* set init RPC client in our program state */
 
