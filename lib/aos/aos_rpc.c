@@ -18,7 +18,32 @@
 #define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 2)*8
 
 
-errval_t 
+/**
+ * Unified interface of sending a message.
+ * @param rpc
+ * @param identifier
+ * @param cap
+ * @param buf
+ * @param size
+ * @return
+ * @note For M3, only sending ONE LMP message is supported. That is, size should be at
+ *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
+ */
+__attribute__((unused))
+static errval_t
+aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, struct capref cap, void *buf, size_t size, struct capref *ret_cap, void **ret_buf, size_t *ret_size) {
+
+    // Call ONE raw LMP until success
+    while() {
+        // RECV
+    }
+
+    uint8_t words[LMP_MSG_LENGTH * 8];
+
+    return SYS_ERR_NOT_IMPLEMENTED;
+}
+
+errval_t
 aos_rpc_send_message(struct aos_rpc *rpc, struct aos_rpc_msg rpc_msg) {
 
     errval_t err;
@@ -29,7 +54,7 @@ aos_rpc_send_message(struct aos_rpc *rpc, struct aos_rpc_msg rpc_msg) {
     words[3] = 0;
     struct capref cap = NULL_CAP;
 
-    //buffer fits in the remaining two words 
+    //buffer fits in the remaining two words
     if(rpc_msg.size <= 16) {
         memcpy(words+2, rpc_msg.buff, rpc_msg.size);
     }
@@ -81,24 +106,6 @@ aos_rpc_send_string(struct aos_rpc *rpc, const char *string) {
     // aos_rpc_send_general(STRING_IDENTIFIER);
 
     return SYS_ERR_OK;
-}
-
-/**
- * Unified interface of sending a message.
- * @param rpc
- * @param identifier
- * @param cap
- * @param buf
- * @param size
- * @return
- * @note For M3, only sending ONE LMP message is supported. That is, size should be at
- *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
- */
-__attribute__((unused))
-static errval_t
-aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, struct capref cap, void *buf, size_t size) {
-    // Call ONE raw LMP until success
-    return SYS_ERR_NOT_IMPLEMENTED;
 }
 
 

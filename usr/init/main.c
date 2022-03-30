@@ -32,11 +32,52 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
-__attribute__((unused))
-static void handle_general_recv(uintptr_t identifier, struct capref cap, void *buf, size_t size) {
-    switch (identifier) {
+static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
+    lmp_chan_send();
+}
 
+__attribute__((unused))
+static void handle_general_recv(void *rpc, uintptr_t identifier, struct capref cap, void *buf, size_t size) {
+    //TODO FILL IN CALLS TO NECESSARY FUNCTIONS HERE
+    //Protocol : words[0] has the type, words[1] has the size, and words[2],words[3] contain the rest of the data IFF cap is NULL, otherwise the cap contains everything
+    switch(identifier) {
+    case NUM_MSG:
+        break;
+    case STR_MSG:
+        break;
+    case RAM_MSG:
+        break;
+    case SPAWN_MSG:
+        break;
+    case TERMINAL_MSG:
+        rpc_reply(rpc, ...);
+        break;
     }
+}
+
+static void rpc_recv_handler(void *arg)
+{
+    struct lmp_chan *lc = arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t err;
+
+    // Try to receive a message
+    err = lmp_chan_recv(lc, &msg, &cap);
+    if (err_is_fail(err)) {
+        if (lmp_err_is_transient(err)) {
+            // Re-register
+            err = lmp_chan_register_recv(lc, get_default_waitset(),
+                                         MKCLOSURE(init_ack_handler, arg));
+            if (err_is_ok(err)) return;  // otherwise, fall through
+        }
+        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV),
+                       "unhandled error in init_ack_handler");
+    }
+
+    assert(capcmp(lc->remote_cap, cap_initep));  // should be the original one
+    lc->remote_cap = cap;
+    lc->connstate = LMP_CONNECTED;
 }
 
 static int
