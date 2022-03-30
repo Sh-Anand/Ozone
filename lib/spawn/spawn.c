@@ -270,7 +270,7 @@ static void binding_handler(void *arg)
     // No need to re-register
 }
 
-static errval_t create_local_lmp_ep_if_not_yet() {
+static errval_t create_local_lmp_ep_if_not_yet(void) {
     errval_t err;
 
     // Create local endpoint if not done yet
