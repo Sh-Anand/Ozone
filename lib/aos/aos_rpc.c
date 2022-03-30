@@ -17,8 +17,6 @@
 
 #define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 1) * 8
 
-struct aos_rpc init_rpc_channel;
-
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
 errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf,
@@ -215,7 +213,7 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
  */
 struct aos_rpc *aos_rpc_get_init_channel(void)
 {
-    return &init_rpc_channel;
+    return get_init_rpc();
 }
 
 /**

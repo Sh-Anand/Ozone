@@ -128,8 +128,6 @@ static void init_ack_handler(void *arg)
     lc->connstate = LMP_CONNECTED;
 }
 
-extern struct aos_rpc init_rpc_channel;
-
 /** \brief Initialise libbarrelfish.
  *
  * This runs on a thread in every domain, after the dispatcher is setup but
@@ -189,7 +187,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         /* allocate lmp channel structure */
         struct lmp_chan *init_chan = malloc(sizeof(*init_chan));
         if (init_chan == NULL) {
-            return err_push(err, LIB_ERR_LMP_ENDPOINT_REGISTER);
+            return err_push(err, LIB_ERR_MALLOC_FAIL);
         }
         lmp_chan_init(init_chan);
 
@@ -235,14 +233,15 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         set_init_chan((struct aos_chan *) init_chan);
 
         /* initialize init RPC client with lmp channel */
-        // TODO: use init_chan or get_init_chan() to setup RPC
-        init_rpc_channel.type = TYPE_LMP;
-        init_rpc_channel.chan = init_chan;
+        struct aos_rpc *init_rpc = malloc(sizeof(*init_rpc));
+        if (init_rpc == NULL) {
+            return err_push(err, LIB_ERR_MALLOC_FAIL);
+        }
+        init_rpc->type = TYPE_LMP;
+        init_rpc->chan = init_chan;
 
         /* set init RPC client in our program state */
-
-        /* TODO MILESTONE 3: now we should have a channel with init set up and can
-        * use it for the ram allocator */
+        set_init_rpc(init_rpc);
     }
 
     // right now we don't have the nameservice & don't need the terminal
