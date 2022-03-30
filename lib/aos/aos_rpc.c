@@ -115,12 +115,25 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
             break;
     }
 
+    if (!capref_is_null(recv_cap)) {
+        if (ret_cap) {
+            *ret_cap = recv_cap;
+        } else {
+            DEBUG_PRINTF("warning: aos_rpc_send_general received a cap which is given up\n");
+        }
+        err = slot_alloc(&recv_cap);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        lmp_chan_set_recv_slot(rpc->chan, recv_cap);
+    }
+
     if (ret_buf) {
         void *res_buf = malloc(msg.buf.msglen - 1);
         memcpy(res_buf, ((char *) msg.words + 1), msg.buf.msglen);
         *ret_buf = res_buf;
     }
-    if (ret_cap) *ret_cap = recv_cap;
+
     if (ret_size) *ret_size = msg.buf.msglen;
 
     return SYS_ERR_OK;
