@@ -105,6 +105,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
 //Register this function after spawning a process to register a receive handler to that child process
 static void rpc_recv_handler(void *arg)
 {
+
     struct lmp_chan *lc = arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
     struct capref cap;
@@ -124,7 +125,7 @@ static void rpc_recv_handler(void *arg)
     }
 
     char *buf = (char *) msg.words;
-    enum msg_type type;
+    enum msg_type type = 0;
     memcpy(&type, buf, MSG_TYPE_SIZE);
     buf += MSG_TYPE_SIZE;
     size_t size = msg.buf.msglen - MSG_TYPE_SIZE;
@@ -133,7 +134,7 @@ static void rpc_recv_handler(void *arg)
         memcpy(&size, buf, sizeof(size_t));
         buf += sizeof(size_t);
     }
-
+    DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
     err = handle_general_recv(arg, type, cap, (void *)buf, size);
 
     if(err_is_fail(err))

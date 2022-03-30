@@ -25,13 +25,10 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
                       size_t size, uintptr_t *words, struct capref *ret_cap)
 {
     errval_t err;
-    words[0] = identifier;
-    words[1] = 0;
-    words[2] = 0;
-    words[3] = 0;
     struct capref cap = cap_ref;
 
     char *buffer = (char *)words;
+    buffer[0] = identifier;
     buffer++;
     size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
 
@@ -92,7 +89,7 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
 
     if (err_is_fail(err))
         return err_push(err, LIB_ERR_MARSHALL_FAIL);
-    DEBUG_PRINTF("before lmp_chan_send4\n");
+
     // send or die
     while (true) {
         err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, send_cap, words[0],
@@ -108,7 +105,7 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
         DEBUG_ERR(err, "LMP Sending failed!!!");
         return err;
     }
-    DEBUG_PRINTF("before lmp_chan_recv\n");
+
     // receive acknowledgement/return message
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
     struct capref recv_cap;
