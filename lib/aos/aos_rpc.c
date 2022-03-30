@@ -118,8 +118,8 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
     }
 
     if (ret_buf) {
-        void *res_buf = malloc(msg.buf.msglen);
-        memcpy(res_buf, msg.words, msg.buf.msglen);
+        void *res_buf = malloc(msg.buf.msglen - 1);
+        memcpy(res_buf, ((char *) msg.words + 1), msg.buf.msglen);
         *ret_buf = res_buf;
     }
     if (ret_cap) *ret_cap = recv_cap;

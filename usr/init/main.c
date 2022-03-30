@@ -37,7 +37,7 @@ static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) 
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
     struct capref send_cap;
-    err = rpc_marshall(STR_MSG, cap, buf, size, words, &send_cap); 
+    err = rpc_marshall(RPC_ACK_MSG, cap, buf, size, words, &send_cap);
 
     if(err_is_fail(err))
         return err_push(err, LIB_ERR_MARSHALL_FAIL);
@@ -95,6 +95,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         break;
     case TERMINAL_MSG:
         break;
+    default:
+        DEBUG_PRINTF("Unexpected message identifier %d\n", identifier);
     }
 
     return SYS_ERR_OK;
