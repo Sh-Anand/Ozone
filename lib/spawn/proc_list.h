@@ -54,6 +54,15 @@ errval_t proc_list_delete(struct proc_list *ps, domainid_t pid);
 errval_t proc_list_get_name(struct proc_list *ps, domainid_t pid, char **name);
 
 /**
+ * Get dispatcher of a process by PID.
+ * @param ps
+ * @param pid
+ * @param dispatcher
+ * @return
+ */
+errval_t proc_list_get_dispatcher(struct proc_list *ps, domainid_t pid, struct capref *dispatcher);
+
+/**
  * Get an array of all PIDs.
  * @param ps
  * @param pids  Pointer to a domainid_t* which is set as the array. Should be freed.

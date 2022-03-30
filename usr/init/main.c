@@ -82,7 +82,18 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         break;
     case RAM_MSG:
         break;
-    case SPAWN_MSG:
+    case RPC_PROCESS_SPAWN_MSG:
+    {
+        struct rpc_process_spawn_call_msg *msg = buf;
+        grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
+
+        struct spawninfo info;
+        domainid_t pid;
+        spawn_load_cmdline(msg->cmdline, &info, &pid);
+
+        struct rpc_process_spawn_return_msg reply = {.pid = pid};
+        return rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
+    }
         break;
     case TERMINAL_MSG:
         break;

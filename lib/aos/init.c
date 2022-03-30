@@ -25,6 +25,7 @@
 #include <aos/paging.h>
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
+#include <aos/aos_rpc.h>
 
 #include "threads_priv.h"
 #include "init.h"
@@ -126,6 +127,8 @@ static void init_ack_handler(void *arg)
     lc->remote_cap = cap;
     lc->connstate = LMP_CONNECTED;
 }
+
+extern struct aos_rpc init_rpc_channel;
 
 /** \brief Initialise libbarrelfish.
  *
@@ -233,6 +236,8 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
         /* initialize init RPC client with lmp channel */
         // TODO: use init_chan or get_init_chan() to setup RPC
+        init_rpc_channel.type = TYPE_LMP;
+        init_rpc_channel.chan = init_chan;
 
         /* set init RPC client in our program state */
 
