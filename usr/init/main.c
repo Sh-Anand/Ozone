@@ -32,14 +32,48 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
-static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
-    lmp_chan_send();
+static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
+    struct lmp_chan *lc = rpc;
+    errval_t err;
+    uintptr_t words[LMP_MSG_LENGTH];
+    struct capref send_cap;
+    err = rpc_marshall(STR_MSG, cap, buf, size, words, &send_cap); 
+
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_MARSHALL_FAIL);
+
+    //send or die
+    while(true) {
+        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1], words[2], words[3]);
+
+        if(lmp_err_is_transient(err))
+            thread_yield(); //TODO : ensure validity
+        else
+            break;
+    }
+
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "LMP Sending failed!!!");
+        return err;
+    }
+
+    return SYS_ERR_OK;
 }
 
+//size is unreliable for non-fixed size messages.
 __attribute__((unused))
-static void handle_general_recv(void *rpc, uintptr_t identifier, struct capref cap, void *buf, size_t size) {
+static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct capref cap, void *buf, size_t size) {
+    errval_t err;
+    //we have a frame cap, map into our space and set buf to mapped address
+    if(!capref_is_null(cap)) {
+        void *buffer;
+        err = paging_map_frame(get_current_paging_state(), &buffer, size, cap);
+        if(err_is_fail(err))
+            return err_push(err, LIB_ERR_PAGING_MAP);
+        buf = buffer;
+    }
     //TODO FILL IN CALLS TO NECESSARY FUNCTIONS HERE
-    //Protocol : words[0] has the type, words[1] has the size, and words[2],words[3] contain the rest of the data IFF cap is NULL, otherwise the cap contains everything
+    //Protocol : words[0][2:0] has the type, words[1] has the size IFF it is an STR_MSG.
     switch(identifier) {
     case NUM_MSG:
         break;
@@ -50,11 +84,11 @@ static void handle_general_recv(void *rpc, uintptr_t identifier, struct capref c
     case SPAWN_MSG:
         break;
     case TERMINAL_MSG:
-        rpc_reply(rpc, ...);
         break;
     }
 }
 
+//Register this function after spawning a process to register a receive handler to that child process
 static void rpc_recv_handler(void *arg)
 {
     struct lmp_chan *lc = arg;
@@ -68,16 +102,32 @@ static void rpc_recv_handler(void *arg)
         if (lmp_err_is_transient(err)) {
             // Re-register
             err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                         MKCLOSURE(init_ack_handler, arg));
+                                         MKCLOSURE(rpc_recv_handler, arg));
             if (err_is_ok(err)) return;  // otherwise, fall through
         }
         USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV),
                        "unhandled error in init_ack_handler");
     }
 
-    assert(capcmp(lc->remote_cap, cap_initep));  // should be the original one
-    lc->remote_cap = cap;
-    lc->connstate = LMP_CONNECTED;
+    char *buf = (char *) msg.words;
+    enum msg_type type;
+    memcpy(&type, buf, MSG_TYPE_SIZE);
+    buf += MSG_TYPE_SIZE;
+    size_t size = msg.buf.msglen - MSG_TYPE_SIZE;
+    
+    if(type == STR_MSG) {
+        memcpy(&size, buf, sizeof(size_t));
+        buf += sizeof(size_t);
+    }
+
+    err = handle_general_recv(arg, type, cap, (void *)buf, size);
+
+    if(err_is_fail(err))
+       USER_PANIC_ERR(err_push(err, LIB_ERR_RPC_HANDLE), "error handling message");
+
+    err = lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(rpc_recv_handler, arg));
+    if(err_is_fail(err))
+        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV), "error re-registering handler");
 }
 
 static int

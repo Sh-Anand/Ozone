@@ -15,8 +15,52 @@
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
 
-#define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 2)*8
+#define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 1)*8
 
+//ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the sent cap back
+//words is an array of LMP_MSG_LENGTH size
+errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap) {
+    errval_t err;
+    words[0] = identifier;
+    words[1] = 0;
+    words[2] = 0;
+    words[3] = 0;
+    struct capref cap = cap_ref;
+
+    char *buffer = (char *)words;
+    buffer++;
+    size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
+
+    //encode size if string message
+    if(identifier == STR_MSG) {
+        memcpy(buffer, &size, sizeof(size_t));
+        buffer += sizeof(size_t);
+        remaining_space -= sizeof(size_t);
+    }
+
+    //buffer fits in the remaining space
+    if(size <= remaining_space) {
+        memcpy(buffer, buf, size);
+    }
+
+    //buffer doesn't fit, make and map frame cap
+    else {
+        struct capref frame_cap;
+        err = frame_alloc(&frame_cap, size, NULL);
+        if(err_is_fail(err))
+            err_push(err, LIB_ERR_FRAME_ALLOC);
+        void *addr;
+        err = paging_map_frame(get_current_paging_state(), &addr, ROUND_UP(size, BASE_PAGE_SIZE), frame_cap);
+        if(err_is_fail(err))
+            err_push(err, LIB_ERR_PAGING_MAP);
+        memcpy(addr, buf, size);
+        cap = frame_cap;
+    }
+
+    *ret_cap = cap;
+
+    return SYS_ERR_OK;
+}
 
 /**
  * Unified interface of sending a message.
@@ -31,49 +75,21 @@
  */
 __attribute__((unused))
 static errval_t
-aos_rpc_send_general(struct aos_rpc *rpc, uint8_t identifier, struct capref cap, void *buf, size_t size, struct capref *ret_cap, void **ret_buf, size_t *ret_size) {
-
-    // Call ONE raw LMP until success
-    while() {
-        // RECV
-    }
-
-    uint8_t words[LMP_MSG_LENGTH * 8];
-
-    return SYS_ERR_NOT_IMPLEMENTED;
-}
-
-errval_t
-aos_rpc_send_message(struct aos_rpc *rpc, struct aos_rpc_msg rpc_msg) {
+aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capref cap, void *buf, size_t size, struct capref *ret_cap, void **ret_buf, size_t *ret_size) {
 
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
-    words[0] = rpc_msg.type;
-    words[1] = rpc_msg.size;
-    words[2] = 0;
-    words[3] = 0;
-    struct capref cap = NULL_CAP;
+    struct capref send_cap;
 
-    //buffer fits in the remaining two words
-    if(rpc_msg.size <= 16) {
-        memcpy(words+2, rpc_msg.buff, rpc_msg.size);
-    }
+    //marshall arguments into buffer/frame
+    err = rpc_marshall(identifier, cap, buf, size, words, &send_cap);
 
-    //buffer doesn't fit, make and map frame cap
-    else {
-        err = frame_alloc(&cap, rpc_msg.size, NULL);
-        if(err_is_fail(err))
-            err_push(err, LIB_ERR_FRAME_ALLOC);
-        void *addr;
-        err = paging_map_frame(get_current_paging_state(), &addr, ROUND_UP(rpc_msg.size, BASE_PAGE_SIZE), cap);
-        if(err_is_fail(err))
-            err_push(err, LIB_ERR_PAGING_MAP);
-        memcpy(addr, rpc_msg.buff, rpc_msg.size);
-    }
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_MARSHALL_FAIL);
 
     //send or die
     while(true) {
-        err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1], words[2], words[3]);
+        err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, send_cap, words[0], words[1], words[2], words[3]);
 
         if(lmp_err_is_transient(err))
             thread_yield(); //TODO : Does this really do what I think it does? (yields thread so another dispatcher can run immediately instead of busy waiting) there are dangers to this though, we may starve
@@ -86,7 +102,26 @@ aos_rpc_send_message(struct aos_rpc *rpc, struct aos_rpc_msg rpc_msg) {
         return err;
     }
 
+    //receive acknowledgement/return message
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref recv_cap;
+    while(true) {
+        err = lmp_chan_recv(rpc->chan, &msg, &recv_cap);
+        if(err_is_fail(err))
+            thread_yield(); //TODO verify if this works
+        else
+            break;
+    }
+
+    void *res_buf = malloc(msg.buf.msglen);
+    memcpy(res_buf, msg.words, msg.buf.msglen);
+
+    *ret_buf = res_buf;
+    *ret_cap = recv_cap;
+    *ret_size = msg.buf.msglen;
+    
     return SYS_ERR_OK;
+
 }
 
 errval_t

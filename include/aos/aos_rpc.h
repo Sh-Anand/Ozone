@@ -45,11 +45,9 @@ struct aos_rpc {
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-/**
- * @brief Send a general RPC message
- * 
- */
-errval_t aos_rpc_send_message(struct aos_rpc *chan, struct aos_rpc_msg rpc_msg);
+errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
+
+
 /**
  * \brief Send a number.
  */

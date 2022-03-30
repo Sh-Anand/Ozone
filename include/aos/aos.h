@@ -54,6 +54,8 @@
 #include <aos/lmp_endpoints.h>
 #include <aos/solution.h>
 
+#define MSG_TYPE_SIZE 1
+
 /* XXX: utility macros. not sure where to put these */
 
 /* Duplicate memory */
