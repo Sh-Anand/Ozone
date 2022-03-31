@@ -71,10 +71,33 @@ int main(int argc, char *argv[]) {
             // spawn another spawnTester with the level decreased by 1 on the same core
             err = aos_rpc_process_spawn(proc_rpc, cmdline, my_core_id, &spawnTester_pid);
             if (err_is_fail(err)) {
-                DEBUG_PRINTF("Starting spawnTester failed.\n");
+                DEBUG_PRINTF("  Starting spawnTester failed.\n");
                 return EXIT_FAILURE;
             } 
-            DEBUG_PRINTF("Starting spawnTester succeeded.\n");
+            DEBUG_PRINTF("  Starting spawnTester succeeded.\n");
+
+            domainid_t *pids = NULL;
+            size_t pid_count = 0;
+            err = aos_rpc_process_get_all_pids(proc_rpc, &pids, &pid_count);
+            if (err_is_fail(err)) {
+                DEBUG_PRINTF("  Getting all PIDs failed.\n");
+                return EXIT_FAILURE;
+            }
+            assert(pids != NULL && "NULL pids");
+            DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
+
+            for (int i = 0; i < pid_count; i++) {
+                char *name;
+                err = aos_rpc_process_get_name(proc_rpc, pids[i], &name);
+                if (err_is_fail(err)) {
+                    DEBUG_PRINTF("  Getting name failed.\n");
+                    return EXIT_FAILURE;
+                }
+                DEBUG_PRINTF("  %u %s\n", pids[i], name);
+                free(name);
+            }
+
+            free(pids);
         }
         return EXIT_SUCCESS;
     }

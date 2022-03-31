@@ -33,8 +33,10 @@ void grading_rpc_handler_process_spawn(char* cmdline, coreid_t core)
 
 void grading_rpc_handler_process_get_name(domainid_t pid)
 {
+    DEBUG_PRINTF("grading_rpc_handler_process_get_name: %u\n", pid);
 }
 
 void grading_rpc_handler_process_get_all_pids(void)
 {
+    DEBUG_PRINTF("grading_rpc_handler_process_get_all_pids\n");
 }
