@@ -260,18 +260,29 @@ static void binding_handler(void *arg)
     }
 
     // XXX: no checking for now, might be risky if user program exploit this endpoint
-    DEBUG_PRINTF("spawn: receive ep cap from process %lu\n", msg.words[0])
+    DEBUG_PRINTF("spawn: receive binding request from process %lu\n", msg.words[0])
     err = lmp_chan_accept(si->lc, PROC_ENDPOINT_BUF_LEN, cap);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to accept");
     }
 
+    // Assign initial slot for incoming cap
+    struct capref new_init_ep_slot;
+    err = slot_alloc(&new_init_ep_slot);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "binding_handler: fail to alloc slot");
+    }
+    lmp_chan_set_recv_slot(si->lc, new_init_ep_slot);
+
+    // Start receiving on the channel
     err = lmp_chan_register_recv(si->lc, get_default_waitset(),
                                 MKCLOSURE(rpc_handler, si->lc));
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to register channel recv");
     }
 
+
+    // Ack with the new endpoint
     err = lmp_chan_send0(si->lc, LMP_SEND_FLAGS_DEFAULT, si->lc->local_cap);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to send");

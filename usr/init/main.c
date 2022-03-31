@@ -153,7 +153,6 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         reply->count = count;
         memcpy(reply->pids, pids, count * sizeof(domainid_t));
         free(pids);
-        DEBUG_PRINTF("??? reply_size = %lu\n", reply_size);
         err = rpc_reply(rpc, NULL_CAP, reply, reply_size);
         
         free(reply);
