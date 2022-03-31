@@ -20,50 +20,57 @@
 
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
-errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf,
+errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
                       size_t size, uintptr_t *words, struct capref *ret_cap)
 {
     errval_t err;
-    struct capref cap = cap_ref;
 
-    char *buffer = (char *)words;
-    buffer[0] = identifier;
-    buffer++;
-    size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
-
-    size_t rounded_size = ROUND_UP(size, BASE_PAGE_SIZE);
-
-    // encode size if string message
-    if (identifier == STR_MSG) {
-        memcpy(buffer, &size, sizeof(size_t));
-        buffer += sizeof(size_t);
-        remaining_space -= sizeof(size_t);
+    if (buf == NULL) {
+        if (size == 0) {
+            return SYS_ERR_OK;
+        } else {
+            return ERR_INVALID_ARGS;
+        }
     }
 
+    uint8_t *buffer = (uint8_t *)words;
+    buffer[0] = identifier;
+    buffer++;
+
+    *ret_cap = cap;
+
+    size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
     if (size <= remaining_space) {
-        // buffer fits in the remaining space
+
+        // Buffer fits in the remaining space
         memcpy(buffer, buf, size);
+
     } else {
-        // buffer doesn't fit, make and map frame cap
+
+        // Buffer doesn't fit, make and map frame cap
         DEBUG_PRINTF("rpc_marshall: alloc frame\n")
+
+        if (!capref_is_null(cap)) {
+            return LIB_ERR_RPC_LARGE_MSG_WITH_CAP;
+        }
+
+        size_t rounded_size = ROUND_UP(size, BASE_PAGE_SIZE);
 
         struct capref frame_cap;
         err = frame_alloc(&frame_cap, rounded_size, NULL);
-        if (err_is_fail(err))
+        if (err_is_fail(err)) {
             err_push(err, LIB_ERR_FRAME_ALLOC);
+        }
+
         void *addr;
-        DEBUG_PRINTF("rpc_marshall: alloc frame success!\n")
         err = paging_map_frame(get_current_paging_state(), &addr,
                                rounded_size, frame_cap);
-        DEBUG_PRINTF("rpc_marshall: frame map success!\n")
         if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
         }
         memcpy(addr, buf, size);
-        cap = frame_cap;
+        *ret_cap = frame_cap;
     }
-
-    *ret_cap = cap;
 
     return SYS_ERR_OK;
 }

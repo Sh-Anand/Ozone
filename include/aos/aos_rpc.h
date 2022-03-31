@@ -72,7 +72,7 @@ struct rpc_process_get_all_pids_return_msg {
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
+errval_t rpc_marshall(uint8_t identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
 
 
 /**

@@ -75,6 +75,7 @@ typedef void *CONST_CAST;
 
 enum msg_type {
     RPC_ACK_MSG,
+    RPC_ERR_MSG,
     NUM_MSG,
     STR_MSG,
     RAM_MSG,

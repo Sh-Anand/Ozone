@@ -378,6 +378,7 @@ errors libaos LIB_ERR_ {
     failure IPI_NOTIFY          "Failure in ipi_notify()",
 
     //RPC
+    failure RPC_LARGE_MSG_WITH_CAP        "Large message cannot have a cap to send",
     failure RPC_SEND_NUM        "Failure in sending a number",
     failure RPC_SEND_STR        "Failure in sending a string",
 
