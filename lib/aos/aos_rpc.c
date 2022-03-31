@@ -14,6 +14,7 @@
 
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
+#include <aos/capabilities.h>
 
 #define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 1) * 8
 
@@ -186,6 +187,26 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 {
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
+
+    struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
+    errval_t err = aos_rpc_send_general(rpc, RAM_MSG, NULL_CAP, &msg, sizeof(msg), ret_cap, NULL, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to receive RAM\n");
+        return err;
+    }
+
+    if (ret_bytes != NULL)  {
+        // No better way as of now (mm does not return any size)
+        struct capability c;
+        err = cap_direct_identify(*ret_cap, &c);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to get the frame info\n");
+            return err_push(err, MM_ERR_FIND_NODE);
+        }
+        assert(c.type == ObjType_RAM);
+        assert(c.u.ram.bytes >= bytes);
+        *ret_bytes = c.u.ram.bytes;
+    }
 
     // aos_rpc_send_general(RAM_IDENTIFIER)
 
