@@ -126,23 +126,23 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
     case NUM_MSG: {
         uintptr_t num = *((uintptr_t *)buf);
         grading_rpc_handle_number(num);
-        debug_printf("Received number %d in init\n", num);
+        debug_printf("Received number %lu in init\n", num);
         rpc_reply(rpc, NULL_CAP, NULL, 0);
     } break;
     case STR_MSG: {
         char *msg = (char *)buf;
-        debug_printf("Received string in init: \"%s\"", msg);
+        debug_printf("Received string in init: \"%s\"\n", msg);
         rpc_reply(rpc, NULL_CAP, NULL, 0);
     } break;
-    case RAM_MSG:;
-        struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram *)buf;
-        struct capref ram;
-        err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        rpc_reply(rpc, ram, NULL, 0);
-        break;
+    case RAM_MSG: {
+            struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram *)buf;
+            struct capref ram;
+            err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
+            if (err_is_fail(err)) {
+                return err;
+            }
+            rpc_reply(rpc, ram, NULL, 0);
+    } break;
     case RPC_PROCESS_SPAWN_MSG: {
         struct rpc_process_spawn_call_msg *msg = buf;
         grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
@@ -156,7 +156,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
 
         struct rpc_process_spawn_return_msg reply = { .pid = pid };
         rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
-    }
+    } break;
     case RPC_PROCESS_GET_NAME_MSG: {
         struct rpc_process_get_name_call_msg *msg = buf;
         grading_rpc_handler_process_get_name(msg->pid);
@@ -171,9 +171,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
         rpc_reply(rpc, NULL_CAP, name, strlen(name) + 1);
 
         free(name);
-        return SYS_ERR_OK;
-    }
-
+    } break;
     case RPC_PROCESS_GET_ALL_PIDS_MSG: {
         grading_rpc_handler_process_get_all_pids();
 
@@ -195,10 +193,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
         memcpy(reply->pids, pids, count * sizeof(domainid_t));
         free(pids);
         rpc_reply(rpc, NULL_CAP, reply, reply_size);
-
         free(reply);
-        return err;
-    }
+    } break;
     case TERMINAL_MSG: {
         // don't care about capabilities for now
         char *info = buf;

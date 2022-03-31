@@ -31,7 +31,8 @@ const char *large_str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit
                         "occaecat cupidatat non proident, sunt in culpa qui officia "
                         "deserunt mollit anim id est laborum.";
 
-static void print_err_if_any(errval_t err) {
+static void print_err_if_any(errval_t err)
+{
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "");
     }
@@ -68,8 +69,8 @@ int main(int argc, char *argv[])
                 if (offset == 0) {
                     // Do nothing, fall back to the next command
                 } else if (strcmp(buf, "help") == 0) {
-                    printf("Available commands:\n  hello\n  exit\n  send_num\n  "
-                           "send_str\n  send_large_str\n  get_ram\n  "
+                    printf("Available commands:\n  exit\n  send_num\n  "
+                           "send_str\n  send_large_str\n  get_ram\n  get_pids\n  "
                            "Others are interpreted as spawn commands\n");
 
                 } else if (strcmp(buf, "exit") == 0) {
@@ -137,18 +138,45 @@ int main(int argc, char *argv[])
 
                     printf("The frame is write and readable...\n");
 
+                } else if (strcmp(buf, "get_pids") == 0) {
+                    domainid_t *pids = NULL;
+                    size_t pid_count = 0;
+                    err = aos_rpc_process_get_all_pids(aos_rpc_get_process_channel(),
+                                                       &pids, &pid_count);
+                    if (err_is_fail(err)) {
+                        DEBUG_PRINTF("  Getting all PIDs failed.\n");
+                        return EXIT_FAILURE;
+                    }
+                    assert(pids != NULL && "NULL pids");
+                    DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
+
+                    for (int i = 0; i < pid_count; i++) {
+                        char *name;
+                        err = aos_rpc_process_get_name(aos_rpc_get_process_channel(),
+                                                       pids[i], &name);
+                        if (err_is_fail(err)) {
+                            DEBUG_PRINTF("  Getting name failed.\n");
+                            return EXIT_FAILURE;
+                        }
+                        DEBUG_PRINTF("  %u %s\n", pids[i], name);
+                        free(name);
+                    }
+
+                    free(pids);
                 } else {
                     domainid_t pid = 0;
-//                    printf("Spawn %s...\n", buf);
-                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, 0, &pid);
-//                    printf("New pid is %u\n", pid);
+                    printf("Hello is going to exit to unblock init!\n");
+                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, 0,
+                                                &pid);
                     print_err_if_any(err);
+                    return EXIT_SUCCESS;
                 }
                 break;  // prompt for the next command
 
             } else if (c == 127) {
                 if (offset > 0) {
                     printf("\b \b");  // destructive backspace
+                    fflush(stdout);
                     offset--;
                 }
             } else {
