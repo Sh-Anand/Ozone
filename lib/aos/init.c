@@ -248,6 +248,8 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
         /* set init RPC client in our program state */
         set_init_rpc(init_rpc);
+
+        ram_alloc_set(NULL); // Use Ram allocation over RPC
     }
 
     // right now we don't have the nameservice & don't need the terminal

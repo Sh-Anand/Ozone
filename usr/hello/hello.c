@@ -19,7 +19,6 @@
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
 #include <unistd.h>
-#include "aos/aos_rpc.h"
 
 static void delay(int count) {
     volatile int a[3]= {0, 1};
@@ -37,18 +36,38 @@ int main(int argc, char *argv[])
         printf("arg[%d]: %s\n", i, argv[i]);
     }
 
-    // printf("Try to spawn hello using RPC...\n");
-    // domainid_t pid;
-    // errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
-    // assert(err_is_ok(err));
-    // printf("spawn new hello: %u\n", pid);
+    struct capref ram;
+    size_t size = 16384;
+    ram_alloc(&ram, size);
 
-    struct capref ram = NULL_CAP;
-    size_t size = 0;
-    struct aos_rpc *init_chan = aos_rpc_get_process_channel();
-    printf("Got %p\n", init_chan);
-    aos_rpc_get_ram_cap(init_chan, 4096, 4096, &ram, &size);
-    printf("Got %ld /%ld)\n", size, get_cap_addr(ram));
+    struct slot_allocator *sa = get_default_slot_allocator();
+    struct capref frame;
+    sa->alloc(sa, &frame);
+    void *addr;
+    cap_retype(frame, ram, 0, ObjType_Frame, size, 1);
+    paging_map_frame_attr(get_current_paging_state(), &addr, size, frame, VREGION_FLAGS_READ_WRITE);
+
+    printf("Mapped requested frame at %p\n", addr);
+    char *data = (char*)addr;
+
+    for (int i = 0; i < size; i++) {
+        if (data[i] != 0) printf("READ ERROR\n");
+        while(data[i] != 0);
+        data[i] = (i / 128 + i / 16) % 256;
+    }
+
+    for (int i = 0; i < size; i++) {
+        if (data[i] != (i / 128 + i / 16) % 256) printf("WRITE ERROR %d instead of %d\n", data[i], (i / 128 + i / 16) % 256);
+        while(data[i] != (i / 128 + i / 16) % 256);
+    }
+
+    printf("Frame is write and readable...\n");
+
+    printf("Try to spawn hello using RPC...\n");
+    domainid_t pid;
+    errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    assert(err_is_ok(err));
+    printf("spawn new hello: %u\n", pid);
 
     printf("Going to print INFINITELY...\n");
     while(1) {
