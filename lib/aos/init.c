@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include <aos/aos.h>
+#include <aos/aos_rpc.h>
 #include <aos/dispatch.h>
 #include <aos/curdispatcher_arch.h>
 #include <aos/dispatcher_arch.h>
@@ -77,6 +78,31 @@ static size_t syscall_terminal_write(const char *buf, size_t len)
 }
 
 __attribute__((__used__))
+static size_t aos_terminal_write(const char *buf, size_t len)
+{
+    
+	size_t sent;
+	errval_t err;
+	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+	
+	// TODO: this is probably very inefficient, so maybe do this for whole strings instead
+	for (sent = 0; sent < len;) {
+		err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
+		
+		if (err_is_fail(err)) {
+			// sending failed, so return
+			break;
+		}
+		
+		sent++;
+	}
+	
+	// return the number of characters sent
+	return sent;
+	
+}
+
+__attribute__((__used__))
 static size_t dummy_terminal_read(char *buf, size_t len)
 {
     debug_printf("Terminal read NYI!\n");
@@ -91,7 +117,7 @@ void barrelfish_libc_glue_init(void)
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
     _libc_terminal_read_func = dummy_terminal_read;
-    _libc_terminal_write_func = syscall_terminal_write;
+    _libc_terminal_write_func = aos_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */

@@ -160,7 +160,19 @@ errval_t
 aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc) {
     // TODO implement functionality to request a character from
     // the serial driver.
-    return SYS_ERR_OK;
+	errval_t err;
+	
+	// TODO: this is no good, do better
+	// a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
+	char info[2] = {1, 0};
+	char *ret_info;
+	size_t rsize;
+	err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, info, 2, NULL, (void**)&ret_info, &rsize);
+	assert(rsize == 2);
+	
+	*retc = ret_info[1]; // pass the returned character along
+		
+    return err;
 }
 
 
@@ -168,7 +180,15 @@ errval_t
 aos_rpc_serial_putchar(struct aos_rpc *rpc, char c) {
     // TODO implement functionality to send a character to the
     // serial port.
-    return SYS_ERR_OK;
+	
+	// TODO: this is no good, do better
+	// a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
+	char data[2] = { 0, c };
+	
+	// we don't care about return values or capabilities, just send this single char (again, do better)
+	errval_t err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, data, 2, NULL, NULL, NULL);
+	
+    return err;
 }
 
 errval_t
@@ -235,7 +255,7 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
 {
     //TODO: Return channel to talk to serial driver/terminal process (whoever
     //implements print/read functionality)
-    debug_printf("aos_rpc_get_serial_channel NYI\n");
-    return NULL;
+    //debug_printf("aos_rpc_get_serial_channel NYI\n");
+    return aos_rpc_get_init_channel(); // XXX: For now return the init channel, since the current serial driver is handled in init
 }
 
