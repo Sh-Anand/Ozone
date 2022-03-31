@@ -71,7 +71,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     //we have a frame cap, map into our space and set buf to mapped address
     if(!capref_is_null(cap)) {
         void *buffer;
-        err = paging_map_frame(get_current_paging_state(), &buffer, size, cap);
+        DEBUG_PRINTF("Trying to map received frame in local space\n");
+        err = paging_map_frame(get_current_paging_state(), &buffer, ROUND_UP(size, BASE_PAGE_SIZE), cap);
         if(err_is_fail(err))
             return err_push(err, LIB_ERR_PAGING_MAP);
         buf = buffer;

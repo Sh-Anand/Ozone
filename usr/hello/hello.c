@@ -73,11 +73,15 @@ int main(int argc, char *argv[])
 
     printf("Frame is write and readable...\n");
 
-    printf("Try to spawn hello using RPC...\n");
-    domainid_t pid;
-    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
-    assert(err_is_ok(err));
-    printf("succesfully sent string\n");
+    // printf("Try to spawn hello using RPC...\n");
+    // domainid_t pid;
+    // err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    // assert(err_is_ok(err));
+    // printf("succesfully sent string\n");
+
+    char *strn = "hello RPC world hello RPC world hello RPC world hello RPC world hello RPC world hello RPC world hello RPC world hello RPC world";
+    printf("Trying to send large string\n");
+    err = aos_rpc_send_string(aos_rpc_get_init_channel(), strn);
 
     printf("Going to print INFINITELY...\n");
     while(1) {

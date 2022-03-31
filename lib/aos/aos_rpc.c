@@ -31,6 +31,8 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
     buffer++;
     size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
 
+    size_t rounded_size = ROUND_UP(size, BASE_PAGE_SIZE);
+
     // encode size if string message
     if (identifier == STR_MSG) {
         memcpy(buffer, &size, sizeof(size_t));
@@ -46,12 +48,14 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
         DEBUG_PRINTF("rpc_marshall: alloc frame\n")
 
         struct capref frame_cap;
-        err = frame_alloc(&frame_cap, size, NULL);
+        err = frame_alloc(&frame_cap, rounded_size, NULL);
         if (err_is_fail(err))
             err_push(err, LIB_ERR_FRAME_ALLOC);
         void *addr;
+        DEBUG_PRINTF("rpc_marshall: alloc frame success!\n")
         err = paging_map_frame(get_current_paging_state(), &addr,
-                               ROUND_UP(size, BASE_PAGE_SIZE), frame_cap);
+                               rounded_size, frame_cap);
+        DEBUG_PRINTF("rpc_marshall: frame map success!\n")
         if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
         }
