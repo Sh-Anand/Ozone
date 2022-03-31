@@ -377,6 +377,9 @@ errors libaos LIB_ERR_ {
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",
 
+    //RPC
+    failure RPC_SEND_NUM        "Failure in sending a number",
+
     // Binding to init
     failure BIND_INIT_ACCEPT        "Failure accepting init ep for init binding",
     failure BIND_INIT_SET_RECV        "Failure setting receiver for init binding",

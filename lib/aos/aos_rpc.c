@@ -141,8 +141,10 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
 
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 {
-    // TODO: implement functionality to send a number over the channel
-    // given channel and wait until the ack gets returned.
+    errval_t err = aos_rpc_send_general(rpc, NUM_MSG, NULL_CAP, &num, sizeof(num), NULL, NULL, NULL);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_RPC_SEND_NUM);
+    
     return SYS_ERR_OK;
 }
 
