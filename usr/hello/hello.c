@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
     char str[15] = "hello RPC world";
     printf("Trying to send string\n");
     err = aos_rpc_send_string(aos_rpc_get_init_channel(), str);
-    
+
     struct capref ram;
     size_t size = 16384;
     ram_alloc(&ram, size);
@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
 
     printf("Try to spawn hello using RPC...\n");
     domainid_t pid;
-    errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
     assert(err_is_ok(err));
     printf("succesfully sent string\n");
 
