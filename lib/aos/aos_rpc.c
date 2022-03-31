@@ -230,9 +230,10 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 	char *ret_info;
 	size_t rsize;
 	err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, info, 2, NULL, (void**)&ret_info, &rsize);
-	assert(rsize == 2);
+	assert(rsize >= 2);
 	
 	*retc = ret_info[1]; // pass the returned character along
+	//printf("retc: %c (err: %d)\n", *retc, err);
 		
     return err;
 }

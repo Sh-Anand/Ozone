@@ -111,6 +111,29 @@ static size_t dummy_terminal_read(char *buf, size_t len)
     return 0;
 }
 
+__attribute__((__used__))
+static size_t aos_terminal_read(char *buf, size_t len)
+{
+	size_t read = 0;
+	errval_t err;
+	char c;
+	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+	assert(serial_rpc != NULL);
+	
+	for (; read < len;) {
+		err = aos_rpc_serial_getchar(serial_rpc, &c);
+		
+		if (err_is_fail(err)) {
+			// cannot receive so exit
+			break;
+		}
+		
+		buf[read++] = c;
+	}
+	
+    return read;
+}
+
 /* Set libc function pointers */
 void barrelfish_libc_glue_init(void)
 {
@@ -118,7 +141,7 @@ void barrelfish_libc_glue_init(void)
     // what we need for that
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
-    _libc_terminal_read_func = dummy_terminal_read;
+    _libc_terminal_read_func = !init_domain ? aos_terminal_read : dummy_terminal_read;
     _libc_terminal_write_func = !init_domain ? aos_terminal_write : syscall_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;

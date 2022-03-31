@@ -20,6 +20,7 @@
 #include <aos/aos_rpc.h>
 #include <unistd.h>
 
+__attribute__((__unused__))
 static void delay(int count) {
     volatile int a[3]= {0, 1};
     for (int i = 0; i < count; i++) {
@@ -85,9 +86,8 @@ int main(int argc, char *argv[])
 
     printf("Going to print INFINITELY...\n");
     while(1) {
-        printf("+");
-        fflush(stdout);
-        delay(20000000);
+		putchar(getchar());
+		fflush(stdout);
     }
     printf("Goodbye, world!\n");
     return EXIT_SUCCESS;

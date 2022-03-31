@@ -185,8 +185,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     case TERMINAL_MSG:
 		{
 			// don't care about capabilities for now
-			char *info;
-			info = buf;
+			char *info = buf;
 			if (info[0] == 0) { // putchar
 				// no response necessary here
 				err = sys_print(info+1, 1); // print a single char
@@ -194,7 +193,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
 				return rpc_reply(rpc, NULL_CAP, NULL, 0);
 			} else if (info[0] == 1) { // getchar
 				char c;
-				err = sys_getchar(&c + 1);
+				err = sys_getchar(&c);
 				// TODO: handle error
 				
 				info[1] = c; // set the response value
