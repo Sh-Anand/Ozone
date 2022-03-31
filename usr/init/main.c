@@ -131,7 +131,9 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
 			info = buf;
 			if (info[0] == 0) { // putchar
 				// no response necessary here
-				return sys_print(info+1, 1); // print a single char
+				err = sys_print(info+1, 1); // print a single char
+				// TODO: handle errors
+				return rpc_reply(rpc, NULL_CAP, NULL, 0);
 			} else if (info[0] == 1) { // getchar
 				char c;
 				err = sys_getchar(&c + 1);
@@ -181,7 +183,7 @@ static void rpc_recv_handler(void *arg)
         memcpy(&size, buf, sizeof(size_t));
         buf += sizeof(size_t);
     }
-    DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
+    //DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
     err = handle_general_recv(arg, type, cap, (void *)buf, size);
 
     if(err_is_fail(err))

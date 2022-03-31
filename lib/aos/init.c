@@ -81,7 +81,7 @@ static size_t syscall_terminal_write(const char *buf, size_t len)
 __attribute__((__used__))
 static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    sys_print("aos_terminal_write called\n", 27);
+    //sys_print("aos_terminal_write called\n", 27);
 	size_t sent;
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
@@ -119,7 +119,7 @@ void barrelfish_libc_glue_init(void)
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
     _libc_terminal_read_func = dummy_terminal_read;
-    _libc_terminal_write_func = aos_terminal_write;
+    _libc_terminal_write_func = !init_domain ? aos_terminal_write : syscall_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
