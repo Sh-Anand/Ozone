@@ -25,6 +25,12 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
 {
     errval_t err;
 
+    uint8_t *buffer = (uint8_t *)words;
+    buffer[0] = identifier;
+    buffer++;
+
+    *ret_cap = cap;
+
     if (buf == NULL) {
         if (size == 0) {
             return SYS_ERR_OK;
@@ -33,11 +39,6 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
         }
     }
 
-    uint8_t *buffer = (uint8_t *)words;
-    buffer[0] = identifier;
-    buffer++;
-
-    *ret_cap = cap;
 
     size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
     if (size <= remaining_space) {
@@ -125,7 +126,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
     }
 
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "LMP Sending failed!!!");
+        DEBUG_ERR(err, "aos_rpc_send_general: failed to send\n");
         return err;
     }
 
@@ -149,8 +150,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
         if (ret_cap) {
             *ret_cap = recv_cap;
         } else {
-            DEBUG_PRINTF("warning: aos_rpc_send_general received a cap which is given "
-                         "up\n");
+            DEBUG_PRINTF("aos_rpc_send_general received a cap but is given up!\n");
         }
         err = slot_alloc(&recv_cap);
         if (err_is_fail(err)) {

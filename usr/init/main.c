@@ -52,41 +52,47 @@ __attribute__((__unused__)) static errval_t handle_terminal_print(const char *st
 }
 
 
-__attribute__((unused)) static errval_t rpc_reply(void *rpc, struct capref cap, void *buf,
-                                                  size_t size)
+static void rpc_send(void *rpc, uint8_t identifier, struct capref cap, void *buf,
+                     size_t size)
 {
     struct lmp_chan *lc = rpc;
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
-    struct capref send_cap;
-    err = rpc_marshall(RPC_ACK_MSG, cap, buf, size, words, &send_cap);
 
+    struct capref send_cap;
+    err = rpc_marshall(identifier, cap, buf, size, words, &send_cap);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_MARSHALL_FAIL);
+        DEBUG_ERR(err_push(err, LIB_ERR_MARSHALL_FAIL), "rpc_reply: marshall failed");
+        // XXX: maybe kill the caller here
+        return;
     }
 
-    // send or die
+    // Send or die
     while (true) {
         err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1],
                              words[2], words[3]);
-
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
-                thread_yield();  // TODO verify if this works
+                thread_yield();
             } else {
-                return err;
+                DEBUG_ERR(err, "rpc_reply: send failed");
+                // XXX: maybe kill the caller here
+                return;
             }
         } else {
             break;
         }
     }
+}
 
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "LMP Sending failed!!!");
-        return err;
-    }
+static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size)
+{
+    rpc_send(rpc, RPC_ACK_MSG, cap, buf, size);
+}
 
-    return SYS_ERR_OK;
+static void rpc_nack(void *rpc, errval_t err)
+{
+    rpc_send(rpc, RPC_ERR_MSG, NULL_CAP, &err, sizeof(errval_t));
 }
 
 /**
@@ -115,28 +121,25 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
             return err_push(err, LIB_ERR_PAGING_MAP);
         buf = buffer;
     }
-    // TODO FILL IN CALLS TO NECESSARY FUNCTIONS HERE
-    // Protocol : words[0][2:0] has the type, words[1] has the size IFF it is an STR_MSG.
+
     switch (identifier) {
     case NUM_MSG: {
-        int num = *((int *)buf);
-        debug_printf("Received number %d in Init\n", num);
-        char reply[2] = "OK";
-        return rpc_reply(rpc, NULL_CAP, reply, sizeof(reply));
+        uintptr_t num = *((uintptr_t *)buf);
+        grading_rpc_handle_number(num);
+        debug_printf("Received number %d in init\n", num);
+        rpc_reply(rpc, NULL_CAP, NULL, 0);
     } break;
     case STR_MSG: {
         char *msg = (char *)buf;
-        debug_printf("Received message in Init\n%s\n", msg);
-        char reply[2] = "OK";
-        return rpc_reply(rpc, NULL_CAP, reply, sizeof(reply));
+        debug_printf("Received string in init: \"%s\"", msg);
+        rpc_reply(rpc, NULL_CAP, NULL, 0);
     } break;
     case RAM_MSG:;
-        // assert(size == sizeof(struct aos_rpc_msg_ram));
         struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram *)buf;
         struct capref ram;
         err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
         if (err_is_fail(err)) {
-            // TODO pass error back?
+            return err;
         }
         rpc_reply(rpc, ram, NULL, 0);
         break;
@@ -146,25 +149,29 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
 
         struct spawninfo info;
         domainid_t pid;
-        spawn_load_cmdline(msg->cmdline, &info, &pid);
-        // TODO: reply err
+        err = spawn_load_cmdline(msg->cmdline, &info, &pid);
+        if (err_is_fail(err)) {
+            return err;
+        }
 
         struct rpc_process_spawn_return_msg reply = { .pid = pid };
-        return rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
+        rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
     }
     case RPC_PROCESS_GET_NAME_MSG: {
         struct rpc_process_get_name_call_msg *msg = buf;
         grading_rpc_handler_process_get_name(msg->pid);
 
         char *name = NULL;
-        spawn_get_name(msg->pid, &name);
-        // TODO: reply err
+        err = spawn_get_name(msg->pid, &name);
+        if (err_is_fail(err)) {
+            return err;
+        }
 
         // XXX: bypass rpc_process_get_name_return_msg
-        err = rpc_reply(rpc, NULL_CAP, name, strlen(name) + 1);
+        rpc_reply(rpc, NULL_CAP, name, strlen(name) + 1);
 
         free(name);
-        return err;
+        return SYS_ERR_OK;
     }
 
     case RPC_PROCESS_GET_ALL_PIDS_MSG: {
@@ -173,8 +180,9 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
         size_t count;
         domainid_t *pids;
         err = spawn_get_all_pids(&pids, &count);
-
-        assert(err_is_ok(err));
+        if (err_is_fail(err)) {
+            return err;
+        }
 
         size_t reply_size = sizeof(struct rpc_process_get_all_pids_return_msg)
                             + count * sizeof(domainid_t);
@@ -186,27 +194,29 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
         reply->count = count;
         memcpy(reply->pids, pids, count * sizeof(domainid_t));
         free(pids);
-        err = rpc_reply(rpc, NULL_CAP, reply, reply_size);
+        rpc_reply(rpc, NULL_CAP, reply, reply_size);
 
         free(reply);
         return err;
     }
     case TERMINAL_MSG: {
         // don't care about capabilities for now
-        char *info;
-        info = buf;
+        char *info = buf;
         if (info[0] == 0) {  // putchar
             // no response necessary here
             err = sys_print(info + 1, 1);  // print a single char
-            // TODO: handle errors
-            return rpc_reply(rpc, NULL_CAP, NULL, 0);
+            if (err_is_fail(err)) {
+                return err;
+            }
+            rpc_reply(rpc, NULL_CAP, NULL, 0);
         } else if (info[0] == 1) {  // getchar
             char c;
-            err = sys_getchar(&c + 1);
-            // TODO: handle error
-
-            info[1] = c;                               // set the response value
-            return rpc_reply(rpc, NULL_CAP, info, 2);  // return the requested character
+            err = sys_getchar(&c);
+            if (err_is_fail(err)) {
+                return err;
+            }
+            info[1] = c;                        // set the response value
+            rpc_reply(rpc, NULL_CAP, info, 2);  // return the requested character
         }
     } break;
     default:
@@ -235,31 +245,38 @@ static void rpc_recv_handler(void *arg)
             if (err_is_ok(err))
                 return;  // otherwise, fall through
         }
-        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV), "unhandled error in "
-                                                                  "init_ack_handler");
+        DEBUG_ERR(err, "rpc_recv_handler: unhandled error from lmp_chan_recv");
+        // XXX: maybe kill the caller here
     }
 
-    char *buf = (char *)msg.words;
-    enum msg_type type = 0;
-    memcpy(&type, buf, MSG_TYPE_SIZE);
-    buf += MSG_TYPE_SIZE;
+    // Refill the cap slot
+    if (!capref_is_null(cap)) {
+        struct capref new_slot;
+        err = slot_alloc(&new_slot);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
+            // XXX: maybe kill the caller here
+        }
+        lmp_chan_set_recv_slot(lc, new_slot);
+    }
+
+    uint8_t *buf = (uint8_t *)msg.words;
+    uint8_t type = buf[0];
+    buf += 1;
     size_t size = msg.buf.msglen - MSG_TYPE_SIZE;
 
-//    if (type == STR_MSG) {
-//        memcpy(&size, buf, sizeof(size_t));
-//        buf += sizeof(size_t);
-//    }
-    // DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
     err = handle_general_recv(arg, type, cap, (void *)buf, size);
+    if (err_is_fail(err)) {
+        rpc_nack(lc, err);  // reply error
+    }
 
-    if (err_is_fail(err))
-        USER_PANIC_ERR(err_push(err, LIB_ERR_RPC_HANDLE), "error handling message");
-
+    // Re-register
     err = lmp_chan_register_recv(lc, get_default_waitset(),
                                  MKCLOSURE(rpc_recv_handler, arg));
-    if (err_is_fail(err))
-        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV), "error re-registering "
-                                                                  "handler");
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "rpc_recv_handler: error re-registering handler");
+        // XXX: maybe kill the caller here
+    }
 }
 
 static int bsp_main(int argc, char *argv[])

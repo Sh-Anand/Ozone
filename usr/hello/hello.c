@@ -31,6 +31,12 @@ const char *large_str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit
                         "occaecat cupidatat non proident, sunt in culpa qui officia "
                         "deserunt mollit anim id est laborum.";
 
+static void print_err_if_any(errval_t err) {
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "");
+    }
+}
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -39,22 +45,19 @@ int main(int argc, char *argv[])
         printf("arg[%d]: %s\n", i, argv[i]);
     }
 
-    char str0[15] = "Hello RPC world";
-    printf("Trying to send a small string...\n");
-    err = aos_rpc_send_string(aos_rpc_get_init_channel(), str0);
-    assert(err_is_ok(err));
-    printf("Successfully send string\n");
+    if (argc < 2 || strcmp(argv[1], "AOS") != 0) {
+        printf("Goodbye world!");
+        return EXIT_SUCCESS;
+    }
 
-    printf("Trying to send a large string...\n");
-    err = aos_rpc_send_string(aos_rpc_get_init_channel(), large_str);
-    assert(err_is_ok(err));
-    printf("Successfully send large string\n");
-    return EXIT_SUCCESS;
+    printf("Entering shell since argv[1] == \"AOS\"\n");
 
     char buf[SHELL_BUF_SIZE];
     uword_t offset;
     while (1) {  // command loop
-        printf("$ ");
+        putchar('$');
+        putchar(' ');
+        fflush(stdout);
 
         offset = 0;
         while (1) {  // character loop
@@ -69,9 +72,6 @@ int main(int argc, char *argv[])
                            "send_str\n  send_large_str\n  get_ram\n  "
                            "Others are interpreted as spawn commands\n");
 
-                } else if (strcmp(buf, "hello") == 0) {
-                    printf("Hello from AOS team 1\n");
-
                 } else if (strcmp(buf, "exit") == 0) {
                     printf("Goodbye, world!\n");
                     return EXIT_SUCCESS;
@@ -79,20 +79,20 @@ int main(int argc, char *argv[])
                 } else if (strcmp(buf, "send_num") == 0) {
                     printf("Trying to send number 42...\n");
                     err = aos_rpc_send_number(aos_rpc_get_init_channel(), 42);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     printf("Successfully send number 42\n");
 
                 } else if (strcmp(buf, "send_str") == 0) {
                     char str[15] = "Hello RPC world";
                     printf("Trying to send a small string...\n");
                     err = aos_rpc_send_string(aos_rpc_get_init_channel(), str);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     printf("Successfully send string\n");
 
                 } else if (strcmp(buf, "send_large_str") == 0) {
                     printf("Trying to send a large string...\n");
                     err = aos_rpc_send_string(aos_rpc_get_init_channel(), large_str);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     printf("Successfully send large string\n");
 
                 } else if (strcmp(buf, "get_ram") == 0) {
@@ -101,19 +101,19 @@ int main(int argc, char *argv[])
                     printf("Trying to get a frame of size %lu...\n", size);
                     struct capref ram;
                     err = ram_alloc(&ram, size);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     printf("Successfully get the frame\n");
 
                     struct capref frame;
                     err = slot_alloc(&frame);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
 
                     void *addr;
                     err = cap_retype(frame, ram, 0, ObjType_Frame, size, 1);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     err = paging_map_frame_attr(get_current_paging_state(), &addr, size,
                                                 frame, VREGION_FLAGS_READ_WRITE);
-                    assert(err_is_ok(err));
+                    print_err_if_any(err);
                     printf("Mapped requested frame at %p\n", addr);
 
                     char *data = addr;
@@ -138,7 +138,11 @@ int main(int argc, char *argv[])
                     printf("The frame is write and readable...\n");
 
                 } else {
-                    printf("Unknown command: %s\n", buf);
+                    domainid_t pid = 0;
+//                    printf("Spawn %s...\n", buf);
+                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, 0, &pid);
+//                    printf("New pid is %u\n", pid);
+                    print_err_if_any(err);
                 }
                 break;  // prompt for the next command
 
@@ -149,6 +153,7 @@ int main(int argc, char *argv[])
                 }
             } else {
                 putchar(c);  // echo
+                fflush(stdout);
                 buf[offset] = c;
                 offset++;
                 if (offset == SHELL_BUF_SIZE) {

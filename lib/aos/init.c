@@ -274,7 +274,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         while (init_chan->connstate != LMP_CONNECTED) {
             err = event_dispatch(get_default_waitset());
             if (err_is_fail(err)) {
-                DEBUG_ERR(err, "in init event_dispatch loop");
+                DEBUG_ERR(err, "error in init event_dispatch loop");
                 return err_push(err, LIB_ERR_BIND_INIT_WAITING);
             }
         }
