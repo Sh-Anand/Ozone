@@ -265,6 +265,12 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
         init_rpc->type = TYPE_LMP;
         init_rpc->chan = init_chan;
+        struct capref init_rpc_slot;
+        err = slot_alloc(&init_rpc_slot);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        lmp_chan_set_recv_slot(init_rpc->chan, init_rpc_slot);
 
         /* set init RPC client in our program state */
         set_init_rpc(init_rpc);

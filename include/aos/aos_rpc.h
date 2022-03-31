@@ -33,6 +33,11 @@ struct aos_rpc_msg {
     void *buff;
 };
 
+struct aos_rpc_msg_ram {
+    size_t size;
+    size_t alignment;
+};
+
 /* An RPC binding, which may be transported over LMP or UMP. */
 struct aos_rpc {
     // TODO(M3): Add state

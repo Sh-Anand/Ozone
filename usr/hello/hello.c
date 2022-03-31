@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include <aos/aos.h>
+#include <aos/aos_rpc.h>
 #include <unistd.h>
 #include "aos/aos_rpc.h"
 
@@ -36,11 +37,18 @@ int main(int argc, char *argv[])
         printf("arg[%d]: %s\n", i, argv[i]);
     }
 
-    printf("Try to spawn hello using RPC...\n");
-    domainid_t pid;
-    errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
-    assert(err_is_ok(err));
-    printf("spawn new hello: %u\n", pid);
+    // printf("Try to spawn hello using RPC...\n");
+    // domainid_t pid;
+    // errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    // assert(err_is_ok(err));
+    // printf("spawn new hello: %u\n", pid);
+
+    struct capref ram = NULL_CAP;
+    size_t size = 0;
+    struct aos_rpc *init_chan = aos_rpc_get_process_channel();
+    printf("Got %p\n", init_chan);
+    aos_rpc_get_ram_cap(init_chan, 4096, 4096, &ram, &size);
+    printf("Got %ld /%ld)\n", size, get_cap_addr(ram));
 
     printf("Going to print INFINITELY...\n");
     while(1) {
