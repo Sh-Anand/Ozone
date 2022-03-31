@@ -81,10 +81,11 @@ static size_t syscall_terminal_write(const char *buf, size_t len)
 __attribute__((__used__))
 static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    
+    sys_print("aos_terminal_write called\n", 27);
 	size_t sent;
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+	assert(serial_rpc != NULL);
 	
 	// TODO: this is probably very inefficient, so maybe do this for whole strings instead
 	for (sent = 0; sent < len;) {

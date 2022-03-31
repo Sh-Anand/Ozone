@@ -208,6 +208,7 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
 	char data[2] = { 0, c };
 	
 	// we don't care about return values or capabilities, just send this single char (again, do better)
+	sys_print("aos_rpc_serial_putchar called!\n", 32);
 	errval_t err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, data, 2, NULL, NULL, NULL);
 	
     return err;
