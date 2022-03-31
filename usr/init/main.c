@@ -80,8 +80,20 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     //Protocol : words[0][2:0] has the type, words[1] has the size IFF it is an STR_MSG.
     switch(identifier) {
     case NUM_MSG:
+    {
+        int num = *(int *)buf;
+        debug_printf("Received number %d in Init\n", num);
+        char reply[2] = "OK";
+        return rpc_reply(rpc, NULL_CAP, reply, sizeof(reply));
+    }
         break;
     case STR_MSG:
+    {
+        char *msg = (char *)buf;
+        debug_printf("Received message in Init\n%s\n", msg);
+        char reply[2] = "OK";
+        return rpc_reply(rpc, NULL_CAP, reply, sizeof(reply));
+    }
         break;
     case RAM_MSG:
         break;
