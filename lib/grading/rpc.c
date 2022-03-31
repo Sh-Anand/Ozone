@@ -28,6 +28,7 @@ void grading_rpc_handler_ram_cap(size_t bytes, size_t alignment)
 
 void grading_rpc_handler_process_spawn(char* cmdline, coreid_t core)
 {
+    DEBUG_PRINTF("grading_rpc_handler_process_spawn: %s, %d\n", cmdline, core);
 }
 
 void grading_rpc_handler_process_get_name(domainid_t pid)

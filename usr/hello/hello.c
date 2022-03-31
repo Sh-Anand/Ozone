@@ -18,6 +18,7 @@
 
 #include <aos/aos.h>
 #include <unistd.h>
+#include "aos/aos_rpc.h"
 
 static void delay(int count) {
     volatile int a[3]= {0, 1};
@@ -34,6 +35,13 @@ int main(int argc, char *argv[])
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
     }
+
+    printf("Try to spawn hello using RPC...\n");
+    domainid_t pid;
+    errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    assert(err_is_ok(err));
+    printf("spawn new hello: %u\n", pid);
+
     printf("Going to print INFINITELY...\n");
     while(1) {
         printf("+");

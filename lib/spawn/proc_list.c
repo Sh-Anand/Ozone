@@ -92,6 +92,18 @@ errval_t proc_list_get_name(struct proc_list *ps, domainid_t pid, char **name)
     return SYS_ERR_OK;
 }
 
+errval_t proc_list_get_dispatcher(struct proc_list *ps, domainid_t pid, struct capref *dispatcher)
+{
+    struct proc_node *node;
+    errval_t err = find_node(ps, pid, &node);
+    if (err_is_fail(err)) {
+        return err_push(err, PROC_LIST_ERR_GET_NAME);
+    }
+    assert(node != NULL);
+    *dispatcher = node->dispatcher;
+    return SYS_ERR_OK;
+}
+
 errval_t proc_list_get_all_pids(struct proc_list *ps, domainid_t **pids, size_t *pid_count)
 {
     if (ps->running_count == 0) {

@@ -74,10 +74,11 @@ void __attribute__((noreturn)) messages_handler_loop(void);
 typedef void *CONST_CAST;
 
 enum msg_type {
+    RPC_ACK_MSG,
     NUM_MSG,
     STR_MSG,
     RAM_MSG,
-    SPAWN_MSG,
+    RPC_PROCESS_SPAWN_MSG,
     TERMINAL_MSG,
 }; // Maybe this can moved somewhere else?
 

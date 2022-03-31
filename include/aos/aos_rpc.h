@@ -40,6 +40,15 @@ struct aos_rpc {
     enum rpc_type type;
 };
 
+struct rpc_process_spawn_call_msg {
+    coreid_t core;
+    char cmdline[0];
+} __attribute__ ((packed));
+
+struct rpc_process_spawn_return_msg {
+    domainid_t pid;
+} __attribute__ ((packed));
+
 /**
  * \brief Initialize an aos_rpc struct.
  */

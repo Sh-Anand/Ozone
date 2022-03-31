@@ -32,7 +32,7 @@ static struct proc_list pl = {
     .pid_upper = PID_START,
     .running_count = 0,
 };
-#define PROC_ENDPOINT_BUF_LEN 128
+#define PROC_ENDPOINT_BUF_LEN 16
 
 // TODO: these address works?
 #define CHILD_DISPFRAME_VADDR (0x200000)
@@ -276,6 +276,7 @@ static void binding_handler(void *arg)
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to send");
     }
+    refill_ep_recv_slot();
     // No need to re-register
 }
 
@@ -734,4 +735,26 @@ errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_
 
 void spawn_set_rpc_handler(void (*handler)(void *)) {
     rpc_handler = handler;
+}
+
+errval_t spawn_kill(domainid_t pid) {
+    errval_t err;
+    struct capref dispatcher;
+    err = proc_list_get_dispatcher(&pl, pid, &dispatcher);
+    if (err_is_fail(err)) {
+        return err_push(err, PROC_MGMT_ERR_KILL);
+    }
+    err = invoke_dispatcher_stop(dispatcher);
+    if (err_is_fail(err)) {
+        return err_push(err, PROC_MGMT_ERR_KILL);
+    }
+    return SYS_ERR_OK;
+}
+
+errval_t spawn_get_name(domainid_t pid, char **name) {
+    return proc_list_get_name(&pl, pid, name);
+}
+
+errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count) {
+    return proc_list_get_all_pids(&pl, pids, pid_count);
 }

@@ -60,7 +60,7 @@ static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) 
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
     struct capref send_cap;
-    err = rpc_marshall(STR_MSG, cap, buf, size, words, &send_cap); 
+    err = rpc_marshall(RPC_ACK_MSG, cap, buf, size, words, &send_cap);
 
     if(err_is_fail(err))
         return err_push(err, LIB_ERR_MARSHALL_FAIL);
@@ -84,7 +84,6 @@ static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) 
 }
 
 //size is unreliable for non-fixed size messages.
-__attribute__((unused))
 static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct capref cap, void *buf, size_t size) {
     errval_t err;
     //we have a frame cap, map into our space and set buf to mapped address
@@ -104,7 +103,18 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         break;
     case RAM_MSG:
         break;
-    case SPAWN_MSG:
+    case RPC_PROCESS_SPAWN_MSG:
+    {
+        struct rpc_process_spawn_call_msg *msg = buf;
+        grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
+
+        struct spawninfo info;
+        domainid_t pid;
+        spawn_load_cmdline(msg->cmdline, &info, &pid);
+
+        struct rpc_process_spawn_return_msg reply = {.pid = pid};
+        return rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
+    }
         break;
     case TERMINAL_MSG:
 		{
@@ -124,6 +134,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
 			}
 		}
         break;
+    default:
+        DEBUG_PRINTF("Unexpected message identifier %d\n", identifier);
     }
 
     return SYS_ERR_OK;
@@ -132,6 +144,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
 //Register this function after spawning a process to register a receive handler to that child process
 static void rpc_recv_handler(void *arg)
 {
+
     struct lmp_chan *lc = arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
     struct capref cap;
@@ -151,7 +164,7 @@ static void rpc_recv_handler(void *arg)
     }
 
     char *buf = (char *) msg.words;
-    enum msg_type type;
+    enum msg_type type = 0;
     memcpy(&type, buf, MSG_TYPE_SIZE);
     buf += MSG_TYPE_SIZE;
     size_t size = msg.buf.msglen - MSG_TYPE_SIZE;
@@ -160,7 +173,7 @@ static void rpc_recv_handler(void *arg)
         memcpy(&size, buf, sizeof(size_t));
         buf += sizeof(size_t);
     }
-
+    DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
     err = handle_general_recv(arg, type, cap, (void *)buf, size);
 
     if(err_is_fail(err))
