@@ -30,22 +30,29 @@ static void delay(int count) {
 }
 
 int main(int argc, char *argv[])
-{
+{   
+    errval_t err;
     printf("Hello, world! from userspace, presented by AOS team 1\n");
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
     }
-    errval_t err;
-    printf("Try to spawn hello using RPC...\n");
-    domainid_t pid;
-    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
-    assert(err_is_ok(err));
-    printf("spawn new hello: %u\n", pid);
+
+    // printf("Try to spawn hello using RPC...\n");
+    // domainid_t pid;
+    // err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
+    // assert(err_is_ok(err));
+    // printf("spawn new hello: %u\n", pid);
 
     printf("Trying to send number 42\n");
     err = aos_rpc_send_number(aos_rpc_get_init_channel(), 42);
     assert(err_is_ok(err));
     printf("succesfully send number 42\n");
+
+    char str[15] = "hello RPC world";
+    printf("Trying to send string\n");
+    err = aos_rpc_send_string(aos_rpc_get_init_channel(), str);
+    assert(err_is_ok(err));
+    printf("succesfully sent string\n");
 
     printf("Going to print INFINITELY...\n");
     while(1) {

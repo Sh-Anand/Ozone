@@ -379,6 +379,7 @@ errors libaos LIB_ERR_ {
 
     //RPC
     failure RPC_SEND_NUM        "Failure in sending a number",
+    failure RPC_SEND_STR        "Failure in sending a string",
 
     // Binding to init
     failure BIND_INIT_ACCEPT        "Failure accepting init ep for init binding",
