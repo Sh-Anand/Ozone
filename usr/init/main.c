@@ -94,7 +94,8 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     //we have a frame cap, map into our space and set buf to mapped address
     if(!capref_is_null(cap)) {
         void *buffer;
-        err = paging_map_frame(get_current_paging_state(), &buffer, size, cap);
+        DEBUG_PRINTF("Trying to map received frame in local space\n");
+        err = paging_map_frame(get_current_paging_state(), &buffer, ROUND_UP(size, BASE_PAGE_SIZE), cap);
         if(err_is_fail(err))
             return err_push(err, LIB_ERR_PAGING_MAP);
         buf = buffer;
@@ -136,11 +137,51 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
         struct spawninfo info;
         domainid_t pid;
         spawn_load_cmdline(msg->cmdline, &info, &pid);
+        // TODO: reply err
 
         struct rpc_process_spawn_return_msg reply = {.pid = pid};
         return rpc_reply(rpc, NULL_CAP, &reply, sizeof(reply));
     }
-        break;
+    case RPC_PROCESS_GET_NAME_MSG:
+    {
+        struct rpc_process_get_name_call_msg *msg = buf;
+        grading_rpc_handler_process_get_name(msg->pid);
+
+        char *name = NULL;
+        spawn_get_name(msg->pid, &name);
+        // TODO: reply err
+
+        // XXX: bypass rpc_process_get_name_return_msg
+        err = rpc_reply(rpc, NULL_CAP, name, strlen(name) + 1);
+
+        free(name);
+        return err;
+    }
+
+    case RPC_PROCESS_GET_ALL_PIDS_MSG: {
+        grading_rpc_handler_process_get_all_pids();
+        
+        size_t count;
+        domainid_t *pids;
+        err = spawn_get_all_pids(&pids, &count);
+
+        assert(err_is_ok(err));
+
+        size_t reply_size = sizeof(struct rpc_process_get_all_pids_return_msg)
+                            + count * sizeof(domainid_t);
+        struct rpc_process_get_all_pids_return_msg *reply = malloc(reply_size);
+        if (reply == NULL) {
+            return LIB_ERR_MALLOC_FAIL;
+        }
+        
+        reply->count = count;
+        memcpy(reply->pids, pids, count * sizeof(domainid_t));
+        free(pids);
+        err = rpc_reply(rpc, NULL_CAP, reply, reply_size);
+        
+        free(reply);
+        return err;
+    }
     case TERMINAL_MSG:
 		{
 			// don't care about capabilities for now

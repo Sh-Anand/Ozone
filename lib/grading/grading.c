@@ -149,10 +149,15 @@ grading_test_late(void) {
     domainid_t pid = -1;
     errval_t err;
 
-    DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
-    err = spawn_load_by_name("hello", &info[0], &pid);
-    assert(err_is_ok(err));
-    assert(pid != -1);
+   DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
+   err = spawn_load_by_name("hello", &info[0], &pid);
+   assert(err_is_ok(err));
+   assert(pid != -1);
+
+    // DEBUG_PRINTF("Run spawnTester 5...\n");
+    // err = spawn_load_cmdline("spawnTester 5", &info[0], &pid);
+    // assert(err_is_ok(err));
+    // assert(pid != -1);
 
     delay(200000000);
 
@@ -160,7 +165,7 @@ grading_test_late(void) {
 //    err = invoke_dispatcher_stop(info[0].dispatcher_cap_in_parent);
 //    assert(err_is_ok(err));
 
-    delay(20000000);
+//    delay(20000000);
 
 //    DEBUG_PRINTF("Print proc list...\n");
 //    proc_list_enum(&list, print_proc);

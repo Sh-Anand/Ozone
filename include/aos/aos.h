@@ -79,6 +79,8 @@ enum msg_type {
     STR_MSG,
     RAM_MSG,
     RPC_PROCESS_SPAWN_MSG,
+    RPC_PROCESS_GET_NAME_MSG,
+    RPC_PROCESS_GET_ALL_PIDS_MSG,
     TERMINAL_MSG,
 }; // Maybe this can moved somewhere else?
 

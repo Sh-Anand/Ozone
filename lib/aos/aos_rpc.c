@@ -31,6 +31,8 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
     buffer++;
     size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
 
+    size_t rounded_size = ROUND_UP(size, BASE_PAGE_SIZE);
+
     // encode size if string message
     if (identifier == STR_MSG) {
         memcpy(buffer, &size, sizeof(size_t));
@@ -46,12 +48,14 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
         DEBUG_PRINTF("rpc_marshall: alloc frame\n")
 
         struct capref frame_cap;
-        err = frame_alloc(&frame_cap, size, NULL);
+        err = frame_alloc(&frame_cap, rounded_size, NULL);
         if (err_is_fail(err))
             err_push(err, LIB_ERR_FRAME_ALLOC);
         void *addr;
+        DEBUG_PRINTF("rpc_marshall: alloc frame success!\n")
         err = paging_map_frame(get_current_paging_state(), &addr,
-                               ROUND_UP(size, BASE_PAGE_SIZE), frame_cap);
+                               rounded_size, frame_cap);
+        DEBUG_PRINTF("rpc_marshall: frame map success!\n")
         if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
         }
@@ -71,6 +75,9 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
  * @param cap
  * @param buf
  * @param size
+ * @param ret_cap
+ * @param ret_buf     Should be freed outside.
+ * @param ret_size
  * @return
  * @note For M3, only sending ONE LMP message is supported. That is, size should be at
  *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
@@ -146,8 +153,8 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
     }
 
     if (ret_buf) {
-        void *res_buf = malloc(msg.buf.msglen - 1);
-        memcpy(res_buf, ((char *)msg.words + 1), msg.buf.msglen);
+        void *res_buf = malloc((msg.buf.msglen * sizeof(uintptr_t)) - 1);
+        memcpy(res_buf, ((char *)msg.words + 1), msg.buf.msglen * sizeof(uintptr_t));
         *ret_buf = res_buf;
     }
 
@@ -160,17 +167,19 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
 
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 {
-    errval_t err = aos_rpc_send_general(rpc, NUM_MSG, NULL_CAP, &num, sizeof(num), NULL, NULL, NULL);
-    if(err_is_fail(err))
+    errval_t err = aos_rpc_send_general(rpc, NUM_MSG, NULL_CAP, &num, sizeof(num), NULL,
+                                        NULL, NULL);
+    if (err_is_fail(err))
         return err_push(err, LIB_ERR_RPC_SEND_NUM);
-    
+
     return SYS_ERR_OK;
 }
 
 errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 {
-    errval_t err = aos_rpc_send_general(rpc, STR_MSG, NULL_CAP, (void *)string, strlen(string), NULL, NULL, NULL);
-    if(err_is_fail(err))
+    errval_t err = aos_rpc_send_general(rpc, STR_MSG, NULL_CAP, (void *)string,
+                                        strlen(string), NULL, NULL, NULL);
+    if (err_is_fail(err))
         return err_push(err, LIB_ERR_RPC_SEND_STR);
 
     return SYS_ERR_OK;
@@ -254,7 +263,6 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
     strcpy(call_msg->cmdline, cmdline);
 
     struct rpc_process_spawn_return_msg *return_msg = NULL;
-    DEBUG_PRINTF("aos_rpc_send_general\n");
     errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_SPAWN_MSG, NULL_CAP, call_msg,
                                         call_msg_size, NULL, (void **)&return_msg, NULL);
     if (err_is_ok(err)) {
@@ -269,16 +277,37 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
 
 errval_t aos_rpc_process_get_name(struct aos_rpc *rpc, domainid_t pid, char **name)
 {
-    // TODO (M5): implement name lookup for process given a process id
-    return SYS_ERR_OK;
+    struct rpc_process_get_name_call_msg call_msg = {.pid = pid};
+    struct rpc_process_get_name_return_msg *return_msg = NULL;
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME_MSG, NULL_CAP, &call_msg,
+                                        sizeof(call_msg), NULL, (void **)&return_msg, NULL);
+    if (err_is_ok(err)) {
+        *name = strdup(return_msg->name);
+    }  // on failure, fall through
+
+    free(return_msg);
+    return err;
 }
 
 
 errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
                                       size_t *pid_count)
 {
-    // TODO (M5): implement process id discovery
-    return SYS_ERR_OK;
+    struct rpc_process_get_all_pids_return_msg *return_msg = NULL;
+    size_t return_size = 0;
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_ALL_PIDS_MSG, NULL_CAP, NULL,
+                                        0, NULL, (void **)&return_msg, &return_size);
+    if (err_is_ok(err)) {
+        *pid_count = return_msg->count;
+        *pids = malloc(return_msg->count * sizeof(domainid_t));
+        if (*pids == NULL) {
+            return LIB_ERR_MALLOC_FAIL;
+        }
+        memcpy(*pids, return_msg->pids, return_msg->count * sizeof(domainid_t));
+    }  // on failure, fall through
+
+    free(return_msg);
+    return err;
 }
 
 

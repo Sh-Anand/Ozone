@@ -54,6 +54,19 @@ struct rpc_process_spawn_return_msg {
     domainid_t pid;
 } __attribute__ ((packed));
 
+struct rpc_process_get_name_call_msg {
+    domainid_t pid;
+} __attribute__ ((packed));
+
+struct rpc_process_get_name_return_msg {
+    char name[0];
+} __attribute__ ((packed));
+
+struct rpc_process_get_all_pids_return_msg {
+    uint32_t count;
+    domainid_t pids[0];
+} __attribute__ ((packed));
+
 /**
  * \brief Initialize an aos_rpc struct.
  */

@@ -114,6 +114,9 @@ errval_t proc_list_get_all_pids(struct proc_list *ps, domainid_t **pids, size_t 
     }
 
     domainid_t *ret = malloc(sizeof(domainid_t) * ps->running_count);
+    if (ret == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
     size_t i = 0;
     struct proc_node *node;
     LIST_FOREACH(node, &ps->running, link)
