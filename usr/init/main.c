@@ -32,6 +32,29 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 
+/**
+ * @brief TODO: make use of this function
+ * 
+ * @param str 
+ * @param length 
+ */
+__attribute__((__unused__))
+static errval_t handle_terminal_print(const char* str, size_t length)
+{
+	// TODO: this should be moved to the serial driver when it is written
+	errval_t err = sys_print(str, length);
+	
+	if (err_is_fail(err)) {
+		USER_PANIC_ERR(err, "unable to print to terminal!");
+		return err;
+	}
+	
+	return SYS_ERR_OK;
+}
+
+
+
+__attribute__((unused))
 static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) {
     struct lmp_chan *lc = rpc;
     errval_t err;
@@ -119,6 +142,24 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier, struct 
     }
         break;
     case TERMINAL_MSG:
+		{
+			// don't care about capabilities for now
+			char *info;
+			info = buf;
+			if (info[0] == 0) { // putchar
+				// no response necessary here
+				err = sys_print(info+1, 1); // print a single char
+				// TODO: handle errors
+				return rpc_reply(rpc, NULL_CAP, NULL, 0);
+			} else if (info[0] == 1) { // getchar
+				char c;
+				err = sys_getchar(&c + 1);
+				// TODO: handle error
+				
+				info[1] = c; // set the response value
+				return rpc_reply(rpc, NULL_CAP, info, 2); // return the requested character
+			}
+		}
         break;
     default:
         DEBUG_PRINTF("Unexpected message identifier %d\n", identifier);
@@ -159,7 +200,7 @@ static void rpc_recv_handler(void *arg)
         memcpy(&size, buf, sizeof(size_t));
         buf += sizeof(size_t);
     }
-    DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
+    //DEBUG_PRINTF("rpc_recv_handler: type = %d\n", type);
     err = handle_general_recv(arg, type, cap, (void *)buf, size);
 
     if(err_is_fail(err))
