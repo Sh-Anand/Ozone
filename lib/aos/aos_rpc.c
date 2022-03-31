@@ -42,7 +42,7 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
         memcpy(buffer, buf, size);
     } else {
         // buffer doesn't fit, make and map frame cap
-        DEBUG_PRINTF("rpc_marshall: alloc frame")
+        DEBUG_PRINTF("rpc_marshall: alloc frame\n")
 
         struct capref frame_cap;
         err = frame_alloc(&frame_cap, size, NULL);
@@ -51,8 +51,9 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
         void *addr;
         err = paging_map_frame(get_current_paging_state(), &addr,
                                ROUND_UP(size, BASE_PAGE_SIZE), frame_cap);
-        if (err_is_fail(err))
+        if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
+        }
         memcpy(addr, buf, size);
         cap = frame_cap;
     }
@@ -73,10 +74,10 @@ errval_t rpc_marshall(enum msg_type identifier, struct capref cap_ref, void *buf
  * @note For M3, only sending ONE LMP message is supported. That is, size should be at
  *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
  */
-static errval_t
-aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capref cap,
-                     void *buf, size_t size, struct capref *ret_cap, void **ret_buf,
-                     size_t *ret_size)
+static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier,
+                                     struct capref cap, void *buf, size_t size,
+                                     struct capref *ret_cap, void **ret_buf,
+                                     size_t *ret_size)
 {
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
@@ -85,18 +86,27 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
     // marshall arguments into buffer/frame
     err = rpc_marshall(identifier, cap, buf, size, words, &send_cap);
 
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_MARSHALL_FAIL);
+    }
 
     // send or die
     while (true) {
         err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, send_cap, words[0],
                              words[1], words[2], words[3]);
 
-        if (lmp_err_is_transient(err))
-            thread_yield(); //TODO : Does this really do what I think it does? (yields thread so another dispatcher can run immediately instead of busy waiting) there are dangers to this though, we may starve
-        else
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                thread_yield();  // TODO : Does this really do what I think it does?
+                                 // (yields thread so another dispatcher can run
+                                 // immediately instead of busy waiting) there are dangers
+                                 // to this though, we may starve
+            } else {
+                return err;
+            }
+        } else {
             break;
+        }
     }
 
     if (err_is_fail(err)) {
@@ -109,17 +119,23 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
     struct capref recv_cap;
     while (true) {
         err = lmp_chan_recv(rpc->chan, &msg, &recv_cap);
-        if(err_is_fail(err))
-            thread_yield(); //TODO verify if this works
-        else
+        if (err_is_fail(err)) {
+            if (err == LIB_ERR_NO_LMP_MSG) {
+                thread_yield();  // TODO verify if this works
+            } else {
+                return err;
+            }
+        } else {
             break;
+        }
     }
 
     if (!capref_is_null(recv_cap)) {
         if (ret_cap) {
             *ret_cap = recv_cap;
         } else {
-            DEBUG_PRINTF("warning: aos_rpc_send_general received a cap which is given up\n");
+            DEBUG_PRINTF("warning: aos_rpc_send_general received a cap which is given "
+                         "up\n");
         }
         err = slot_alloc(&recv_cap);
         if (err_is_fail(err)) {
@@ -130,11 +146,13 @@ aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifier, struct capre
 
     if (ret_buf) {
         void *res_buf = malloc(msg.buf.msglen - 1);
-        memcpy(res_buf, ((char *) msg.words + 1), msg.buf.msglen);
+        memcpy(res_buf, ((char *)msg.words + 1), msg.buf.msglen);
         *ret_buf = res_buf;
     }
 
-    if (ret_size) *ret_size = msg.buf.msglen;
+    if (ret_size) {
+        *ret_size = msg.buf.msglen;
+    }
 
     return SYS_ERR_OK;
 }
@@ -193,12 +211,14 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
     struct rpc_process_spawn_call_msg *call_msg = calloc(call_msg_size, 1);
     call_msg->core = core;
     strcpy(call_msg->cmdline, cmdline);
-    
+
     struct rpc_process_spawn_return_msg *return_msg = NULL;
     DEBUG_PRINTF("aos_rpc_send_general\n");
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_SPAWN_MSG, NULL_CAP, call_msg, call_msg_size, NULL, (void **) &return_msg, NULL);
-
-    *newpid = return_msg->pid;
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_SPAWN_MSG, NULL_CAP, call_msg,
+                                        call_msg_size, NULL, (void **)&return_msg, NULL);
+    if (err_is_ok(err)) {
+        *newpid = return_msg->pid;
+    }  // on failure, fall through
 
     free(call_msg);
     free(return_msg);

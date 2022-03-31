@@ -39,7 +39,9 @@ int main(int argc, char *argv[])
     printf("Try to spawn hello using RPC...\n");
     domainid_t pid;
     errval_t err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), "hello", 0, &pid);
-    assert(err_is_ok(err));
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "failed to aos_rpc_process_spawn");
+    }
     printf("spawn new hello: %u\n", pid);
 
     printf("Going to print INFINITELY...\n");

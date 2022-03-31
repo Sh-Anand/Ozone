@@ -46,10 +46,15 @@ static errval_t rpc_reply(void *rpc, struct capref cap, void *buf, size_t size) 
     while(true) {
         err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1], words[2], words[3]);
 
-        if(lmp_err_is_transient(err))
-            thread_yield(); //TODO : ensure validity
-        else
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                thread_yield();  // TODO verify if this works
+            } else {
+                return err;
+            }
+        } else {
             break;
+        }
     }
 
     if(err_is_fail(err)) {
