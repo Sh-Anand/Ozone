@@ -131,17 +131,19 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
     } break;
     case STR_MSG: {
         char *msg = (char *)buf;
+        grading_rpc_handler_string(msg);
         debug_printf("Received string in init: \"%s\"\n", msg);
         rpc_reply(rpc, NULL_CAP, NULL, 0);
     } break;
     case RAM_MSG: {
-            struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram *)buf;
-            struct capref ram;
-            err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
-            if (err_is_fail(err)) {
-                return err;
-            }
-            rpc_reply(rpc, ram, NULL, 0);
+        struct aos_rpc_msg_ram ram_msg = *(struct aos_rpc_msg_ram *)buf;
+        struct capref ram;
+        grading_rpc_handler_ram_cap(ram_msg.size, ram_msg.alignment);
+        err = aos_ram_alloc_aligned(&ram, ram_msg.size, ram_msg.alignment);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        rpc_reply(rpc, ram, NULL, 0);
     } break;
     case RPC_PROCESS_SPAWN_MSG: {
         struct rpc_process_spawn_call_msg *msg = buf;
@@ -199,6 +201,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
         // don't care about capabilities for now
         char *info = buf;
         if (info[0] == 0) {  // putchar
+            grading_rpc_handler_serial_putchar(info[1]);
             // no response necessary here
             err = sys_print(info + 1, 1);  // print a single char
             if (err_is_fail(err)) {
@@ -207,6 +210,7 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
             rpc_reply(rpc, NULL_CAP, NULL, 0);
         } else if (info[0] == 1) {  // getchar
             char c;
+            grading_rpc_handler_serial_getchar();
             err = sys_getchar(&c);
             if (err_is_fail(err)) {
                 return err;
