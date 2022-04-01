@@ -35,8 +35,8 @@ static struct proc_list pl = {
 #define PROC_ENDPOINT_BUF_LEN 16
 
 // TODO: these address works?
-#define CHILD_DISPFRAME_VADDR (0x200000)
-#define CHILD_ARGFRAME_VADDR (0x200000 + DISPATCHER_FRAME_SIZE)
+#define CHILD_DISPFRAME_VADDR (0x20000000)
+#define CHILD_ARGFRAME_VADDR (CHILD_DISPFRAME_VADDR + DISPATCHER_FRAME_SIZE)
 
 /**
  * \brief Set the base address of the .got (Global Offset Table) section of the ELF binary
