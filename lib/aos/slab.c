@@ -18,7 +18,6 @@
 #include <aos/aos.h>
 #include <aos/slab.h>
 #include <aos/static_assert.h>
-#include <aos/core_state.h>
 
 struct block_head {
     struct block_head *next;///< Pointer to next block in free list
@@ -180,31 +179,30 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-    bytes = (bytes + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
-	
-	static lvaddr_t address = 64UL << 39;
+    // Hint: you can't just use malloc here...
+    // Hint: For M1, just use the fixed mapping funcionality, however you may want to replace
+    //       the fixed mapping later to avoid conflicts.
 
+    errval_t err;
+    size_t size = ROUND_UP(bytes, BASE_PAGE_SIZE);
+
+    void *current_refill_vaddr;
+
+    // Allocate frame
     struct capref frame;
-    size_t frame_bytes;
-
-    errval_t err = frame_alloc(&frame, bytes, &frame_bytes);
+    err = frame_alloc(&frame, size, NULL);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to snip part of capability\n");
-        return err_push(err, MM_ERR_CHUNK_NODE);
-    }
-	
-	//lvaddr_t ra;
-    lvaddr_t maddr = address;
-	address += frame_bytes + BASE_PAGE_SIZE;
-
-    //err = paging_map_frame_attr(get_current_paging_state(), (void**)&ra, frame_bytes, frame, VREGION_FLAGS_READ_WRITE);
-    err = paging_map_fixed_attr(get_current_paging_state(), maddr, frame, frame_bytes, VREGION_FLAGS_READ_WRITE);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to snip part of capability\n");
-        return err_push(err, MM_ERR_CHUNK_NODE);
+        return err;
     }
 
-    slab_grow(slabs, (void *)maddr, frame_bytes);
+    // Map the frame
+    err = paging_map_frame_attr(get_current_paging_state(), &current_refill_vaddr, size, frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Grow the slabs
+    slab_grow(slabs, (void *) current_refill_vaddr, size);
 
     return SYS_ERR_OK;
 }
@@ -226,9 +224,11 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
 {
     // Refill the slot allocator without causing a page fault
     // Hint: you can't just use malloc here...
-    //return LIB_ERR_NOT_IMPLEMENTED;
-	
-	return slab_refill_pages(slabs, minbytes); // XXX: this not gud
+
+    // TODO: for M1, this is sufficient?
+    return slab_refill_pages(slabs, BASE_PAGE_SIZE);
+
+    return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 /**
