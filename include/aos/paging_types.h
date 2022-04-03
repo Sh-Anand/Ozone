@@ -39,21 +39,21 @@
 typedef int paging_flags_t;
 
 
-struct vnode_cap_node {
+struct paging_node {
    size_t index;
    size_t count;
-   struct capref cap;
+   struct capref vnode_cap;  // NULL_CAP for placeholder
    // XXX: for now the mapping cap is not tracked
    size_t max_continuous_count;  // largest continuous region, 0 and empty children means invalid
-   LIST_HEAD(, vnode_cap_node) children;
-   LIST_ENTRY(vnode_cap_node) link;
+   LIST_HEAD(, paging_node) children;
+   LIST_ENTRY(paging_node) link;
 };
 
 // struct to store the paging status of a process
 struct paging_state {
    struct slot_allocator *slot_alloc;
    struct slab_allocator slabs;
-   struct vnode_cap_node *l0;
+   struct paging_node *l0;
    bool refilling;
 };
 

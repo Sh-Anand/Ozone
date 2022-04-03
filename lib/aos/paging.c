@@ -73,17 +73,18 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state *st,
     return pt_alloc(st, ObjType_VNode_AARCH64_l3, ret);
 }
 
-// cap is not initialized
+// Create a node. cap is initialized to NULL_CAP. link is not initialized
 static errval_t create_node(struct paging_state *st, size_t index, size_t count,
-                            struct vnode_cap_node **ret)
+                            struct paging_node **ret)
 {
-    struct vnode_cap_node *n = slab_alloc(&st->slabs);
+    struct paging_node *n = slab_alloc(&st->slabs);
     if (n == NULL) {
-        return MM_ERR_NEW_NODE;  // FIXME: change to paging error
+        return LIB_ERR_SLAB_ALLOC_FAIL;
     }
     n->index = index;
     n->count = count;
     n->max_continuous_count = VMSAv8_64_PTABLE_NUM_ENTRIES;
+    n->vnode_cap = NULL_CAP;
     LIST_INIT(&n->children);
     *ret = n;
     return SYS_ERR_OK;
@@ -115,19 +116,18 @@ static errval_t apply_mapping(struct paging_state *st, struct capref dest,
 }
 
 // Not inserted into parent
-static errval_t upgrade_node_to_page_table(struct paging_state *st,
-                                           struct vnode_cap_node *n, enum objtype type,
-                                           struct capref parent_cap)
+static errval_t upgrade_node_to_page_table(struct paging_state *st, struct paging_node *n,
+                                           enum objtype type, struct capref parent_cap)
 {
     assert(n != NULL);
     assert(n->count == 1);
 
     errval_t err;
-    err = pt_alloc(st, type, &n->cap);
+    err = pt_alloc(st, type, &n->vnode_cap);
     if (err_is_fail(err)) {
         return err;
     }
-    err = apply_mapping(st, parent_cap, n->cap, n->index,
+    err = apply_mapping(st, parent_cap, n->vnode_cap, n->index,
                         KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1);
     if (err_is_fail(err)) {
         return err;
@@ -160,7 +160,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     st->slot_alloc = ca;
 
-    slab_init(&st->slabs, sizeof(struct vnode_cap_node), slab_default_refill);
+    slab_init(&st->slabs, sizeof(struct paging_node), slab_default_refill);
 
     if (!slab_buf_used) {
         // Paging is not setup yet so refill is not available
@@ -174,12 +174,12 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     if (err_is_fail(err)) {
         return err;
     }
-    st->l0->cap = pdir;
+    st->l0->vnode_cap = pdir;
     st->refilling = false;
 
     // TODO: for now just handle the only case of skipping first L1
     if (start_vaddr == VMSAv8_64_L0_SIZE) {
-        struct vnode_cap_node *first_l1;
+        struct paging_node *first_l1;
         err = create_node(st, 0, 1, &first_l1);
         if (err_is_fail(err)) {
             return err;
@@ -259,26 +259,30 @@ errval_t paging_init_onthread(struct thread *t)
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
-static void update_max_continuous_count(struct vnode_cap_node *node)
+static void update_max_continuous_count(struct paging_node *node)
 {
     if (LIST_EMPTY(&node->children)) {
         node->max_continuous_count = VMSAv8_64_PTABLE_NUM_ENTRIES;
     } else {
-        struct vnode_cap_node *n;
-        LIST_FOREACH(n, &node->children, link)
-        {
-            size_t next_index = (LIST_NEXT(n, link) == NULL ? VMSAv8_64_PTABLE_NUM_ENTRIES
-                                                            : LIST_NEXT(n, link)->index);
-            assert(next_index >= n->index + n->count && "paging: linked list not sorted");
-            size_t empty_region = next_index - (n->index + n->count);
-            if (empty_region > node->max_continuous_count) {
-                node->max_continuous_count = empty_region;
+        node->max_continuous_count = 0;
+        struct paging_node *n = NULL;
+        do {
+            struct paging_node *next_n = (n ? LIST_NEXT(n, link)
+                                            : LIST_FIRST(&node->children));
+            size_t region_start = (n ? n->index + n->count : 0);
+            size_t region_end = (next_n ? next_n->index : VMSAv8_64_PTABLE_NUM_ENTRIES);
+            assert(region_end >= region_start && "paging: linked list not sorted");
+            size_t region_size = region_end - region_start;
+            if (region_size > node->max_continuous_count) {
+                node->max_continuous_count = region_size;
             }
-        }
+
+            n = next_n;
+        } while (n != NULL);
     }
 }
 
-static size_t get_child_index(lvaddr_t vaddr, size_t level)
+static inline size_t get_child_index(lvaddr_t vaddr, size_t level)
 {
     switch (level) {
     case 0:
@@ -303,7 +307,7 @@ static errval_t ensure_enough_slabs(struct paging_state *st)
         if (err_is_fail(err)) {
             return err;
         } else if (slab_freecount(&st->slabs) < SLAB_REFILL_THRESHOLD) {
-            return MM_ERR_SLOT_NOSLOTS;  // XXX: change to proper error
+            return LIB_ERR_SLAB_REFILL;
         }
         st->refilling = false;
         // DEBUG_PRINTF("paging: refill slabs done\n");
@@ -311,18 +315,215 @@ static errval_t ensure_enough_slabs(struct paging_state *st)
     return SYS_ERR_OK;
 }
 
+// An invalid node (such as placeholder to enforce start address)
+static inline bool is_invalid_node(const struct paging_node *node)
+{
+    return node->max_continuous_count == 0 && LIST_EMPTY(&node->children);
+}
+
+// A placeholder node (such as placeholder to enforce start address)
+static inline bool is_placeholder_node(const struct paging_node *node)
+{
+    return !is_invalid_node(node) && capref_is_null(node->vnode_cap);
+}
+
+static inline void decode_indices(size_t level, lvaddr_t rvaddr, size_t bytes,
+                                  size_t *ret_inclusive_start, size_t *ret_exclusive_end,
+                                  size_t *ret_count)
+{
+    const size_t CHILD_SIZE = CHILD_BLOCK_SIZE[level];
+
+    size_t child_start_index = get_child_index(rvaddr, level);  // inclusive
+    size_t child_end_index = get_child_index(ROUND_UP(rvaddr + bytes, CHILD_SIZE),
+                                             level);  // exclusive
+    if (child_end_index == 0) {                       // wrap around
+        child_end_index = 512;
+    }
+
+    assert(child_end_index > child_start_index);
+    assert(child_start_index < 512);
+    assert(child_end_index <= 512);
+    assert((child_end_index - child_start_index) * CHILD_SIZE >= bytes);
+
+    *ret_inclusive_start = child_start_index;
+    *ret_exclusive_end = child_end_index;
+    *ret_count = child_end_index - child_start_index;
+}
+
+/**
+ * Chop down a node.
+ * @param st
+ * @param n                 The node to be chopped down.
+ * @param child_start_index Inclusive.
+ * @param child_end_index   Exclusive.
+ * @param chop_down_to_one  If true, chop down to size of 1.
+ * @param ret_start         Fill with the resulting start node in the linked list
+ * @note Refill can happen inside this function. But it's guaranteed that all space
+ *       occupied by the original node is still occupied at any refill.
+ * @return
+ */
+static inline errval_t chop_down_node(struct paging_state *st, struct paging_node *n,
+                                      size_t child_start_index, size_t child_end_index,
+                                      bool chop_down_to_one,
+                                      struct paging_node **ret_start)
+{
+    assert(n != NULL);
+    assert(child_start_index <= child_end_index);
+    assert(n->index <= child_start_index);
+    assert(n->count > 0);
+    assert(n->index + n->count >= child_end_index);
+
+    errval_t err;
+
+    // Chop the part before away
+    if (n->index < child_start_index) {
+        struct paging_node *node_before;
+        err = create_node(st, n->index, child_start_index - n->index, &node_before);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        n->index += node_before->count;
+        n->count -= node_before->count;
+        LIST_INSERT_BEFORE(n, node_before, link);
+    }
+    assert(n->index == child_start_index);
+
+    // Chop the part after away
+    if (n->index + n->count > child_end_index) {
+        struct paging_node *node_after;
+        err = create_node(st, child_end_index, n->index + n->count - child_end_index,
+                          &node_after);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        n->count -= node_after->count;
+        LIST_INSERT_AFTER(n, node_after, link);
+    }
+    assert(n->index + n->count == child_end_index);
+
+    if (chop_down_to_one && n->count > 1) {
+        for (int i = (int)child_end_index - 1; i > (int)child_start_index; i--) {
+            struct paging_node *node_after;
+            err = create_node(st, i, 1, &node_after);
+            if (err_is_fail(err)) {
+                return err;
+            }
+            n->count--;
+            LIST_INSERT_AFTER(n, node_after, link);
+        }
+        assert(n->count == 1);  // for the last iteration
+    }
+
+    assert(n->index == child_start_index);
+    *ret_start = n;
+    return SYS_ERR_OK;
+}
+
+/**
+ * Create a node (chopped down to size one upon request, insert it to the linked list, and
+ * update max_continuous_count upon request.
+ * @param st
+ * @param index
+ * @param count
+ * @param node
+ * @param insert_after  If null, insert to head of node->children
+ * @param ret_node
+ * @param should_update_max_continuous_count
+ * @param chop_down_to_one
+ * @note Refill can happen inside this function. Before calling this function, the caller
+ *       must guarantee that one slab can be allocated without triggering refill. And
+ *       then this function guarantees that no refill can comes to the created region.
+ * @return
+ */
+static inline errval_t create_node_and_insert(struct paging_state *st, size_t index,
+                                              size_t count, struct paging_node *node,
+                                              struct paging_node *insert_after,
+                                              struct paging_node **ret_node,
+                                              bool should_update_max_continuous_count,
+                                              bool chop_down_to_one)
+{
+    struct paging_node *new_node;
+
+    // Create a placeholder node to ensure refill doesn't come to this region
+
+    // This should never trigger a refill since ensure_enough_slabs() is expected
+    // before every call in this function
+    errval_t err = create_node(st, index, count, &new_node);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    if (insert_after == NULL) {
+        LIST_INSERT_HEAD(&node->children, new_node, link);
+    } else {
+        LIST_INSERT_AFTER(insert_after, new_node, link);  // ensure ordering
+    }
+    if (should_update_max_continuous_count) {
+        update_max_continuous_count(node);
+    }
+
+    // ======== Any refill starting from this point should be OK ========
+
+    if (chop_down_to_one && new_node->count > 1) {
+        err = chop_down_node(st, new_node, index, index + count, true, &new_node);
+        if (err_is_fail(err)) {
+            return err;
+        }
+    }
+
+    *ret_node = new_node;
+    return SYS_ERR_OK;
+}
+
+static inline bool unit_placeholders_matched(const struct paging_node *n,
+                                             size_t child_start, size_t child_end)
+{
+    for (size_t i = child_start; i < child_end; i++) {
+        if (n == NULL || n->index != i || !is_placeholder_node(n)) {
+            return false;
+        }
+        assert(n->count == 1);
+        n = LIST_NEXT(n, link);
+    }
+    return true;
+}
+
+static inline bool bulk_placeholder_matched(const struct paging_node *n,
+                                            size_t child_start, size_t child_end)
+{
+    return n->index <= child_start && n->index + n->count >= child_end
+           && is_placeholder_node(n);
+}
+
+#ifndef min
+#    define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef max
+#    define max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 // Forward declaration
-static errval_t _map_recursive(struct paging_state *st, struct vnode_cap_node *node,
+static errval_t _map_recursive(struct paging_state *st, struct paging_node *node,
                                size_t level, lvaddr_t rvaddr, struct capref frame,
                                size_t offset, size_t bytes, uint64_t attr,
                                lvaddr_t *out_rvaddr);
 
 // Wrapper function for _map_recursive to ensure refilling
-static inline errval_t map_recursive(struct paging_state *st, struct vnode_cap_node *node,
+static inline errval_t map_recursive(struct paging_state *st, struct paging_node *node,
                                      size_t level, lvaddr_t rvaddr, struct capref frame,
                                      size_t offset, size_t bytes, uint64_t attr,
                                      lvaddr_t *out_rvaddr)
 {
+    assert(st->l0 != NULL);
+
+    if (rvaddr >= VMSAv8_64_L0_SIZE * VMSAv8_64_PTABLE_NUM_ENTRIES /* plus can overflow */
+        || rvaddr + bytes >= VMSAv8_64_L0_SIZE * VMSAv8_64_PTABLE_NUM_ENTRIES) {
+        // Map into kernel address space
+        return MM_ERR_NOT_FOUND;
+    }
+    if (bytes == 0) {
+        return SYS_ERR_OK;
+    }
+
     // Must call ensure_enough_slabs before recursion
     errval_t err = ensure_enough_slabs(st);
     if (err_is_fail(err)) {
@@ -337,257 +538,295 @@ static inline errval_t map_recursive(struct paging_state *st, struct vnode_cap_n
  * @param st
  * @param node
  * @param level
- * @param rvaddr    If out_vaddr == NULL, relative address to the node. Otherwise, ignored.
- * @param frame
+ * @param rvaddr    If out_vaddr == NULL, relative address to node. Otherwise, ignored.
+ * @param frame     If NULL_CAP, create placeholders and attr is ignored
  * @param offset
  * @param bytes
- * @param attr
- * @param out_vaddr If not NULL, rvaddr is ignored and arbitrary placement is allowed
+ * @param attr      If frame != NULL_CAP, mapping attribute. Otherwise, ignored.
+ * @param out_vaddr If not NULL, rvaddr is ignored and arbitrary placement is allowed.
  * @return
  * @note Require base page alignment and size.
  * @note IMPORTANT: expect ensure_enough_slabs() before every call into this function,
  *       including recursion.
+ * @todo Allocated nodes and slots are not freed on failure return.
  */
-static errval_t _map_recursive(struct paging_state *st, struct vnode_cap_node *node,
+static errval_t _map_recursive(struct paging_state *st, struct paging_node *node,
                                size_t level, lvaddr_t rvaddr, struct capref frame,
                                size_t offset, size_t bytes, uint64_t attr,
                                lvaddr_t *out_rvaddr)
 {
-    //    debug_printf("_map_recursive level = %u, rvaddr = %lx, bytes = %lu, out_rvaddr =
-    //    %p\n", level, rvaddr, bytes, out_rvaddr);
-
     assert(level <= 3 && "paging: invalid level");
     assert(ROUND_UP(bytes, BASE_PAGE_SIZE) == bytes);
     assert(ROUND_UP(offset, BASE_PAGE_SIZE) == offset);
 
-    if (node->max_continuous_count == 0 && LIST_EMPTY(&node->children)) {  // invalid block
-        return MM_ERR_NOT_FOUND;
+    if (is_invalid_node(node)) {
+        return LIB_ERR_PAGING_INVALID_REGION;
     }
 
     errval_t err;
     const size_t CHILD_SIZE = CHILD_BLOCK_SIZE[level];
+    const bool is_fixed_mapping = (out_rvaddr == NULL);
+    const bool is_allocating_placeholder = (capref_is_null(frame));
+#if 0
+    debug_printf("_map_recursive(%lu), node=%lu->%lu, 0x%lx/%lu  %s%s\n", level,
+                 node->index, node->count, rvaddr, bytes,
+                 is_fixed_mapping ? "fixed " : "dynamic ",
+                 is_allocating_placeholder ? "placeholder " : "");
+#endif
 
-    size_t child_start_index = get_child_index(rvaddr, level);  // inclusive
-    size_t child_end_index = get_child_index(ROUND_UP(rvaddr + bytes, CHILD_SIZE),
-                                             level);  // exclusive
-    if (child_end_index == 0)
-        child_end_index = 512;
-    size_t child_count = child_end_index - child_start_index;
-    // debug_printf("child_start_index = %lu, end = %lu, count = %lu\n",
-    // child_start_index, child_end_index, child_count);
-
-    assert(child_end_index > child_start_index);
-    assert(child_start_index < 512);
-    assert(child_end_index <= 512);
-    assert((child_end_index - child_start_index) * CHILD_SIZE >= bytes);
+    size_t child_start, child_end, child_count;
+    decode_indices(level, rvaddr, bytes, &child_start, &child_end, &child_count);
+#if 0
+    debug_printf("child_start = %lu, end = %lu, count = %lu\n", child_start, child_end, child_count);
+#endif
 
     if (child_count == 1 && level < 3 && !LIST_EMPTY(&node->children)) {
-        // Find a child and try dive into it
-        struct vnode_cap_node *n;
+        // Bounded in one child, find a child and try dive into it
+
+        struct paging_node *n = NULL;
         LIST_FOREACH(n, &node->children, link)
         {
             assert(n->count == 1 && "paging: page table cannot have count > 1");
-            if (out_rvaddr == NULL) {
+
+            if (is_fixed_mapping) {
                 // Fixed mapping
-                if (n->index == child_start_index) {
+
+                if (n->index == child_start) {
                     assert(rvaddr >= n->index * CHILD_SIZE);
+
+                    if (is_placeholder_node(n)) {
+                        // Create a page table and install
+                        err = upgrade_node_to_page_table(
+                            st, n, CHILD_PAGE_TABLE_TYPE[level], node->vnode_cap);
+                        if (err_is_fail(err)) {
+                            return err;
+                        }
+                        assert(!capref_is_null(n->vnode_cap));
+                    }
+
+                    // Here _map_recursive is called since no slab alloc has happened
                     err = _map_recursive(st, n, level + 1, rvaddr - n->index * CHILD_SIZE,
                                          frame, offset, bytes, attr, out_rvaddr);
                     return err;  // must be this node, return directly, either work or fail
-                } else if (n->index > child_start_index) {
+                } else if (n->index > child_start) {
                     break;
                 }
+
             } else {
                 // Dynamic mapping
-                err = _map_recursive(st, n, level + 1, 0 /* useless */, frame, offset,
-                                     bytes, attr, out_rvaddr);
-                *out_rvaddr += n->index * CHILD_SIZE;
-                if (err_is_ok(err)) {
-                    return SYS_ERR_OK;
-                } else if (err != MM_ERR_NOT_FOUND) {  // error other than no memory
-                    return err;
+
+                if (!is_placeholder_node(n) && !is_invalid_node(n)) {
+                    if (level + 1 == 3 && n->max_continuous_count == 0) {
+                        // Fast path to skip full L3 tables
+                    } else {
+                        // Here _map_recursive is called since no slab alloc has happened
+                        err = _map_recursive(st, n, level + 1, 0 /* useless */, frame,
+                                             offset, bytes, attr, out_rvaddr);
+                        assert(out_rvaddr != NULL);
+                        *out_rvaddr += n->index * CHILD_SIZE;
+                        if (err_is_ok(err)) {
+                            return SYS_ERR_OK;
+                        } else if (err
+                                   != MM_ERR_NOT_FOUND) {  // error other than no memory
+                            return err;
+                        }
+                    }
                 }
             }
         }
     }
     // Fall back to create children at this level
+    // For fixed mapping, child count must be > 1 (otherwise returned above)
+    // For dynamic mapping, child count >= 1
 
-    struct vnode_cap_node *n;
-    struct vnode_cap_node *heading
-        = NULL;  // allow fixed mapping to overlap for one at head
-    bool should_update_max_continuous_count;
-    if (LIST_EMPTY(&node->children)) {
-        n = NULL;
-        should_update_max_continuous_count = true;
-    } else {
-        LIST_FOREACH(n, &node->children, link)
-        {
-            size_t next_index = (LIST_NEXT(n, link) == NULL ? VMSAv8_64_PTABLE_NUM_ENTRIES
-                                                            : LIST_NEXT(n, link)->index);
-            assert(next_index >= n->index + n->count && "paging: linked list not sorted");
+    struct paging_node *new_node = NULL;
 
-            size_t continuous_count = next_index - (n->index + n->count);
-            // debug_printf("continuous_count = %lu, node->max_continuous_count = %lu\n",
-            // continuous_count, node->max_continuous_count);
-            assert(continuous_count <= node->max_continuous_count
-                   && "paging: max_continuous_count too small");
+    struct paging_node *n = NULL;
+    do {
+        struct paging_node *next_n = (n ? LIST_NEXT(n, link)
+                                        : LIST_FIRST(&node->children));
+        size_t region_start = (n ? n->index + n->count : 0);
+        size_t region_end = (next_n ? next_n->index : VMSAv8_64_PTABLE_NUM_ENTRIES);
+        assert(region_end >= region_start && "paging: linked list not sorted");
+        size_t region_size = region_end - region_start;
+#if 0
+        debug_printf("region_size = %lu, node->max_continuous_count = %lu\n", region_size, node->max_continuous_count);
+#endif
+        assert(region_size <= node->max_continuous_count
+               && "paging: max_continuous_count too small");
 
-            if (out_rvaddr == NULL) {  // require specific mapping
-                // Allow overlapping for one at head
-                // TODO: overlapping for one at the end is not allowed
-                if (n->index + n->count <= child_start_index + 1
-                    && next_index >= child_end_index) {
-                    should_update_max_continuous_count = (continuous_count
-                                                          == node->max_continuous_count);
-                    if (n->index + n->count == child_start_index + 1) {
-                        heading = n;
+        if (is_fixed_mapping) {
+            // Fixed mapping
+#if 0
+                debug_printf("relaxed_start = %lu, relaxed_end = %lu\n", relaxed_start, relaxed_end);
+#endif
+            // Use placeholder
+            if (n != NULL && is_placeholder_node(n)) {
+                if (level < 3) {  // unit placeholder
+                    if (unit_placeholders_matched(n, child_start, child_end)) {
+                        new_node = n;
+                        break;
                     }
-                    break;
-                }
-            } else {
-                if (continuous_count >= child_count) {
-                    should_update_max_continuous_count = (continuous_count
-                                                          == node->max_continuous_count);
-                    // Assign new range
-                    child_start_index = n->index + n->count;
-                    child_end_index = child_start_index + child_count;
-                    rvaddr
-                        = child_start_index
-                          * CHILD_SIZE;  // the map size computation below will just work
-                    break;
+                } else {
+                    if (bulk_placeholder_matched(n, child_start, child_end)) {
+                        // Safe to call because the space is already occupied
+                        err = chop_down_node(st, n, child_start, child_end, false,
+                                             &new_node);
+                        if (err_is_fail(err)) {
+                            return err;
+                        }
+                        assert(new_node != NULL);
+                        break;
+                    }
                 }
             }
-        }
-        if (n == NULL) {              // memory already occupied or no slot available
-            return MM_ERR_NOT_FOUND;  // XXX: change to paging error
-        }
-    }
 
-    if (level < 3) {
-        // Create a placeholder node to ensure refill doesn't come to this region
-        struct vnode_cap_node *placeholder;
-
-        // This should never trigger a refill since ensure_enough_slabs() is expected
-        // before every call in this function
-        err = create_node(st, child_start_index + (heading != NULL),
-                          child_count - (heading != NULL), &placeholder);
-        if (err_is_fail(err)) {
-            return err;
-        }
-
-        // Insert the placeholder
-        if (n == NULL) {
-            LIST_INSERT_HEAD(&node->children, placeholder, link);
-        } else {
-            LIST_INSERT_AFTER(n, placeholder, link);  // ensure ordering
-        }
-        // Insert before placeholder next time and shrink placeholder
-        // The placeholder will become the last node
-        if (should_update_max_continuous_count) {
-            update_max_continuous_count(node);
-        }
-
-        // Any refill starting from here should be OK
-
-        // Construct nodes
-        for (size_t i = child_start_index; i < child_end_index; i++) {
-            struct vnode_cap_node *new_node;
-
-            if (heading != NULL) {
-                new_node = heading;
-                heading = NULL;
-
-            } else {
-                if (placeholder->count == 1) {
-                    new_node = placeholder;
-                } else {
-                    err = create_node(st, i, 1, &new_node);
+            // Use empty region between current node and the next
+            // Allow overlapping for one at the front and one at the end
+            size_t relaxed_start = (n ? n->index + n->count - 1 : 0);
+            size_t relaxed_end = (next_n ? next_n->index + 1
+                                         : VMSAv8_64_PTABLE_NUM_ENTRIES);
+            if ((level < 3 && relaxed_start <= child_start && relaxed_end >= child_end)
+                || (level == 3 && region_start <= child_start && region_end >= child_end)) {
+#if 0
+                debug_printf("relaxed_start = %lu, relaxed_end = %lu IN\n", relaxed_start, relaxed_end);
+#endif
+                size_t create_start = max(child_start, region_start);
+                size_t create_end = min(child_end, region_end);
+                if (create_end > create_start) {
+                    size_t create_size = create_end - create_start;
+                    // Safe to call this function since ensure_enough_slabs() is
+                    // expected before every call in the current function
+                    err = create_node_and_insert(
+                        st, create_start, create_size, node, n, &new_node,
+                        (region_size == node->max_continuous_count), (level < 3));
                     if (err_is_fail(err)) {
                         return err;
                     }
-                    placeholder->index++;
-                    placeholder->count--;
-                    LIST_INSERT_BEFORE(placeholder, new_node, link);
+                    if (create_start != child_start) {
+                        assert(n != NULL);
+                        new_node = n;
+                    }
+                } else {
+                    assert(n != NULL);
+                    new_node = n;
                 }
-                assert(new_node != NULL);
+                break;
+            }
+        } else {
+            // Dynamic mapping
 
-                // Create a page table and map
-                err = upgrade_node_to_page_table(st, new_node,
-                                                 CHILD_PAGE_TABLE_TYPE[level], node->cap);
+            if (region_size >= child_count) {  // find a region large enough
+
+                // Assign new indices
+                child_start = region_start;
+                child_end = child_start + child_count;
+                rvaddr = child_start * CHILD_SIZE;
+                // The map size computation below will just work
+
+                // Safe to call this function since ensure_enough_slabs() is expected
+                // before every call in the current function
+                err = create_node_and_insert(
+                    st, child_start, child_count, node, n, &new_node,
+                    (region_size == node->max_continuous_count), (level < 3));
                 if (err_is_fail(err)) {
                     return err;
                 }
+                break;
             }
+        }
+
+        n = next_n;
+    } while (n != NULL);
+
+    if (new_node == NULL) {       // memory already occupied or no slot available
+        return MM_ERR_NOT_FOUND;  // XXX: change to paging error
+    }
+
+    assert(new_node != NULL);
+#if 0
+    debug_printf("new_node->index = %lu, count = %lu, is_placeholder_node = %d\n",
+                 new_node->index, new_node->count, is_placeholder_node(new_node));
+#endif
+    assert(new_node->index == child_start);
+
+    if (level < 3) {
+        for (size_t i = child_start; i < child_end; i++) {
+            assert(new_node->index == i);
+            assert(new_node->count == 1);
 
             // Relative to this node
-            lvaddr_t child_start_vaddr = i * CHILD_SIZE;
-            if (child_start_vaddr < rvaddr) {
-                child_start_vaddr = rvaddr;
-            }
-
-            lvaddr_t child_end_vaddr = (i + 1) * CHILD_SIZE;  // exclusive
-            if (child_end_vaddr > rvaddr + bytes) {
-                child_end_vaddr = rvaddr + bytes;
-            }
-
+            lvaddr_t child_start_vaddr = max(i * CHILD_SIZE, rvaddr);
+            lvaddr_t child_end_vaddr = min((i + 1) * CHILD_SIZE, rvaddr + bytes);
             size_t child_mapping_size = child_end_vaddr - child_start_vaddr;
-
-            // Must call ensure_enough_slabs before recursion
-            err = ensure_enough_slabs(st);
-            if (err_is_fail(err)) {
-                return err;
-            }
+            assert(child_mapping_size <= CHILD_SIZE);
 
             lvaddr_t next_rvaddr = child_start_vaddr - (i * CHILD_SIZE);
-            if (out_rvaddr != NULL) {
+            if (!is_fixed_mapping) {
+                // Dynamic mapping, align to the left
                 assert(next_rvaddr == 0);
             }
 
-            // Call the wrapper to ensure_enough_slabs before recursion
-            err = map_recursive(st, new_node, level + 1, next_rvaddr, frame, offset,
-                                child_mapping_size, attr, out_rvaddr);
-            offset += child_mapping_size;
-            if (err_is_fail(err)) {
-                return err;
+            if (!is_allocating_placeholder
+                || (child_count == 1 && child_mapping_size < CHILD_SIZE)) {
+                if (is_placeholder_node(new_node)) {
+                    // Create a page table and install
+                    // Put here for unified handling of new node and empty node
+                    err = upgrade_node_to_page_table(
+                        st, new_node, CHILD_PAGE_TABLE_TYPE[level], node->vnode_cap);
+                    if (err_is_fail(err)) {
+                        return err;
+                    }
+                    assert(!capref_is_null(new_node->vnode_cap));
+                }
+
+                // Call the wrapper to ensure_enough_slabs before recursion
+                assert(!capref_is_null(new_node->vnode_cap));
+                err = map_recursive(st, new_node, level + 1, next_rvaddr, frame, offset,
+                                    child_mapping_size, attr,
+                                    /* only continue to be dynamic if one child  */
+                                    /* if fixed, out_rvaddr == NULL */
+                                    (child_count == 1 ? out_rvaddr : NULL));
+                if (err_is_fail(err)) {
+                    return err;
+                }
+
+            } else {  // is_allocating_placeholder && (spanning || exact match)
+
+                assert(is_placeholder_node(new_node));
+                if (out_rvaddr) {
+                    assert(next_rvaddr == 0);
+                    *out_rvaddr = next_rvaddr;
+                }
             }
+            offset += child_mapping_size;
+
+            new_node = LIST_NEXT(new_node, link);
         }
-        assert(placeholder->count == 1);
 
         if (out_rvaddr) {
-            *out_rvaddr += child_start_index * CHILD_SIZE;
+            if (child_count > 1) {  // become fixed and not passed to the next level
+                *out_rvaddr = 0;
+            }
+            *out_rvaddr += child_start * CHILD_SIZE;
         }
 
     } else {  // level == 3
 
-        struct vnode_cap_node *new_node;
-        // This should never trigger a refill since ensure_enough_slabs() is expected
-        // before every call in this function
-        err = create_node(st, child_start_index, child_count, &new_node);
-        if (err_is_fail(err)) {
-            return err;
-        }
+        assert(new_node->index == child_start && new_node->count == child_count);
 
-        // Insert the node
-        if (n == NULL) {
-            LIST_INSERT_HEAD(&node->children, new_node, link);
-        } else {
-            LIST_INSERT_AFTER(n, new_node, link);  // ensure ordering
-        }
-        if (should_update_max_continuous_count) {
-            update_max_continuous_count(node);
-        }
+        if (!is_allocating_placeholder) {
+            // Actually apply the mapping, all at once
 
-        // Any refill starting from here should be OK
-
-        // Apply mapping all at once
-        err = apply_mapping(st, node->cap, frame, child_start_index, attr, offset,
-                            child_count);
-        if (err_is_fail(err)) {
-            return err;
+            err = apply_mapping(st, node->vnode_cap, frame, child_start, attr, offset,
+                                child_count);
+            if (err_is_fail(err)) {
+                return err;
+            }
         }
 
         if (out_rvaddr) {
-            *out_rvaddr = child_start_index * CHILD_SIZE;
+            *out_rvaddr = child_start * CHILD_SIZE;
         }
     }
 
@@ -625,14 +864,12 @@ static uint64_t flags_to_attr(int flags)
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t alignment)
 {
-    /**
-     * TODO(M2): Implement this function
-     *   - Find a region of free virtual address space that is large enough to
-     *     accomodate a buffer of size `bytes`.
-     */
-    *buf = NULL;
-
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // TODO: support alignment
+    if (st == NULL) {
+        return ERR_INVALID_ARGS;
+    }
+    return map_recursive(st, st->l0, 0, 0, NULL_CAP, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
+                         0, (lvaddr_t *)buf);
 }
 
 
@@ -652,26 +889,11 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes,
                                struct capref frame, int flags)
 {
-    // TODO: allocated nodes and slots are not freed on failure return
-
-    assert(st->l0 != NULL);
-
-    if (bytes >= VMSAv8_64_L0_SIZE
-                     * VMSAv8_64_PTABLE_NUM_ENTRIES) {  // trying to map into kernel
-        return MM_ERR_NOT_FOUND;
+    if (st == NULL) {
+        return ERR_INVALID_ARGS;
     }
-    if (bytes == 0) {
-        return SYS_ERR_OK;
-    }
-
-    // Must call ensure_enough_slabs before recursion
-    errval_t err = ensure_enough_slabs(st);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    return _map_recursive(st, st->l0, 0, 0, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
-                          flags_to_attr(flags), (lvaddr_t *)buf);
+    return map_recursive(st, st->l0, 0, 0, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
+                         flags_to_attr(flags), (lvaddr_t *)buf);
 }
 
 
@@ -690,28 +912,11 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
                                struct capref frame, size_t bytes, int flags)
 {
-    // TODO: allocated nodes and slots are not freed on failure return
-
-    assert(st->l0 != NULL);
-
-    if (vaddr >= VMSAv8_64_L0_SIZE * VMSAv8_64_PTABLE_NUM_ENTRIES /* plus can overflow */
-        || vaddr + bytes
-               >= VMSAv8_64_L0_SIZE
-                      * VMSAv8_64_PTABLE_NUM_ENTRIES) {  // map into kernel address space
-        return MM_ERR_NOT_FOUND;
+    if (st == NULL) {
+        return ERR_INVALID_ARGS;
     }
-    if (bytes == 0) {
-        return SYS_ERR_OK;
-    }
-
-    // Must call ensure_enough_slabs before recursion
-    errval_t err = ensure_enough_slabs(st);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    return _map_recursive(st, st->l0, 0, vaddr, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
-                          flags_to_attr(flags), NULL);
+    return map_recursive(st, st->l0, 0, vaddr, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
+                         flags_to_attr(flags), NULL);
 }
 
 

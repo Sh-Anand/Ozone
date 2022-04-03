@@ -124,7 +124,7 @@ void grading_test_early(void)
         &addr5, 3145728 + 8192);  // TODO: there seems to be an issue still here, where
                                   // something causes a pagefault
 
-//    grading_test_paging(&aos_mm, get_current_paging_state());
+    grading_test_paging(&aos_mm, get_current_paging_state());
 //    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 1000);
 //    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 1000);
 

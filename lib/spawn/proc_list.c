@@ -118,7 +118,7 @@ errval_t proc_list_get_all_pids(struct proc_list *ps, domainid_t **pids, size_t 
         return LIB_ERR_MALLOC_FAIL;
     }
     size_t i = 0;
-    struct proc_node *node;
+    struct proc_node *node = NULL;
     LIST_FOREACH(node, &ps->running, link)
     {
         assert(i < ps->running_count && "ret[] overflows");
