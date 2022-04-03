@@ -65,7 +65,7 @@ errval_t two_level_alloc(struct slot_allocator *ca, struct capref *ret)
         struct slot_allocator *rca = (struct slot_allocator *)(&state->rootca);
         // Need to refill when one slot left, otherwise it's too late
         size_t rootcn_free = single_slot_alloc_freecount(&state->rootca);
-        if (rootcn_free == 1) {
+        if (rootcn_free <= 2) {
             // resize root slot allocator (and rootcn)
             err = root_slot_allocator_refill(NULL, NULL);
             if (err_is_fail(err)) {
