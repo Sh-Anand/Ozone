@@ -131,7 +131,7 @@ __srefill(FILE *fp)
 			__sflush(fp);
 	}
 	fp->_p = fp->_bf._base;
-	fp->_r = _sread(fp, (char *)fp->_p, 1);//fp->_bf._size); // FIXME: this is a horrible fix and should probably not be necessary!!! fix this back as soon as anyone can!!!
+	fp->_r = _sread(fp, (char *)fp->_p, fp->_bf._size);
 	fp->_flags &= ~__SMOD;	/* buffer contents are again pristine */
 	if (fp->_r <= 0) {
 		if (fp->_r == 0)
