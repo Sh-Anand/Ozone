@@ -35,6 +35,14 @@ static bool slab_buf_used = false;
 
 #define SLAB_REFILL_THRESHOLD 12
 
+// Forward declarations
+static void page_fault_handler(enum exception_type type, int subtype, void *addr,
+                                      arch_registers_state_t *regs);
+static errval_t set_page_fault_handler(void);
+
+#define EXCEPTION_STACK_SIZE (BASE_PAGE_SIZE * 4)
+static char exception_stack[EXCEPTION_STACK_SIZE];
+
 /**
  * \brief Helper function that allocates a slot and
  *        creates a aarch64 page table capability for a certain level
@@ -236,6 +244,11 @@ errval_t paging_init(void)
     errval_t err;
     err = paging_init_state(&current, VMSAv8_64_L0_SIZE, cap_vroot,
                             get_default_slot_allocator());
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    err = set_page_fault_handler();
     if (err_is_fail(err)) {
         return err;
     }
@@ -935,4 +948,44 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
 errval_t paging_unmap(struct paging_state *st, const void *region)
 {
     return LIB_ERR_NOT_IMPLEMENTED;
+}
+
+static void page_fault_handler(enum exception_type type, int subtype, void *addr,
+                                      arch_registers_state_t *regs)
+{
+    if (type == EXCEPT_PAGEFAULT) {
+        DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
+
+        if (addr == NULL) {
+            DEBUG_PRINTF("NULL pointer\n", subtype, addr);
+            exit(EXIT_FAILURE);
+        }
+
+        errval_t err;
+        struct capref frame = NULL_CAP;
+
+        err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+        if (err_is_fail(err)) {
+            USER_PANIC_ERR(err, "paging_page_fault_handler: frame_alloc failed\n");
+        }
+
+        err = paging_map_fixed(get_current_paging_state(),
+                               ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame,
+                               BASE_PAGE_SIZE);
+        if (err_is_fail(err)) {
+            USER_PANIC_ERR(err, "paging_page_fault_handler: paging_map_fixed failed\n");
+        }
+    }
+}
+
+static errval_t set_page_fault_handler(void) {
+    errval_t err;
+    err = thread_set_exception_handler(page_fault_handler, NULL, exception_stack, exception_stack + EXCEPTION_STACK_SIZE, NULL, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "paging: fail to set exception handler");
+        return err;
+    } else {
+        DEBUG_PRINTF("paging: page fault handler set\n");
+    }
+    return SYS_ERR_OK;
 }

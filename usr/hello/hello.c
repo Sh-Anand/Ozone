@@ -23,7 +23,6 @@
 
 #define SHELL_BUF_SIZE 256
 
-#define EXCEPTION_STACK_SIZE BASE_PAGE_SIZE * 4
 const char *large_str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, "
                         "sed do eiusmod tempor incididunt ut labore et dolore magna "
                         "aliqua. Ut enim ad minim veniam, quis nostrud exercitation "
@@ -40,37 +39,9 @@ static void print_err_if_any(errval_t err)
     }
 }
 
-static void exception_handler(enum exception_type type, int subtype, void *addr,
-                               arch_registers_state_t *regs)
-{
-    if (type == EXCEPT_PAGEFAULT) {
-        DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
-    }
-    exit(EXIT_FAILURE);
-}
-
 int main(int argc, char *argv[])
 {
     errval_t err;
-
-    struct capref exception_stack_cap;
-    err = frame_alloc(&exception_stack_cap, EXCEPTION_STACK_SIZE, NULL);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "fail to set alloc exception stack");
-    } 
-    void *exception_stack_base = NULL;
-    err = paging_map_frame(get_current_paging_state(), &exception_stack_base, EXCEPTION_STACK_SIZE, exception_stack_cap);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "fail to set alloc exception stack");
-    }
-    assert(exception_stack_base != NULL);
-    
-    err = thread_set_exception_handler(exception_handler, NULL, exception_stack_base, exception_stack_base + EXCEPTION_STACK_SIZE, NULL, NULL);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "fail to set exception handler");
-    } else {
-        DEBUG_PRINTF("exception handler set\n");
-    }
 
     printf("Hello, world! from userspace and through RPC, presented by AOS team 1\n");
     for (int i = 0; i < argc; i++) {

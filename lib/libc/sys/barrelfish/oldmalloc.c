@@ -91,7 +91,7 @@ malloc(size_t nbytes)
 				MALLOC_UNLOCK;
 				return NULL;	/* none left */
 			} else {
-
+                /* left blank intentionally, continue on the circular free list */
 			}
 		}
 	}
