@@ -99,7 +99,7 @@ extern struct mm aos_mm;
 
 void grading_test_early(void)
 {
-    // test some fixed memory mapping (freeing not yet tested)
+    /*// test some fixed memory mapping (freeing not yet tested)
     __attribute__((unused)) lvaddr_t base = 3UL << 39;
     __attribute__((unused)) lvaddr_t addr0, addr1, addr2, addr3, addr4, addr5;
     __attribute__((unused)) struct capref fixed_frame0 = test_mem_map_fixed(base, 8192);
@@ -122,7 +122,7 @@ void grading_test_early(void)
     __attribute__((unused)) struct capref frame4 = test_mem_alloc(&addr4, 3145728);
     __attribute__((unused)) struct capref frame5 = test_mem_alloc(
         &addr5, 3145728 + 8192);  // TODO: there seems to be an issue still here, where
-                                  // something causes a pagefault
+                                  // something causes a pagefault*/
 
     grading_test_paging(&aos_mm, get_current_paging_state());
 //    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 1000);

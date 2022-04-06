@@ -146,7 +146,7 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_fixed_mapping_success(mm, st, vaddr_base3, BASE_PAGE_SIZE,false);  // one page in first L3
     test_fixed_mapping_success(mm, st, vaddr_base3 + VMSAv8_64_L2_BLOCK_SIZE - BASE_PAGE_SIZE, BASE_PAGE_SIZE,false);  // one page in the 2nd L3
     test_fixed_mapping_success(mm, st, vaddr_base3 + BASE_PAGE_SIZE, VMSAv8_64_L2_BLOCK_SIZE - BASE_PAGE_SIZE * 2,false);  // involves 2 L3's, including the two above
-
+    while(1);
     DEBUG_PRINTF("[Try Dynamic Mapping]\n");
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, false);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, false);
