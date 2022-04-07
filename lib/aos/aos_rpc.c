@@ -18,6 +18,9 @@
 
 #define LMP_REMAINING_SIZE (LMP_MSG_LENGTH - 1) * 8
 
+struct capref rpc_reserved_recv_slot;  // all 0 is NULL_CAP
+static bool recv_slot_not_refilled = false;
+
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
 errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
@@ -96,6 +99,10 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
                                      size_t *ret_size)
 {
     errval_t err;
+
+    // Alloc reserved recv slot if it's empty
+    assert(!capref_is_null(rpc_reserved_recv_slot));
+
     uintptr_t words[LMP_MSG_LENGTH];
     struct capref send_cap;
 
@@ -152,11 +159,32 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
         } else {
             DEBUG_PRINTF("aos_rpc_send_general received a cap but is given up!\n");
         }
-        err = slot_alloc(&recv_cap);
-        if (err_is_fail(err)) {
-            return err;
+
+        // This can happen when the current call results from slot_alloc
+        if (!capref_is_null(rpc_reserved_recv_slot)) {
+
+            // Use the reserved slot first, since slot_alloc can trigger a refill which
+            // calls rpc ram alloc, and then we have no slot to receive the cap
+            lmp_chan_set_recv_slot(rpc->chan, rpc_reserved_recv_slot);
+            rpc_reserved_recv_slot = NULL_CAP;
+
+
+            err = slot_alloc(&rpc_reserved_recv_slot);  // may trigger refill
+            if (err_is_fail(err)) {
+                debug_printf("failed to alloc rpc_reserved_recv_slot\n");
+                return err;
+            }
+
+            if (recv_slot_not_refilled) {
+                err = lmp_chan_alloc_recv_slot(rpc->chan);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+            }
+
+        } else {
+            recv_slot_not_refilled = true;
         }
-        lmp_chan_set_recv_slot(rpc->chan, recv_cap);
     }
 
     if (ret_buf) {
@@ -196,8 +224,16 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                              struct capref *ret_cap, size_t *ret_bytes)
 {
-    // TODO: implement functionality to request a RAM capability over the
-    // given channel and wait until it is delivered.
+//    if (refilling_recv_slot) {
+//        assert(bytes == BASE_PAGE_SIZE);
+//        *ret_cap = reserved_slot;
+//        if (ret_bytes != NULL)  {
+//            *ret_bytes = BASE_PAGE_SIZE;
+//        }
+//        reserved_slot = NULL_CAP;
+//        return SYS_ERR_OK;
+//    }
+
 
     struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
     errval_t err = aos_rpc_send_general(rpc, RAM_MSG, NULL_CAP, &msg, sizeof(msg), ret_cap, NULL, NULL);
