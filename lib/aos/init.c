@@ -142,7 +142,7 @@ void barrelfish_libc_glue_init(void)
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
     _libc_terminal_read_func = !init_domain ? aos_terminal_read : dummy_terminal_read;
-    _libc_terminal_write_func = syscall_terminal_write;
+    _libc_terminal_write_func = !init_domain ? aos_terminal_write : syscall_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
