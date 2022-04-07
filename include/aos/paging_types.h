@@ -41,8 +41,10 @@ typedef int paging_flags_t;
 
 struct paging_node {
    size_t index;
-   size_t count;
-   struct capref vnode_cap;  // NULL_CAP for placeholder
+   uint16_t count;
+   bool is_placeholder;
+   bool is_invalid;
+   struct capref vnode_cap;
    // XXX: for now the mapping cap is not tracked
    size_t max_continuous_count;  // largest continuous region, 0 and empty children means invalid
    LIST_HEAD(, paging_node) children;

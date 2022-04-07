@@ -37,7 +37,7 @@ static bool slab_buf_used = false;
 
 // Forward declarations
 static void page_fault_handler(enum exception_type type, int subtype, void *addr,
-                                      arch_registers_state_t *regs);
+                               arch_registers_state_t *regs);
 static errval_t set_page_fault_handler(void);
 
 #define EXCEPTION_STACK_SIZE (BASE_PAGE_SIZE * 4)
@@ -91,11 +91,24 @@ static errval_t create_node(struct paging_state *st, size_t index, size_t count,
     }
     n->index = index;
     n->count = count;
+    n->is_placeholder = false;
     n->max_continuous_count = VMSAv8_64_PTABLE_NUM_ENTRIES;
     n->vnode_cap = NULL_CAP;
     LIST_INIT(&n->children);
     *ret = n;
     return SYS_ERR_OK;
+}
+
+// An invalid node (such as placeholder to enforce start address)
+static inline bool is_invalid_node(const struct paging_node *node)
+{
+    return node->is_invalid;
+}
+
+// A placeholder node (such as placeholder to enforce start address)
+static inline bool is_placeholder_node(const struct paging_node *node)
+{
+    return node->is_placeholder;
 }
 
 // May call back to mm and paging due to slot refill
@@ -183,6 +196,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
         return err;
     }
     st->l0->vnode_cap = pdir;
+    assert(!is_placeholder_node(st->l0));
     st->refilling = false;
 
     // TODO: for now just handle the only case of skipping first L1
@@ -192,8 +206,10 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
         if (err_is_fail(err)) {
             return err;
         }
-        first_l1->max_continuous_count = 0;  // invalid
+        first_l1->is_invalid = 1;
+        first_l1->max_continuous_count = 0;
         assert(LIST_EMPTY(&first_l1->children));
+        assert(is_invalid_node(first_l1));
 
         LIST_INSERT_HEAD(&st->l0->children, first_l1, link);
         st->l0->max_continuous_count--;
@@ -328,18 +344,6 @@ static errval_t ensure_enough_slabs(struct paging_state *st)
     return SYS_ERR_OK;
 }
 
-// An invalid node (such as placeholder to enforce start address)
-static inline bool is_invalid_node(const struct paging_node *node)
-{
-    return node->max_continuous_count == 0 && LIST_EMPTY(&node->children);
-}
-
-// A placeholder node (such as placeholder to enforce start address)
-static inline bool is_placeholder_node(const struct paging_node *node)
-{
-    return !is_invalid_node(node) && capref_is_null(node->vnode_cap);
-}
-
 static inline void decode_indices(size_t level, lvaddr_t rvaddr, size_t bytes,
                                   size_t *ret_inclusive_start, size_t *ret_exclusive_end,
                                   size_t *ret_count)
@@ -388,6 +392,11 @@ static inline errval_t chop_down_node(struct paging_state *st, struct paging_nod
 
     errval_t err;
 
+    err = ensure_enough_slabs(st);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
     // Chop the part before away
     if (n->index < child_start_index) {
         struct paging_node *node_before;
@@ -395,8 +404,10 @@ static inline errval_t chop_down_node(struct paging_state *st, struct paging_nod
         if (err_is_fail(err)) {
             return err;
         }
+        node_before->is_placeholder = n->is_placeholder;
         n->index += node_before->count;
         n->count -= node_before->count;
+        assert(node_before->index + node_before->count == n->index);
         LIST_INSERT_BEFORE(n, node_before, link);
     }
     assert(n->index == child_start_index);
@@ -409,18 +420,26 @@ static inline errval_t chop_down_node(struct paging_state *st, struct paging_nod
         if (err_is_fail(err)) {
             return err;
         }
+        node_after->is_placeholder = n->is_placeholder;
         n->count -= node_after->count;
+        assert(n->index + n->count == node_after->index);
         LIST_INSERT_AFTER(n, node_after, link);
     }
     assert(n->index + n->count == child_end_index);
 
     if (chop_down_to_one && n->count > 1) {
         for (int i = (int)child_end_index - 1; i > (int)child_start_index; i--) {
+            err = ensure_enough_slabs(st);
+            if (err_is_fail(err)) {
+                return err;
+            }
+
             struct paging_node *node_after;
             err = create_node(st, i, 1, &node_after);
             if (err_is_fail(err)) {
                 return err;
             }
+            node_after->is_placeholder = n->is_placeholder;
             n->count--;
             LIST_INSERT_AFTER(n, node_after, link);
         }
@@ -518,13 +537,13 @@ static inline bool bulk_placeholder_matched(const struct paging_node *n,
 static errval_t _map_recursive(struct paging_state *st, struct paging_node *node,
                                size_t level, lvaddr_t rvaddr, struct capref frame,
                                size_t offset, size_t bytes, uint64_t attr,
-                               lvaddr_t *out_rvaddr);
+                               lvaddr_t *out_rvaddr, bool into_placeholder);
 
 // Wrapper function for _map_recursive to ensure refilling
 static inline errval_t map_recursive(struct paging_state *st, struct paging_node *node,
                                      size_t level, lvaddr_t rvaddr, struct capref frame,
                                      size_t offset, size_t bytes, uint64_t attr,
-                                     lvaddr_t *out_rvaddr)
+                                     lvaddr_t *out_rvaddr, bool into_placeholder)
 {
     assert(st->l0 != NULL);
 
@@ -542,7 +561,43 @@ static inline errval_t map_recursive(struct paging_state *st, struct paging_node
     if (err_is_fail(err)) {
         return err;
     }
-    return _map_recursive(st, node, level, rvaddr, frame, offset, bytes, attr, out_rvaddr);
+    return _map_recursive(st, node, level, rvaddr, frame, offset, bytes, attr, out_rvaddr,
+                          into_placeholder);
+}
+
+static inline errval_t install_page_table_if_not_yet(struct paging_state *st,
+                                                struct paging_node *parent, size_t level,
+                                                struct paging_node *node)
+{
+    errval_t err;
+    if (capref_is_null(node->vnode_cap)) {
+        // Create a page table and install
+        // Put here for unified handling of new node and empty node
+        err = upgrade_node_to_page_table(st, node, CHILD_PAGE_TABLE_TYPE[level],
+                                         parent->vnode_cap);
+        if (err_is_fail(err)) {
+            return err;
+        }
+    }
+    return SYS_ERR_OK;
+}
+
+static inline errval_t push_down_if_placeholder(struct paging_state *st,
+                                                struct paging_node *parent, size_t level,
+                                                struct paging_node *node)
+{
+    errval_t err;
+    if (is_placeholder_node(node)) {
+        // Lay down placeholder to next level
+        err = map_recursive(st, node, level + 1, 0, NULL_CAP, 0,
+                            CHILD_BLOCK_SIZE[level], 0, NULL, false);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        node->is_placeholder = false;
+        assert(!is_placeholder_node(node));
+    }
+    return SYS_ERR_OK;
 }
 
 /**
@@ -557,6 +612,7 @@ static inline errval_t map_recursive(struct paging_state *st, struct paging_node
  * @param bytes
  * @param attr      If frame != NULL_CAP, mapping attribute. Otherwise, ignored.
  * @param out_vaddr If not NULL, rvaddr is ignored and arbitrary placement is allowed.
+ * @param into_placeholder  For fixed mapping, require going into placeholder node(s)
  * @return
  * @note Require base page alignment and size.
  * @note IMPORTANT: expect ensure_enough_slabs() before every call into this function,
@@ -566,7 +622,7 @@ static inline errval_t map_recursive(struct paging_state *st, struct paging_node
 static errval_t _map_recursive(struct paging_state *st, struct paging_node *node,
                                size_t level, lvaddr_t rvaddr, struct capref frame,
                                size_t offset, size_t bytes, uint64_t attr,
-                               lvaddr_t *out_rvaddr)
+                               lvaddr_t *out_rvaddr, bool into_placeholder)
 {
     assert(level <= 3 && "paging: invalid level");
     assert(ROUND_UP(bytes, BASE_PAGE_SIZE) == bytes);
@@ -580,17 +636,22 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
     const size_t CHILD_SIZE = CHILD_BLOCK_SIZE[level];
     const bool is_fixed_mapping = (out_rvaddr == NULL);
     const bool is_allocating_placeholder = (capref_is_null(frame));
+    if (!is_fixed_mapping || is_allocating_placeholder) {
+        assert(!into_placeholder);
+    }
 #if 0
-    debug_printf("_map_recursive(%lu), node=%lu->%lu, 0x%lx/%lu  %s%s\n", level,
-                 node->index, node->count, rvaddr, bytes,
-                 is_fixed_mapping ? "fixed " : "dynamic ",
-                 is_allocating_placeholder ? "placeholder " : "");
+    debug_printf(
+        "_map_recursive(%lu), node=%lu->%u, 0x%lx/%lu, %s%s\n", level, node->index,
+        node->count, rvaddr, bytes, is_fixed_mapping ? "fixed" : "dynamic",
+        is_allocating_placeholder ? ", alloc placeholder "
+                                  : (into_placeholder ? ", into placeholder" : ""));
 #endif
 
     size_t child_start, child_end, child_count;
     decode_indices(level, rvaddr, bytes, &child_start, &child_end, &child_count);
 #if 0
-    debug_printf("child_start = %lu, end = %lu, count = %lu\n", child_start, child_end, child_count);
+    debug_printf("child_start = %lu, end = %lu, count = %lu\n", child_start, child_end,
+                 child_count);
 #endif
 
     if (child_count == 1 && level < 3 && !LIST_EMPTY(&node->children)) {
@@ -607,19 +668,18 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
                 if (n->index == child_start) {
                     assert(rvaddr >= n->index * CHILD_SIZE);
 
-                    if (is_placeholder_node(n)) {
-                        // Create a page table and install
-                        err = upgrade_node_to_page_table(
-                            st, n, CHILD_PAGE_TABLE_TYPE[level], node->vnode_cap);
-                        if (err_is_fail(err)) {
-                            return err;
-                        }
-                        assert(!capref_is_null(n->vnode_cap));
+                    err = install_page_table_if_not_yet(st, node, level, n);
+                    if (err_is_fail(err)) {
+                        return err;
+                    }
+                    err = push_down_if_placeholder(st, node, level, n);
+                    if (err_is_fail(err)) {
+                        return err;
                     }
 
-                    // Here _map_recursive is called since no slab alloc has happened
-                    err = _map_recursive(st, n, level + 1, rvaddr - n->index * CHILD_SIZE,
-                                         frame, offset, bytes, attr, out_rvaddr);
+                    err = map_recursive(st, n, level + 1, rvaddr - n->index * CHILD_SIZE,
+                                         frame, offset, bytes, attr, out_rvaddr,
+                                         into_placeholder);
                     return err;  // must be this node, return directly, either work or fail
                 } else if (n->index > child_start) {
                     break;
@@ -632,9 +692,9 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
                     if (level + 1 == 3 && n->max_continuous_count == 0) {
                         // Fast path to skip full L3 tables
                     } else {
-                        // Here _map_recursive is called since no slab alloc has happened
-                        err = _map_recursive(st, n, level + 1, 0 /* useless */, frame,
-                                             offset, bytes, attr, out_rvaddr);
+                        err = map_recursive(st, n, level + 1, 0 /* useless */, frame,
+                                             offset, bytes, attr, out_rvaddr,
+                                             into_placeholder);
                         assert(out_rvaddr != NULL);
                         *out_rvaddr += n->index * CHILD_SIZE;
                         if (err_is_ok(err)) {
@@ -649,8 +709,8 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
         }
     }
     // Fall back to create children at this level
-    // For fixed mapping, child count must be > 1 (otherwise returned above)
-    // For dynamic mapping, child count >= 1
+    // For fixed mapping level < 3, child count must be > 1 (otherwise returned above)
+    // For level 3 and/or dynamic mapping, child count >= 1
 
     struct paging_node *new_node = NULL;
 
@@ -671,7 +731,7 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
         if (is_fixed_mapping) {
             // Fixed mapping
 #if 0
-                debug_printf("relaxed_start = %lu, relaxed_end = %lu\n", relaxed_start, relaxed_end);
+            debug_printf("relaxed_start = %lu, relaxed_end = %lu\n", relaxed_start, relaxed_end);
 #endif
             // Use placeholder
             if (n != NULL && is_placeholder_node(n)) {
@@ -688,43 +748,47 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
                         if (err_is_fail(err)) {
                             return err;
                         }
+                        into_placeholder = false;  // no longer require placeholder
                         assert(new_node != NULL);
                         break;
                     }
                 }
             }
 
-            // Use empty region between current node and the next
-            // Allow overlapping for one at the front and one at the end
-            size_t relaxed_start = (n ? n->index + n->count - 1 : 0);
-            size_t relaxed_end = (next_n ? next_n->index + 1
-                                         : VMSAv8_64_PTABLE_NUM_ENTRIES);
-            if ((level < 3 && relaxed_start <= child_start && relaxed_end >= child_end)
-                || (level == 3 && region_start <= child_start && region_end >= child_end)) {
+            if (!into_placeholder) {
+                // Use empty region between current node and the next
+                // Allow overlapping for one at the front and one at the end
+                size_t relaxed_start = (n ? n->index + n->count - 1 : 0);
+                size_t relaxed_end = (next_n ? next_n->index + 1
+                                             : VMSAv8_64_PTABLE_NUM_ENTRIES);
+                if ((level < 3 && relaxed_start <= child_start && relaxed_end >= child_end)
+                    || (level == 3 && region_start <= child_start
+                        && region_end >= child_end)) {
 #if 0
-                debug_printf("relaxed_start = %lu, relaxed_end = %lu IN\n", relaxed_start, relaxed_end);
+                    debug_printf("relaxed_start = %lu, relaxed_end = %lu IN\n", relaxed_start, relaxed_end);
 #endif
-                size_t create_start = max(child_start, region_start);
-                size_t create_end = min(child_end, region_end);
-                if (create_end > create_start) {
-                    size_t create_size = create_end - create_start;
-                    // Safe to call this function since ensure_enough_slabs() is
-                    // expected before every call in the current function
-                    err = create_node_and_insert(
-                        st, create_start, create_size, node, n, &new_node,
-                        (region_size == node->max_continuous_count), (level < 3));
-                    if (err_is_fail(err)) {
-                        return err;
-                    }
-                    if (create_start != child_start) {
+                    size_t create_start = max(child_start, region_start);
+                    size_t create_end = min(child_end, region_end);
+                    if (create_end > create_start) {
+                        size_t create_size = create_end - create_start;
+                        // Safe to call this function since ensure_enough_slabs() is
+                        // expected before every call in the current function
+                        err = create_node_and_insert(
+                            st, create_start, create_size, node, n, &new_node,
+                            (region_size == node->max_continuous_count), (level < 3));
+                        if (err_is_fail(err)) {
+                            return err;
+                        }
+                        if (create_start != child_start) {
+                            assert(n != NULL);
+                            new_node = n;
+                        }
+                    } else {
                         assert(n != NULL);
                         new_node = n;
                     }
-                } else {
-                    assert(n != NULL);
-                    new_node = n;
+                    break;
                 }
-                break;
             }
         } else {
             // Dynamic mapping
@@ -780,33 +844,35 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
                 assert(next_rvaddr == 0);
             }
 
-            if (!is_allocating_placeholder
-                || (child_count == 1 && child_mapping_size < CHILD_SIZE)) {
-                if (is_placeholder_node(new_node)) {
-                    // Create a page table and install
-                    // Put here for unified handling of new node and empty node
-                    err = upgrade_node_to_page_table(
-                        st, new_node, CHILD_PAGE_TABLE_TYPE[level], node->vnode_cap);
-                    if (err_is_fail(err)) {
-                        return err;
-                    }
-                    assert(!capref_is_null(new_node->vnode_cap));
+            if (!is_allocating_placeholder || (child_mapping_size < CHILD_SIZE)) {
+                // Should go to next level
+
+                err = install_page_table_if_not_yet(st, node, level, new_node);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+                err = push_down_if_placeholder(st, node, level, new_node);
+                if (err_is_fail(err)) {
+                    return err;
                 }
 
-                // Call the wrapper to ensure_enough_slabs before recursion
                 assert(!capref_is_null(new_node->vnode_cap));
+
+                // Call the wrapper to ensure_enough_slabs before recursion
                 err = map_recursive(st, new_node, level + 1, next_rvaddr, frame, offset,
                                     child_mapping_size, attr,
                                     /* only continue to be dynamic if one child  */
                                     /* if fixed, out_rvaddr == NULL */
-                                    (child_count == 1 ? out_rvaddr : NULL));
+                                    (child_count == 1 ? out_rvaddr : NULL),
+                                    into_placeholder);
                 if (err_is_fail(err)) {
                     return err;
                 }
 
             } else {  // is_allocating_placeholder && (spanning || exact match)
 
-                assert(is_placeholder_node(new_node));
+                // Set the flag and not dive in
+                new_node->is_placeholder = true;
                 if (out_rvaddr) {
                     assert(next_rvaddr == 0);
                     *out_rvaddr = next_rvaddr;
@@ -831,11 +897,18 @@ static errval_t _map_recursive(struct paging_state *st, struct paging_node *node
         if (!is_allocating_placeholder) {
             // Actually apply the mapping, all at once
 
+            if (into_placeholder) {  // the flag is not cleared yet
+                // DEBUG_PRINTF("paging: into_placeholder not cleared at L3\n");
+                return MM_ERR_NOT_FOUND;
+            }
+
             err = apply_mapping(st, node->vnode_cap, frame, child_start, attr, offset,
                                 child_count);
             if (err_is_fail(err)) {
                 return err;
             }
+        } else {
+            new_node->is_placeholder = true;
         }
 
         if (out_rvaddr) {
@@ -882,7 +955,7 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
         return ERR_INVALID_ARGS;
     }
     return map_recursive(st, st->l0, 0, 0, NULL_CAP, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
-                         0, (lvaddr_t *)buf);
+                         0, (lvaddr_t *)buf, false);
 }
 
 
@@ -906,9 +979,19 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
         return ERR_INVALID_ARGS;
     }
     return map_recursive(st, st->l0, 0, 0, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
-                         flags_to_attr(flags), (lvaddr_t *)buf);
+                         flags_to_attr(flags), (lvaddr_t *)buf, false);
 }
 
+static errval_t _paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
+                                       struct capref frame, size_t bytes, int flags,
+                                       bool into_placeholder)
+{
+    if (st == NULL) {
+        return ERR_INVALID_ARGS;
+    }
+    return map_recursive(st, st->l0, 0, vaddr, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
+                         flags_to_attr(flags), NULL, into_placeholder);
+}
 
 /**
  * @brief mapps the provided frame at the supplied address in the paging state
@@ -925,11 +1008,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes
 errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
                                struct capref frame, size_t bytes, int flags)
 {
-    if (st == NULL) {
-        return ERR_INVALID_ARGS;
-    }
-    return map_recursive(st, st->l0, 0, vaddr, frame, 0, ROUND_UP(bytes, BASE_PAGE_SIZE),
-                         flags_to_attr(flags), NULL);
+    return _paging_map_fixed_attr(st, vaddr, frame, bytes, flags, false);
 }
 
 
@@ -951,13 +1030,11 @@ errval_t paging_unmap(struct paging_state *st, const void *region)
 }
 
 static void page_fault_handler(enum exception_type type, int subtype, void *addr,
-                                      arch_registers_state_t *regs)
+                               arch_registers_state_t *regs)
 {
     if (type == EXCEPT_PAGEFAULT) {
-        DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
-
         if (addr == NULL) {
-            DEBUG_PRINTF("NULL pointer\n", subtype, addr);
+            DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
             exit(EXIT_FAILURE);
         }
 
@@ -969,18 +1046,22 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
             USER_PANIC_ERR(err, "paging_page_fault_handler: frame_alloc failed\n");
         }
 
-        err = paging_map_fixed(get_current_paging_state(),
-                               ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame,
-                               BASE_PAGE_SIZE);
+        DEBUG_PRINTF("Installing page at %p\n", addr);
+        err = _paging_map_fixed_attr(get_current_paging_state(),
+                                     ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame,
+                                     BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE, true);
         if (err_is_fail(err)) {
-            USER_PANIC_ERR(err, "paging_page_fault_handler: paging_map_fixed failed\n");
+            DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
+            exit(EXIT_FAILURE);
         }
     }
 }
 
-static errval_t set_page_fault_handler(void) {
+static errval_t set_page_fault_handler(void)
+{
     errval_t err;
-    err = thread_set_exception_handler(page_fault_handler, NULL, exception_stack, exception_stack + EXCEPTION_STACK_SIZE, NULL, NULL);
+    err = thread_set_exception_handler(page_fault_handler, NULL, exception_stack,
+                                       exception_stack + EXCEPTION_STACK_SIZE, NULL, NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "paging: fail to set exception handler");
         return err;
