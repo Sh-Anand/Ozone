@@ -75,7 +75,7 @@ static inline capaddr_t __mm__capref_to_key(struct capref cap) {
 }
 
 inline bool __mm_pseudo_random_bit(capaddr_t key) {
-    return key & MM_PENDING_TREE_PIVOT;
+    return __builtin_parity(key);
 }
 
 inline struct mm_block __mm_create_block(struct capref root_cap, gensize_t root_offset, unsigned char size_bits, unsigned char alignment_bits) {
