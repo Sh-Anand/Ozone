@@ -217,6 +217,7 @@ errors libaos LIB_ERR_ {
 
     //paging
     failure PAGING_MAP          "failed to create a page mapping",
+    failure PAGING_INVALID_REGION  "Tried to fixed map into an invalid region",
 
     // nested errors in specific functions
     failure FRAME_ALLOC         "Failure in frame_alloc()",

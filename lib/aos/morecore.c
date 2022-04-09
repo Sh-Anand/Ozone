@@ -27,7 +27,7 @@ extern morecore_free_func_t sys_morecore_free;
 // this define makes morecore use an implementation that just has a static
 // 16MB heap.
 // TODO (M4): use a dynamic heap instead,
-#define USE_STATIC_HEAP
+//#define USE_STATIC_HEAP
 
 #ifdef USE_STATIC_HEAP
 
@@ -91,6 +91,8 @@ errval_t morecore_reinit(void)
 #else
 // dynamic heap using lib/aos/paging features
 
+#define INITIAL_HEAP_SIZE  (1 << 20)  /* 1M */
+
 /**
  * \brief Allocate some memory for malloc to use
  *
@@ -101,26 +103,53 @@ errval_t morecore_reinit(void)
  */
 static void *morecore_alloc(size_t bytes, size_t *retbytes)
 {
-    USER_PANIC("NYI: implement me (M4)\n");
-    return NULL;
+    static_assert(ROUND_UP(sizeof(Header), BASE_PAGE_SIZE) == BASE_PAGE_SIZE,
+                  "Header not round up to a base page");
+
+//    struct morecore_state *state = get_morecore_state();
+
+    size_t aligned_bytes = ROUND_UP(bytes, BASE_PAGE_SIZE);
+    void *ret = NULL;
+    errval_t err = paging_alloc(get_current_paging_state(), &ret, aligned_bytes, BASE_PAGE_SIZE);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "morecore_alloc: paging_alloc failed");
+        return NULL;
+    }
+    assert(ret != NULL);
+#if 1
+    DEBUG_PRINTF("morecore_alloc: %p/0x%lx\n", ret, aligned_bytes);
+#endif
+    if (retbytes) *retbytes = aligned_bytes;
+    return ret;
 }
 
 static void morecore_free(void *base, size_t bytes)
 {
-    USER_PANIC("NYI: implement me (M4)\n");
+    // TODO: unmap for large region
+    return;
 }
 
 errval_t morecore_init(size_t alignment)
 {
     debug_printf("initializing dynamic heap\n");
 
-    USER_PANIC("NYI: implement me (M4)\n");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    struct morecore_state *state = get_morecore_state();
+
+    thread_mutex_init(&state->mutex);
+
+    state->freep = morecore_alloc(INITIAL_HEAP_SIZE, NULL);
+    if (state->freep == NULL) {
+        return LIB_ERR_MORECORE_INIT;
+    }
+
+    sys_morecore_alloc = morecore_alloc;
+    sys_morecore_free = morecore_free;
+    return SYS_ERR_OK;
 }
 
 errval_t morecore_reinit(void)
 {
-    USER_PANIC("NYI \n");
+//    USER_PANIC("NYI \n");
     return SYS_ERR_OK;
 }
 

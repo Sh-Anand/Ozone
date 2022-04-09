@@ -18,6 +18,7 @@
 
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
+#include <aos/except.h>
 #include <unistd.h>
 
 #define SHELL_BUF_SIZE 256
@@ -41,6 +42,7 @@ static void print_err_if_any(errval_t err)
 int main(int argc, char *argv[])
 {
     errval_t err;
+
     printf("Hello, world! from userspace and through RPC, presented by AOS team 1\n");
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
@@ -71,11 +73,49 @@ int main(int argc, char *argv[])
                 } else if (strcmp(buf, "help") == 0) {
                     printf("Available commands:\n  exit\n  send_num\n  "
                            "send_str\n  send_large_str\n  get_ram\n  get_pids\n  "
+                           "fault_read  \n  fault_write  \n  fault_null  \n"
+                           "self_paging  \n"
                            "Others are interpreted as spawn commands\n");
 
                 } else if (strcmp(buf, "exit") == 0) {
                     printf("Goodbye, world!\n");
                     return EXIT_SUCCESS;
+
+                } else if (strcmp(buf, "fault_read") == 0) {
+                    printf("%d\n", *((int *)(VMSAv8_64_L0_SIZE * 256)));
+                    printf("SHOULD NOT REACH HERE\n");
+                    return EXIT_FAILURE;
+
+                } else if (strcmp(buf, "fault_write") == 0) {
+                    *((int *)(VMSAv8_64_L0_SIZE * 128)) = 42;
+                    printf("SHOULD NOT REACH HERE\n");
+                    return EXIT_FAILURE;
+
+                } else if (strcmp(buf, "large_malloc") == 0) {
+                    printf("Trying to malloc 64MB...\n");
+                    size_t region_size = 64 * 1024 * 1024;
+                    char *b = malloc(region_size);
+                    if (b == NULL) {
+                        print_err_if_any(LIB_ERR_MALLOC_FAIL);
+                    } else {
+                        printf("malloc succeeded, going to memset whole 64MB, will take some time...\n");
+                        memset(b, 0, region_size);
+                        printf("memset succeeded\n");
+                    }
+
+                } else if (strcmp(buf, "self_paging") == 0) {
+                    printf("Trying to malloc 1GB...\n");
+                    size_t region_size = 1 * 1024LU * 1024LU * 1024LU;
+                    char *b = malloc(region_size);
+                    if (b == NULL) {
+                        print_err_if_any(LIB_ERR_MALLOC_FAIL);
+                    } else {
+                        printf("malloc succeeded, going to memset a few pages\n");
+                        memset(b, 0, BASE_PAGE_SIZE);
+                        memset(b + 512LU * 1024LU * 1024LU, 0, BASE_PAGE_SIZE);
+                        memset(b + region_size - BASE_PAGE_SIZE, 0, BASE_PAGE_SIZE);
+                        printf("memset succeeded\n");
+                    }
 
                 } else if (strcmp(buf, "send_num") == 0) {
                     printf("Trying to send number 42...\n");

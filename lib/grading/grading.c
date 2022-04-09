@@ -6,7 +6,7 @@
 #include <aos/aos_rpc.h>
 #include <grading.h>
 #include <spawn/spawn.h>
-
+#include "test_paging.h"
 
 void grading_setup_bsp_init(int argc, char **argv) { }
 
@@ -95,6 +95,8 @@ __attribute__((unused)) static struct capref test_mem_alloc(lvaddr_t *addr, size
     return frame;
 }
 
+extern struct mm aos_mm;
+
 void grading_test_early(void)
 {
     // test some fixed memory mapping (freeing not yet tested)
@@ -121,6 +123,10 @@ void grading_test_early(void)
     __attribute__((unused)) struct capref frame5 = test_mem_alloc(
         &addr5, 3145728 + 8192);  // TODO: there seems to be an issue still here, where
                                   // something causes a pagefault
+
+    grading_test_paging(&aos_mm, get_current_paging_state());
+//    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 1000);
+//    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 1000);
 
     // debug_printf("tests complete\n");
     // while(1);

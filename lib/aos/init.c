@@ -178,6 +178,8 @@ static void init_ack_handler(void *arg)
     lc->connstate = LMP_CONNECTED;
 }
 
+extern struct capref rpc_reserved_recv_slot;
+
 /** \brief Initialise libbarrelfish.
  *
  * This runs on a thread in every domain, after the dispatcher is setup but
@@ -289,12 +291,14 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
         init_rpc->type = TYPE_LMP;
         init_rpc->chan = init_chan;
-        struct capref init_rpc_slot;
-        err = slot_alloc(&init_rpc_slot);
+        err = lmp_chan_alloc_recv_slot(init_rpc->chan);
         if (err_is_fail(err)) {
             return err;
         }
-        lmp_chan_set_recv_slot(init_rpc->chan, init_rpc_slot);
+        err = slot_alloc(&rpc_reserved_recv_slot);  // allocate reserved slot
+        if (err_is_fail(err)) {
+            return err;
+        }
 
         /* set init RPC client in our program state */
         set_init_rpc(init_rpc);

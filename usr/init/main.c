@@ -252,7 +252,7 @@ static void rpc_recv_handler(void *arg)
     // Refill the cap slot
     if (!capref_is_null(cap)) {
         struct capref new_slot;
-        err = slot_alloc(&new_slot);
+        err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
