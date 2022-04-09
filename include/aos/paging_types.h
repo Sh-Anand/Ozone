@@ -17,6 +17,7 @@
 
 #include <aos/solution.h>
 #include <sys/queue.h>
+#include <sys/tree.h>
 
 #define VADDR_OFFSET ((lvaddr_t)512UL * 1024 * 1024 * 1024)  // 1GB
 #define VREGION_FLAGS_READ 0x01                              // Reading allowed
@@ -36,32 +37,39 @@
 
 typedef int paging_flags_t;
 
-struct paging_table_node {
-    struct capref vnode_cap;
-    struct capref array_frame_cap;
-    void **children;
-};
-static_assert(sizeof(struct paging_table_node *) * PTABLE_ENTRIES == BASE_PAGE_SIZE, "children array size");
+#define PAGING_ADDR_BITS 48
+#define PAGING_TABLE_LEVELS 4
 
-struct paging_header_node {
+struct paging_vnode_node {
+    RB_ENTRY(paging_vnode_node) rb_entry;
+    struct capref vnode_cap;
     struct capref mapping_cap;
+    lvaddr_t addr;
+};
+
+int	paging_vnode_node_cmp(struct paging_vnode_node *, struct paging_vnode_node *);
+
+struct paging_region_node {
+    RB_ENTRY(paging_region_node) rb_entry;
+    LIST_ENTRY(paging_region_node) fl_link;
+    struct capref mapping_cap;
+    lvaddr_t addr;
     uint8_t bits;
     bool free;
-    lvaddr_t addr;
-    LIST_ENTRY(paging_header_node) link;
+    bool placeholder;
 };
 
-#define PAGING_ADDR_BITS 48
+int	paging_region_node_cmp(struct paging_region_node *, struct paging_region_node *);
 
 // struct to store the paging status of a process
 struct paging_state {
+    RB_HEAD(vnode_tree, paging_vnode_node) vnode_tree[PAGING_TABLE_LEVELS];
+    RB_HEAD(region_tree, paging_region_node) region_tree;
     struct slot_allocator *slot_alloc;
-    struct slab_allocator table_slabs;
-    struct slab_allocator header_slabs;
-    struct paging_table_node *l0;
-    LIST_HEAD(, paging_header_node) free_list[PAGING_ADDR_BITS - BASE_PAGE_BITS + 1];
+    struct slab_allocator vnode_slabs;
+    struct slab_allocator region_slabs;
+    LIST_HEAD(paging_free_list_head, paging_region_node) free_list[PAGING_ADDR_BITS - BASE_PAGE_BITS + 1];
     bool refilling;
-    bool booting;
 };
 
 #endif  /// PAGING_TYPES_H_

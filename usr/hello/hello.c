@@ -71,10 +71,13 @@ int main(int argc, char *argv[])
                 if (offset == 0) {
                     // Do nothing, fall back to the next command
                 } else if (strcmp(buf, "help") == 0) {
-                    printf("Available commands:\n  exit\n  send_num\n  "
-                           "send_str\n  send_large_str\n  get_ram\n  get_pids\n  "
-                           "fault_read  \n  fault_write  \n  fault_null  \n"
-                           "self_paging  \n"
+                    printf("Available commands:\n  exit\n"
+                           "RPC:\n"
+                           "  send_num\n  send_str\n  send_large_str\n  get_ram\n"
+                           "  get_pids\n"
+                           "Paging:\n"
+                           "  fault_read\n  fault_write\n  fault_null\n"
+                           "  large_malloc\n  self_paging\n"
                            "Others are interpreted as spawn commands\n");
 
                 } else if (strcmp(buf, "exit") == 0) {

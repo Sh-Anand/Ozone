@@ -559,9 +559,9 @@ static errval_t setup_elf(struct spawninfo *si)
     };
 
     // map binary to our page table
+    // DEBUG_PRINTF("si->module->mrmod_size = %lu\n", si->module->mrmod_size);
     err = paging_map_frame(get_current_paging_state(), (void **)&si->mapped_binary,
-                           (si->module->mrmod_size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE
-                               * BASE_PAGE_SIZE,
+                           ROUND_UP(si->module->mrmod_size, BASE_PAGE_SIZE),
                            child_frame);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
