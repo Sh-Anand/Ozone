@@ -267,12 +267,10 @@ static void binding_handler(void *arg)
     }
 
     // Assign initial slot for incoming cap
-    struct capref new_init_ep_slot;
-    err = slot_alloc(&new_init_ep_slot);
+    err = lmp_chan_alloc_recv_slot(si->lc);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to alloc slot");
     }
-    lmp_chan_set_recv_slot(si->lc, new_init_ep_slot);
 
     // Start receiving on the channel
     err = lmp_chan_register_recv(si->lc, get_default_waitset(),

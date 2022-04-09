@@ -116,6 +116,9 @@ static void *morecore_alloc(size_t bytes, size_t *retbytes)
         return NULL;
     }
     assert(ret != NULL);
+#if 1
+    DEBUG_PRINTF("morecore_alloc: %p/0x%lx\n", ret, aligned_bytes);
+#endif
     if (retbytes) *retbytes = aligned_bytes;
     return ret;
 }

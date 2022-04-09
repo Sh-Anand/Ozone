@@ -112,7 +112,7 @@ static FILE usual[FOPEN_MAX - 3];
 static struct glue uglue = { NULL, FOPEN_MAX - 3, usual };
 
 static FILE __sF[3] = {
-	std(__SRD, STDIN_FILENO),
+	std(__SRD|__SNBF, STDIN_FILENO),
 	std(__SWR, STDOUT_FILENO),
 	std(__SWR|__SNBF, STDERR_FILENO)
 };
