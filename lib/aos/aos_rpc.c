@@ -21,10 +21,12 @@
 struct capref rpc_reserved_recv_slot;  // all 0 is NULL_CAP
 static bool recv_slot_not_refilled = false;
 
+static struct thread_mutex reserved_slot_mutex;  // protect rpc_reserved_recv_slot
+
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
-errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
-                      size_t size, uintptr_t *words, struct capref *ret_cap)
+errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t size,
+                      uintptr_t *words, struct capref *ret_cap)
 {
     errval_t err;
 
@@ -45,12 +47,10 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
 
     size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
     if (size <= remaining_space) {
-
         // Buffer fits in the remaining space
         memcpy(buffer, buf, size);
 
     } else {
-
         // Buffer doesn't fit, make and map frame cap
         DEBUG_PRINTF("rpc_marshall: alloc frame\n")
 
@@ -67,8 +67,7 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
         }
 
         void *addr;
-        err = paging_map_frame(get_current_paging_state(), &addr,
-                               rounded_size, frame_cap);
+        err = paging_map_frame(get_current_paging_state(), &addr, rounded_size, frame_cap);
         if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
         }
@@ -79,6 +78,31 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf,
     return SYS_ERR_OK;
 }
 
+static bool reserved_slot_is_null_thread_safe(void)
+{
+    bool reserved_slot_is_null;
+    THREAD_MUTEX_ENTER(&reserved_slot_mutex)
+    {
+        reserved_slot_is_null = (capref_is_null(rpc_reserved_recv_slot));
+    }
+    THREAD_MUTEX_EXIT(&reserved_slot_mutex)
+    return reserved_slot_is_null;
+}
+
+static errval_t refill_reserved_slot_thread_safe(void)
+{
+    struct capref slot = NULL_CAP;
+    errval_t err = slot_alloc(&slot);
+    // Cannot lock on slot_alloc since it may trigger refill, use a local variable instead
+
+    THREAD_MUTEX_ENTER(&reserved_slot_mutex)
+    {
+        rpc_reserved_recv_slot = slot;
+    }
+    THREAD_MUTEX_EXIT(&reserved_slot_mutex)
+
+    return err;
+}
 /**
  * Unified interface of sending a message.
  * @param rpc
@@ -100,8 +124,17 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
 {
     errval_t err;
 
-    // Alloc reserved recv slot if it's empty
-    assert(!capref_is_null(rpc_reserved_recv_slot));
+    if (reserved_slot_is_null_thread_safe()) {
+        // This can happen when the current send is triggered by a slot refill
+        // In this case, slot allocator is willing to give out a slot as its internal
+        // refill flag is set
+        err = refill_reserved_slot_thread_safe();
+        if (err_is_fail(err)) {
+            debug_printf("failed to alloc rpc_reserved_recv_slot\n");
+            return err_push(err, LIB_ERR_SLOT_ALLOC);
+        }
+    }
+
 
     uintptr_t words[LMP_MSG_LENGTH];
     struct capref send_cap;
@@ -120,10 +153,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
 
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
-                thread_yield();  // TODO : Does this really do what I think it does?
-                                 // (yields thread so another dispatcher can run
-                                 // immediately instead of busy waiting) there are dangers
-                                 // to this though, we may starve
+                thread_yield();
             } else {
                 return err;
             }
@@ -144,7 +174,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
         err = lmp_chan_recv(rpc->chan, &msg, &recv_cap);
         if (err_is_fail(err)) {
             if (err == LIB_ERR_NO_LMP_MSG) {
-                thread_yield();  // TODO verify if this works
+                thread_yield();
             } else {
                 return err;
             }
@@ -161,18 +191,22 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum msg_type identifi
         }
 
         // This can happen when the current call results from slot_alloc
-        if (!capref_is_null(rpc_reserved_recv_slot)) {
+        if (!reserved_slot_is_null_thread_safe()) {
 
-            // Use the reserved slot first, since slot_alloc can trigger a refill which
-            // calls rpc ram alloc, and then we have no slot to receive the cap
-            lmp_chan_set_recv_slot(rpc->chan, rpc_reserved_recv_slot);
-            rpc_reserved_recv_slot = NULL_CAP;
+            THREAD_MUTEX_ENTER(&reserved_slot_mutex)
+            {
+                // Use the reserved slot first, since slot_alloc can trigger a refill
+                // which calls rpc ram alloc, and then we have no slot to receive the cap
+                lmp_chan_set_recv_slot(rpc->chan, rpc_reserved_recv_slot);
+                rpc_reserved_recv_slot = NULL_CAP;
+            }
+            THREAD_MUTEX_EXIT(&reserved_slot_mutex)
 
-
-            err = slot_alloc(&rpc_reserved_recv_slot);  // may trigger refill
+            // Refill rpc_reserved_recv_slot
+            err = refill_reserved_slot_thread_safe();
             if (err_is_fail(err)) {
                 debug_printf("failed to alloc rpc_reserved_recv_slot\n");
-                return err;
+                return err_push(err, LIB_ERR_SLOT_ALLOC);
             }
 
             if (recv_slot_not_refilled) {
@@ -224,25 +258,26 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                              struct capref *ret_cap, size_t *ret_bytes)
 {
-//    if (refilling_recv_slot) {
-//        assert(bytes == BASE_PAGE_SIZE);
-//        *ret_cap = reserved_slot;
-//        if (ret_bytes != NULL)  {
-//            *ret_bytes = BASE_PAGE_SIZE;
-//        }
-//        reserved_slot = NULL_CAP;
-//        return SYS_ERR_OK;
-//    }
+    //    if (refilling_recv_slot) {
+    //        assert(bytes == BASE_PAGE_SIZE);
+    //        *ret_cap = reserved_slot;
+    //        if (ret_bytes != NULL)  {
+    //            *ret_bytes = BASE_PAGE_SIZE;
+    //        }
+    //        reserved_slot = NULL_CAP;
+    //        return SYS_ERR_OK;
+    //    }
 
 
     struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
-    errval_t err = aos_rpc_send_general(rpc, RAM_MSG, NULL_CAP, &msg, sizeof(msg), ret_cap, NULL, NULL);
+    errval_t err = aos_rpc_send_general(rpc, RAM_MSG, NULL_CAP, &msg, sizeof(msg),
+                                        ret_cap, NULL, NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to receive RAM\n");
         return err;
     }
 
-    if (ret_bytes != NULL)  {
+    if (ret_bytes != NULL) {
         // No better way as of now (mm does not return any size)
         struct capability c;
         err = cap_direct_identify(*ret_cap, &c);
@@ -265,19 +300,20 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 {
     // TODO implement functionality to request a character from
     // the serial driver.
-	errval_t err;
-	
-	// TODO: this is no good, do better
-	// a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
-	char info[2] = {1, 0};
-	char *ret_info;
-	size_t rsize;
-	err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, info, 2, NULL, (void**)&ret_info, &rsize);
-	assert(rsize >= 2);
-	
-	*retc = ret_info[1]; // pass the returned character along
-	//printf("retc: %c (err: %d)\n", *retc, err);
-		
+    errval_t err;
+
+    // TODO: this is no good, do better
+    // a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
+    char info[2] = { 1, 0 };
+    char *ret_info;
+    size_t rsize;
+    err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, info, 2, NULL,
+                               (void **)&ret_info, &rsize);
+    assert(rsize >= 2);
+
+    *retc = ret_info[1];  // pass the returned character along
+                          // printf("retc: %c (err: %d)\n", *retc, err);
+
     return err;
 }
 
@@ -286,16 +322,18 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
 {
     // TODO implement functionality to send a character to the
     // serial port.
-	
-	// TODO: this is no good, do better
-	// a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
-	char data[2] = { 0, c };
-	
-	// we don't care about return values or capabilities, just send this single char (again, do better)
-	//sys_print("aos_rpc_serial_putchar called!\n", 32);
-	errval_t err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, data, 2, NULL, NULL, NULL);
-	
-	return err;
+
+    // TODO: this is no good, do better
+    // a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
+    char data[2] = { 0, c };
+
+    // we don't care about return values or capabilities, just send this single char
+    // (again, do better)
+    // sys_print("aos_rpc_serial_putchar called!\n", 32);
+    errval_t err = aos_rpc_send_general(rpc, TERMINAL_MSG, NULL_CAP, data, 2, NULL, NULL,
+                                        NULL);
+
+    return err;
 }
 
 errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core,
@@ -321,10 +359,11 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
 
 errval_t aos_rpc_process_get_name(struct aos_rpc *rpc, domainid_t pid, char **name)
 {
-    struct rpc_process_get_name_call_msg call_msg = {.pid = pid};
+    struct rpc_process_get_name_call_msg call_msg = { .pid = pid };
     struct rpc_process_get_name_return_msg *return_msg = NULL;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME_MSG, NULL_CAP, &call_msg,
-                                        sizeof(call_msg), NULL, (void **)&return_msg, NULL);
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME_MSG, NULL_CAP,
+                                        &call_msg, sizeof(call_msg), NULL,
+                                        (void **)&return_msg, NULL);
     if (err_is_ok(err)) {
         *name = strdup(return_msg->name);
     }  // on failure, fall through
@@ -384,8 +423,31 @@ struct aos_rpc *aos_rpc_get_process_channel(void)
  */
 struct aos_rpc *aos_rpc_get_serial_channel(void)
 {
-    //TODO: Return channel to talk to serial driver/terminal process (whoever
-    //implements print/read functionality)
-    //debug_printf("aos_rpc_get_serial_channel NYI\n");
-    return aos_rpc_get_init_channel(); // XXX: For now return the init channel, since the current serial driver is handled in init
+    // TODO: Return channel to talk to serial driver/terminal process (whoever
+    // implements print/read functionality)
+    // debug_printf("aos_rpc_get_serial_channel NYI\n");
+    return aos_rpc_get_init_channel();  // XXX: For now return the init channel, since the
+                                        // current serial driver is handled in init
+}
+
+errval_t aos_rpc_init(struct aos_rpc *rpc)
+{
+    errval_t err;
+
+    thread_mutex_init(&reserved_slot_mutex);
+
+    err = lmp_chan_alloc_recv_slot(rpc->chan);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    err = slot_alloc(&rpc_reserved_recv_slot);  // allocate reserved slot
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    /* set init RPC client in our program state */
+    set_init_rpc(rpc);
+
+    return SYS_ERR_OK;
 }

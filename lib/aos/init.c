@@ -291,17 +291,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
         init_rpc->type = TYPE_LMP;
         init_rpc->chan = init_chan;
-        err = lmp_chan_alloc_recv_slot(init_rpc->chan);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        err = slot_alloc(&rpc_reserved_recv_slot);  // allocate reserved slot
-        if (err_is_fail(err)) {
-            return err;
-        }
-
-        /* set init RPC client in our program state */
-        set_init_rpc(init_rpc);
+        aos_rpc_init(init_rpc);
 
         ram_alloc_set(NULL); // Use Ram allocation over RPC
     }

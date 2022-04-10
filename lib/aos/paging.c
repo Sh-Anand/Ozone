@@ -42,7 +42,7 @@ static char slab_buf[2][SLAB_INIT_BUF_SIZE];
 static bool slab_buf_used = false;
 
 #define REGION_SLAB_REFILL_THRESHOLD (PAGING_ADDR_BITS - BASE_PAGE_BITS)
-#define VNODE_SLAB_REFILL_THRESHOLD  8
+#define VNODE_SLAB_REFILL_THRESHOLD 8
 
 // Forward declarations
 static void page_fault_handler(enum exception_type type, int subtype, void *addr,
@@ -533,13 +533,14 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
 
         err = lookup_or_create_region_node(st, vaddr & ~MASK(b), b, &node, false);
         if (err_is_ok(err)) {
-
             if (into_placeholder != 1 && node->free) {
                 remove_from_free_list(node);  // refill will not touch it
             } else if (into_placeholder != -1 && node->placeholder) {
                 // Keep the property set so that chop_down_region below works correctly
             } else {
-                DEBUG_PRINTF("paging: fixed mapping to already used region 0x%lx/%lu, free=%d\n", node->addr, BIT(node->bits), node->free);
+                DEBUG_PRINTF("paging: fixed mapping to already used region 0x%lx/%lu, "
+                             "free=%d\n",
+                             node->addr, BIT(node->bits), node->free);
                 return MM_ERR_NOT_FOUND;  // the node is already occupied
             }
 
@@ -577,8 +578,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
 }
 
 static errval_t map_fixed(struct paging_state *st, lvaddr_t vaddr, struct capref frame,
-                          size_t offset, size_t bytes, uint64_t attr,
-                          int into_placeholder)
+                          size_t offset, size_t bytes, uint64_t attr, int into_placeholder)
 {
 #if 0
     DEBUG_PRINTF("map_fixed 0x%lx/%lu, offset = 0x%lu\n", vaddr, bytes, offset);
@@ -709,7 +709,8 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
     return MM_ERR_NOT_FOUND;
 }
 
-static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr, size_t *size)
+static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
+                                        size_t *size)
 {
     if (st == NULL) {
         DEBUG_PRINTF("paging: NULL paging_state\n");
@@ -754,6 +755,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     assert(ca != NULL);
 
+    thread_mutex_init(&st->frame_alloc_mutex);
     st->slot_alloc = ca;
 
     slab_init(&st->region_slabs, sizeof(struct paging_region_node), slab_default_refill);
@@ -875,17 +877,28 @@ errval_t paging_init_onthread(struct thread *t)
 
     struct capref frame = NULL_CAP;
 
-    err = frame_alloc(&frame, EXCEPTION_STACK_SIZE, NULL);
+
+    THREAD_MUTEX_ENTER(&get_current_paging_state()->frame_alloc_mutex)
+    {
+        err = frame_alloc(&frame, EXCEPTION_STACK_SIZE, NULL);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "paging_init_onthread: frame_alloc failed\n");
+            err = err_push(err, LIB_ERR_FRAME_ALLOC);
+            break;
+        }
+    }
+    THREAD_MUTEX_EXIT(&get_current_paging_state()->frame_alloc_mutex)
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "paging_init_onthread: frame_alloc failed\n");
-        return err_push(err, LIB_ERR_FRAME_ALLOC);
+        return err;
     }
 
-    err = paging_map_frame(get_current_paging_state(), &t->exception_stack, EXCEPTION_STACK_SIZE, frame);
+    err = paging_map_frame(get_current_paging_state(), &t->exception_stack,
+                           EXCEPTION_STACK_SIZE, frame);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "paging_init_onthread: paging_map_frame failed\n");
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
+
 
     t->exception_stack_top = t->exception_stack + EXCEPTION_STACK_SIZE;
 
@@ -982,33 +995,60 @@ errval_t paging_unmap(struct paging_state *st, const void *region)
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
+static void __attribute((noreturn))
+handle_real_page_fault(enum exception_type type, int subtype, void *addr,
+                       arch_registers_state_t *regs)
+{
+    DEBUG_PRINTF("unhandled page fault (subtype %d) on %" PRIxPTR " at IP %" PRIxPTR "\n",
+                 subtype, (size_t)addr, regs->named.pc);
+
+    // dump hw page tables
+    // debug_dump_hw_ptables();
+
+    // print out stuff
+    // debug_print_save_area(regs);
+    // debug_dump(regs);
+    debug_call_chain(regs);
+
+    exit(EXIT_FAILURE);
+}
+
 static void page_fault_handler(enum exception_type type, int subtype, void *addr,
                                arch_registers_state_t *regs)
 {
     if (type == EXCEPT_PAGEFAULT) {
+#if 0
+        DEBUG_PRINTF("paging: going to handle page fault at %p...\n", addr);
+#endif
 
         if (addr == NULL) {
-            DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
-            exit(EXIT_FAILURE);
+            handle_real_page_fault(type, subtype, addr, regs);
         }
 
         errval_t err;
         struct capref frame = NULL_CAP;
 
-        err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+        THREAD_MUTEX_ENTER(&get_current_paging_state()->frame_alloc_mutex)
+        {
+            err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+            if (err_is_fail(err)) {
+                USER_PANIC_ERR(err, "paging_page_fault_handler: frame_alloc failed\n");
+            }
+        }
+        THREAD_MUTEX_EXIT(&get_current_paging_state()->frame_alloc_mutex)
+
+        err = map_fixed(
+            get_current_paging_state(), ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame,
+            0, BASE_PAGE_SIZE, flags_to_attr(VREGION_FLAGS_READ_WRITE), 1 /* must */);
         if (err_is_fail(err)) {
-            USER_PANIC_ERR(err, "paging_page_fault_handler: frame_alloc failed\n");
+            handle_real_page_fault(type, subtype, addr, regs);
+        } else {
+            DEBUG_PRINTF("paging: installed page to %p\n", addr);
         }
 
-        err = map_fixed(get_current_paging_state(),
-                        ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame, 0,
-                        BASE_PAGE_SIZE, flags_to_attr(VREGION_FLAGS_READ_WRITE), 1 /* must */);
-        if (err_is_fail(err)) {
-            DEBUG_PRINTF("Page fault! subtype = %d, addr = %p\n", subtype, addr);
-            exit(EXIT_FAILURE);
-        } else {
-            DEBUG_PRINTF("paging: install page to %p\n", addr);
-        }
+    } else {
+        DEBUG_PRINTF("Fault! type = %d, subtype = %d, addr = %p\n", type, subtype, addr);
+        exit(EXIT_FAILURE);
     }
 }
 __attribute__((__unused__)) static errval_t set_page_fault_handler(void)

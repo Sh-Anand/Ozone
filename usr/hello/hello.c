@@ -39,6 +39,33 @@ static void print_err_if_any(errval_t err)
     }
 }
 
+struct thread_param {
+    size_t id;
+    volatile bool should_exit;
+};
+
+static int thread_func(void *params)
+{
+    // struct thread_param *p = params;
+    DEBUG_PRINTF("Trying to malloc 64MB...\n");
+    size_t region_size = 64 * 1024 * 1024;
+    char *b = malloc(region_size);
+    if (b == NULL) {
+        print_err_if_any(LIB_ERR_MALLOC_FAIL);
+    } else {
+        DEBUG_PRINTF("malloc succeeded, going to memset whole 64MB, will take "
+               "some time...\n");
+        memset(b, 0, region_size);
+        DEBUG_PRINTF("memset succeeded\n");
+    }
+    return EXIT_SUCCESS;
+}
+
+#define MAX_THREAD_COUNT 256
+struct thread *threads[MAX_THREAD_COUNT] = { NULL };
+struct thread_param params[MAX_THREAD_COUNT];
+size_t thread_count = 0;
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -71,13 +98,22 @@ int main(int argc, char *argv[])
                 if (offset == 0) {
                     // Do nothing, fall back to the next command
                 } else if (strcmp(buf, "help") == 0) {
-                    printf("Available commands:\n  exit\n"
+                    printf("Available commands:\n"
+                           "  exit\n"
                            "RPC:\n"
-                           "  send_num\n  send_str\n  send_large_str\n  get_ram\n"
+                           "  send_num\n"
+                           "  send_str\n"
+                           "  send_large_str\n"
+                           "  get_ram\n"
                            "  get_pids\n"
                            "Paging:\n"
-                           "  fault_read\n  fault_write\n  fault_null\n"
-                           "  large_malloc\n  self_paging\n"
+                           "  fault_read\n"
+                           "  fault_write\n"
+                           "  fault_null\n"
+                           "  large_malloc\n"
+                           "  self_paging\n"
+                           "Thread:\n"
+                           "  create_thread\n"
                            "Others are interpreted as spawn commands\n");
 
                 } else if (strcmp(buf, "exit") == 0) {
@@ -101,7 +137,8 @@ int main(int argc, char *argv[])
                     if (b == NULL) {
                         print_err_if_any(LIB_ERR_MALLOC_FAIL);
                     } else {
-                        printf("malloc succeeded, going to memset whole 64MB, will take some time...\n");
+                        printf("malloc succeeded, going to memset whole 64MB, will take "
+                               "some time...\n");
                         memset(b, 0, region_size);
                         printf("memset succeeded\n");
                     }
@@ -206,6 +243,26 @@ int main(int argc, char *argv[])
                     }
 
                     free(pids);
+                } else if (strcmp(buf, "sleep") == 0) {
+                    sleep(1);
+
+                } else if (strcmp(buf, "create_thread") == 0) {
+
+                    printf("Going to create 16 threads...\n");
+
+                    for (int i = 0; i < 16; i++) {
+                        params[thread_count].id = thread_count;
+                        params[thread_count].should_exit = false;
+                        threads[thread_count] = thread_create(thread_func,
+                                                              &params[thread_count]);
+                        assert(threads[thread_count] != NULL);
+
+                        thread_count++;
+                    }
+
+                    for (int i = 0; i < 16; i++) {
+                        thread_join(threads[i], NULL);
+                    }
                 } else {
                     domainid_t pid = 0;
                     printf("Hello is going to exit to unblock init!\n");

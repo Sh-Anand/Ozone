@@ -71,10 +71,10 @@ int main(int argc, char *argv[]) {
             // spawn another spawnTester with the level decreased by 1 on the same core
             err = aos_rpc_process_spawn(proc_rpc, cmdline, my_core_id, &spawnTester_pid);
             if (err_is_fail(err)) {
-                DEBUG_PRINTF("  Starting spawnTester failed.\n");
+                DEBUG_PRINTF("Starting spawnTester failed.\n");
                 return EXIT_FAILURE;
             } 
-            DEBUG_PRINTF("  Starting spawnTester succeeded.\n");
+            DEBUG_PRINTF("Starting spawnTester succeeded.\n");
 
         }
         return EXIT_SUCCESS;

@@ -122,6 +122,10 @@ static inline void thread_once(thread_once_t *control, void (*func)(void)) {
  */
 void thread_set_status(int status);
 
+#define THREAD_MUTEX_ENTER(mutex) thread_mutex_lock(mutex); do
+#define THREAD_MUTEX_BREAK        break;
+#define THREAD_MUTEX_EXIT(mutex)  while(0); thread_mutex_unlock(mutex);
+
 __END_DECLS
 
 #endif  // LIBBARRELFISH_THREADS_H

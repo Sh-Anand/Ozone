@@ -68,6 +68,7 @@ struct paging_state {
     struct slot_allocator *slot_alloc;
     struct slab_allocator vnode_slabs;
     struct slab_allocator region_slabs;
+    struct thread_mutex frame_alloc_mutex;
     LIST_HEAD(paging_free_list_head, paging_region_node) free_list[PAGING_ADDR_BITS - BASE_PAGE_BITS + 1];
     bool refilling;
 };

@@ -186,8 +186,6 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
     errval_t err;
     size_t size = ROUND_UP(bytes, BASE_PAGE_SIZE);
 
-    void *current_refill_vaddr;
-
     // Allocate frame
     struct capref frame;
     err = frame_alloc(&frame, size, NULL);
@@ -196,13 +194,14 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
     }
 
     // Map the frame
-    err = paging_map_frame_attr(get_current_paging_state(), &current_refill_vaddr, size, frame, VREGION_FLAGS_READ_WRITE);
+    void *buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, size, frame, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) {
         return err;
     }
 
     // Grow the slabs
-    slab_grow(slabs, (void *) current_refill_vaddr, size);
+    slab_grow(slabs, (void *) buf, size);
 
     return SYS_ERR_OK;
 }
@@ -225,11 +224,26 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
     // Refill the slot allocator without causing a page fault
     // Hint: you can't just use malloc here...
 
-    // FIXME: frame should be used?
+    errval_t err;
+    size_t size = ROUND_UP(minbytes, BASE_PAGE_SIZE);
 
-    return slab_refill_pages(slabs, minbytes);
+    // Allocate frame
+    err = frame_create(frame, size, NULL);
+    if (err_is_fail(err)) {
+        return err;
+    }
 
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Map the frame
+    void *buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, size, frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Grow the slabs
+    slab_grow(slabs, (void *) buf, size);
+
+    return SYS_ERR_OK;
 }
 
 /**
