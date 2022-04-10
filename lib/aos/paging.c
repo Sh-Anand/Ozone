@@ -409,7 +409,8 @@ static errval_t chop_down_region(struct paging_state *st,
         if (err_is_fail(err)) {
             return err;
         }
-        // FIXME: already exists right?
+
+        // XXX: may need to think about this once unmapping is supported
         assert(!right->placeholder);
         right->placeholder = left->placeholder;
         assert(left->addr + BIT(left->bits) == right->addr);
@@ -539,8 +540,8 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
                 // Keep the property set so that chop_down_region below works correctly
             } else {
                 DEBUG_PRINTF("paging: fixed mapping to already used region 0x%lx/%lu, "
-                             "free=%d\n",
-                             node->addr, BIT(node->bits), node->free);
+                             "free=%d, placeholder=%d\n",
+                             node->addr, BIT(node->bits), node->free, node->placeholder);
                 return MM_ERR_NOT_FOUND;  // the node is already occupied
             }
 
@@ -733,8 +734,8 @@ static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
 }
 
 /**
- * TODO(M2): Implement this function.
- * TODO(M4): Improve this function.
+ * DONE (M2): Implement this function.
+ * DONE (M4): Improve this function.
  * \brief Initialize the paging_state struct for the paging
  *        state of the calling process.
  *
@@ -749,8 +750,8 @@ static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
                            struct capref pdir, struct slot_allocator *ca)
 {
-    // TODO (M2): Implement state struct initialization
-    // TODO (M4): Implement page fault handler that installs frames when a page fault
+    // DONE (M2): Implement state struct initialization
+    // DONE (M4): Implement page fault handler that installs frames when a page fault
     // occurs and keeps track of the virtual address space.
 
     assert(ca != NULL);
@@ -809,8 +810,8 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 }
 
 /**
- * TODO(M2): Implement this function.
- * TODO(M4): Improve this function.
+ * DONE(M2): Implement this function.
+ * DONE (M4): Improve this function.
  * \brief Initialize the paging_state struct for the paging state
  *        of a child process.
  *
@@ -825,8 +826,8 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr,
                                    struct capref pdir, struct slot_allocator *ca)
 {
-    // TODO (M2): Implement state struct initialization
-    // TODO (M4): Implement page fault handler that installs frames when a page fault
+    // DONE (M2): Implement state struct initialization
+    // DONE (M4): Implement page fault handler that installs frames when a page fault
     // occurs and keeps track of the virtual address space.
     return paging_init_state(st, start_vaddr, pdir, ca);
 }
@@ -839,8 +840,8 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
 errval_t paging_init(void)
 {
     debug_printf("paging_init\n");
-    // TODO (M2): Call paging_init_state for &current
-    // TODO (M4): initialize self-paging handler
+    // DONE (M2): Call paging_init_state for &current
+    // DONE (M4): initialize self-paging handler
     // TIP: use thread_set_exception_handler() to setup a page fault handler
     // TIP: Think about the fact that later on, you'll have to make sure that
     // you can handle page faults in any thread of a domain.

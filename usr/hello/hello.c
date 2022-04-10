@@ -112,8 +112,8 @@ int main(int argc, char *argv[])
                            "  fault_null\n"
                            "  large_malloc\n"
                            "  self_paging\n"
-                           "Thread:\n"
-                           "  create_thread\n"
+                           "Threads:\n"
+                           "  mt_self_paging\n"
                            "Others are interpreted as spawn commands\n");
 
                 } else if (strcmp(buf, "exit") == 0) {
@@ -246,7 +246,7 @@ int main(int argc, char *argv[])
                 } else if (strcmp(buf, "sleep") == 0) {
                     sleep(1);
 
-                } else if (strcmp(buf, "create_thread") == 0) {
+                } else if (strcmp(buf, "mt_self_paging") == 0) {
 
                     printf("Going to create 16 threads...\n");
 
