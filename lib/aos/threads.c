@@ -36,7 +36,7 @@
 #endif
 
 // TODO (M4): define this once your self-paging implementation works...
-// #define SELF_PAGING_WORKS
+#define SELF_PAGING_WORKS
 
 /// Maximum number of threads in a domain, used to size VM region for thread structures
 // there is no point having MAX_THREADS > LDT_NENTRIES on x86 (see ldt.c)
@@ -206,7 +206,7 @@ static errval_t refill_thread_slabs(struct slab_allocator *slabs)
 {
     // TODO(M4):
     //   - implement me!
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return slab_default_refill(slabs);
 }
 #endif
 
@@ -413,7 +413,11 @@ struct thread *thread_create_unrunnable(thread_func_t start_func, void *arg,
     // set thread's ID
     newthread->id = threadid++;
 
-    paging_init_onthread(newthread);
+    errval_t err = paging_init_onthread(newthread);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "paging_init_onthread failed");
+        return NULL;
+    }
 
     // init registers
     registers_set_initial(&newthread->regs, newthread, (lvaddr_t)thread_entry,

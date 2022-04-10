@@ -871,9 +871,27 @@ errval_t paging_init(void)
  */
 errval_t paging_init_onthread(struct thread *t)
 {
-    // TODO (M4):
-    //   - setup exception handler for thread `t'.
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+
+    struct capref frame = NULL_CAP;
+
+    err = frame_alloc(&frame, EXCEPTION_STACK_SIZE, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "paging_init_onthread: frame_alloc failed\n");
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    }
+
+    err = paging_map_frame(get_current_paging_state(), &t->exception_stack, EXCEPTION_STACK_SIZE, frame);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "paging_init_onthread: paging_map_frame failed\n");
+        return err_push(err, LIB_ERR_PAGING_MAP);
+    }
+
+    t->exception_stack_top = t->exception_stack + EXCEPTION_STACK_SIZE;
+
+    t->exception_handler = page_fault_handler;
+
+    return SYS_ERR_OK;
 }
 
 /**

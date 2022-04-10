@@ -225,8 +225,9 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
     // Refill the slot allocator without causing a page fault
     // Hint: you can't just use malloc here...
 
-    // TODO: for M1, this is sufficient?
-    return slab_refill_pages(slabs, BASE_PAGE_SIZE);
+    // FIXME: frame should be used?
+
+    return slab_refill_pages(slabs, minbytes);
 
     return LIB_ERR_NOT_IMPLEMENTED;
 }
