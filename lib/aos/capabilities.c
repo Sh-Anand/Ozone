@@ -697,7 +697,7 @@ errval_t frame_create(struct capref dest, size_t bytes, size_t *retbytes)
     struct capref ram;
     err = ram_alloc(&ram, bytes);
     if (err_is_fail(err)) {
-        if (err_no(err) == MM_ERR_NOT_FOUND ||
+        if (err_no(err) == MM_ERR_NO_MEMORY ||
             err_no(err) == LIB_ERR_RAM_ALLOC_WRONG_SIZE) {
             return err_push(err, LIB_ERR_RAM_ALLOC_MS_CONSTRAINTS);
         }

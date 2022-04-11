@@ -342,7 +342,7 @@ static inline errval_t lookup_or_create_region_node(struct paging_state *st,
     }
 
     *ret = node;
-    return node != NULL ? SYS_ERR_OK : MM_ERR_FIND_NODE;
+    return node != NULL ? SYS_ERR_OK : 101;//MM_ERR_FIND_NODE;
 }
 
 static inline errval_t ensure_enough_slabs(struct paging_state *st)
@@ -542,7 +542,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
                 DEBUG_PRINTF("paging: fixed mapping to already used region 0x%lx/%lu, "
                              "free=%d, placeholder=%d\n",
                              node->addr, BIT(node->bits), node->free, node->placeholder);
-                return MM_ERR_NOT_FOUND;  // the node is already occupied
+                return 100; //MM_ERR_NOT_FOUND;  // the node is already occupied
             }
 
             err = chop_down_region(st, &node, vaddr - node->addr, bits);
@@ -566,7 +566,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
 
             return SYS_ERR_OK;
 
-        } else if (err == MM_ERR_FIND_NODE) {
+        } else if (err == 101) { //MM_ERR_FIND_NODE
             // Continue to next order
         } else {
             // Other error
@@ -575,7 +575,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
     }
 
     DEBUG_PRINTF("paging: run out of memory\n");
-    return MM_ERR_NOT_FOUND;
+    return 100; //MM_ERR_NOT_FOUND;
 }
 
 static errval_t map_fixed(struct paging_state *st, lvaddr_t vaddr, struct capref frame,
@@ -707,7 +707,7 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
     }
 
     // No available region
-    return MM_ERR_NOT_FOUND;
+    return 100; //MM_ERR_NOT_FOUND;
 }
 
 static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,

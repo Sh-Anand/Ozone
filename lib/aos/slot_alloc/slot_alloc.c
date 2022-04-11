@@ -100,7 +100,7 @@ errval_t root_slot_allocator_refill(cn_ram_alloc_func_t myalloc, void *allocst)
     }
     err = myalloc(allocst, nslots * 2 * OBJSIZE_CTE, &root_ram);
     if (err_is_fail(err)) {
-        return err_push(err, MM_ERR_SLOT_MM_ALLOC);
+        return err_push(err, MM_ERR_SLOT_REFILL);
     }
     err = slot_alloc(&newroot_cap);
     if (err_is_fail(err)) {
