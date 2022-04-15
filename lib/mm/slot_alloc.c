@@ -90,12 +90,16 @@ errval_t slot_alloc_prealloc(void *inst, uint64_t nslots, struct capref *ret)
 
     // We always need at least two capabilities left: One for allocating a cnode and one for allocating nodes in the mm if required.
     // CARE IF USING WITH paging, as it might require additonal nodes
-    if (this->meta[this->current].free - nslots <= 20) { 
+    if (this->meta[this->current].free - nslots <= 2) {
         slot_prealloc_refill(inst);
     }
 
     /* Check if enough space */
     if (this->meta[this->current].free < nslots) {
+        /*
+        debug_printf("slot_prealloc: switching cnodes %d->%d\n",
+                this->current, !this->current);
+        */
         // Allocate from next cnode
         this->current = !this->current;
     }

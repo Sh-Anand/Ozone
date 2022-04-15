@@ -1584,9 +1584,6 @@ errval_t caps_create_new(enum objtype type, lpaddr_t addr, size_t bytes,
     return SYS_ERR_OK;
 }
 
-// TODO: We're currently disabling optimization to avoid some bug (that is most certainly inside the code provided). THIS IS NOT A FIX!
-#pragma GCC push_options
-#pragma GCC optimize("O0")
 STATIC_ASSERT(68 == ObjType_Num, "Knowledge of all cap types");
 /// Retype caps
 /// Create `count` new caps of `type` from `offset` in src, and put them in
@@ -1917,7 +1914,6 @@ errval_t caps_retype(enum objtype type, gensize_t objsize, size_t count,
     TRACE(KERNEL_CAPOPS, RETYPE_DONE, retype_seqnum);
     return SYS_ERR_OK;
 }
-#pragma GCC pop_options
 
 /// Check the validity of a retype operation
 errval_t is_retypeable(struct cte *src_cte, enum objtype src_type,

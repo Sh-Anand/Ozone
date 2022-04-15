@@ -46,7 +46,6 @@ void *slab_alloc(struct slab_allocator *slabs);
 void slab_free(struct slab_allocator *slabs, void *block);
 size_t slab_freecount(struct slab_allocator *slabs);
 errval_t slab_default_refill(struct slab_allocator *slabs);
-//errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes);
 errval_t slab_refill_no_pagefault(struct slab_allocator *slabs,
                                   struct capref frame, size_t minbytes);
 

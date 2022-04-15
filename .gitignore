@@ -49,6 +49,7 @@ bin/
 # clang
 .clang_complete
 compile_commands.json
+test-logs
 
 .DS_Store
 *.icloud

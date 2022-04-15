@@ -112,7 +112,6 @@ elf64_find_section_header_name(genvaddr_t  elf_base,
         (struct Elf64_Shdr *)(elf_lbase + (uintptr_t)head->e_shoff);
 
     assert(head->e_shstrndx < head->e_shnum);
-
     struct Elf64_Shdr *strtab =
         ((void *)shead) + head->e_shstrndx * head->e_shentsize;
 
@@ -125,7 +124,6 @@ elf64_find_section_header_name(genvaddr_t  elf_base,
     {
         const char* strings = (const char*)(elf_lbase +
                                             (size_t)strtab->sh_offset);
-
         if (!strcmp(section_name, strings + shead[i].sh_name)) {
             return &shead[i];
         }
@@ -568,12 +566,14 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
         struct Elf64_Phdr *p = &phead[i];
 
         if (p->p_type == PT_LOAD) {
+            //printf("Loading segment: start=0x%" PRIx64 ", size=0x%" PRIx64
+            //       ", flags=0x%" PRIx32 "\n", p->p_vaddr, p->p_memsz,
+            //       p->p_flags);
+
 
             // Map segment in user-space memory
             void *dest = NULL;
-
             err = allocate_func(state, p->p_vaddr, p->p_memsz, p->p_flags, &dest);
-
             if (err_is_fail(err)) {
                 return err_push(err, ELF_ERR_ALLOCATE);
             }

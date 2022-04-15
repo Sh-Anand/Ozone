@@ -75,7 +75,6 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             } 
             DEBUG_PRINTF("Starting spawnTester succeeded.\n");
-
         }
         return EXIT_SUCCESS;
     }

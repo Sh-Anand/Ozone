@@ -179,31 +179,20 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-    // Hint: you can't just use malloc here...
-    // Hint: For M1, just use the fixed mapping funcionality, however you may want to replace
-    //       the fixed mapping later to avoid conflicts.
-
     errval_t err;
-    size_t size = ROUND_UP(bytes, BASE_PAGE_SIZE);
+    struct capref cap;
 
-    // Allocate frame
-    struct capref frame;
-    err = frame_alloc(&frame, size, NULL);
+    err = slot_alloc(&cap);
     if (err_is_fail(err)) {
-        return err;
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
 
-    // Map the frame
-    void *buf;
-    err = paging_map_frame_attr(get_current_paging_state(), &buf, size, frame, VREGION_FLAGS_READ_WRITE);
+    err = slab_refill_no_pagefault(slabs, cap, bytes);
     if (err_is_fail(err)) {
-        return err;
+        slot_free(cap);
     }
 
-    // Grow the slabs
-    slab_grow(slabs, (void *) buf, size);
-
-    return SYS_ERR_OK;
+    return err;
 }
 
 
