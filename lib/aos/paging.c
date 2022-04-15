@@ -59,21 +59,44 @@ static char exception_stack[EXCEPTION_STACK_SIZE];
 #    define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
-int paging_vnode_node_cmp(struct paging_vnode_node *e1, struct paging_vnode_node *e2)
+/// RB tree implementations for general nodes and wrapper functions
+
+int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1, struct paging_rb_tree_node *e2)
 {
     return (e1->addr < e2->addr ? -1 : e1->addr > e2->addr);
 }
 
-RB_PROTOTYPE(vnode_tree, paging_vnode_node, rb_entry, paging_vnode_node_cmp)
-RB_GENERATE(vnode_tree, paging_vnode_node, rb_entry, paging_vnode_node_cmp)
+RB_PROTOTYPE(paging_rb_tree, paging_rb_tree_node, rb_entry, paging_rb_tree_node_cmp)
+RB_GENERATE(paging_rb_tree, paging_rb_tree_node, rb_entry, paging_rb_tree_node_cmp)
 
-int paging_region_node_cmp(struct paging_region_node *e1, struct paging_region_node *e2)
+static inline void rb_vnode_insert(struct paging_state *st, size_t level,
+                                   struct paging_vnode_node *n)
 {
-    return (e1->addr < e2->addr ? -1 : e1->addr > e2->addr);
+    RB_INSERT(paging_rb_tree, &st->vnode_tree[level], (struct paging_rb_tree_node *)n);
 }
 
-RB_PROTOTYPE(region_tree, paging_region_node, rb_entry, paging_region_node_cmp)
-RB_GENERATE(region_tree, paging_region_node, rb_entry, paging_region_node_cmp)
+static inline void rb_region_insert(struct paging_state *st, struct paging_region_node *n)
+{
+    RB_INSERT(paging_rb_tree, &st->region_tree, (struct paging_rb_tree_node *)n);
+}
+
+static inline struct paging_vnode_node *rb_vnode_find(struct paging_state *st,
+                                                      size_t level, lvaddr_t addr)
+{
+    struct paging_vnode_node find;
+    find.addr = addr;
+    return (struct paging_vnode_node *)RB_FIND(paging_rb_tree, &st->vnode_tree[level],
+                                               (struct paging_rb_tree_node *)&find);
+}
+
+static inline struct paging_region_node *rb_region_find(struct paging_state *st,
+                                                        lvaddr_t addr)
+{
+    struct paging_region_node find;
+    find.addr = addr;
+    return (struct paging_region_node *)RB_FIND(paging_rb_tree, &st->region_tree,
+                                                (struct paging_rb_tree_node *)&find);
+}
 
 /**
  * \brief Helper function that allocates a slot and
@@ -217,7 +240,7 @@ static inline errval_t create_vnode_node(struct paging_state *st, lvaddr_t addr,
     if (ret) {
         *ret = n;
     }
-    RB_INSERT(vnode_tree, &st->vnode_tree[level], n);
+    rb_vnode_insert(st, level, n);
     return SYS_ERR_OK;
 }
 
@@ -264,9 +287,7 @@ static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t leve
 
     errval_t err;
 
-    struct paging_vnode_node find;
-    find.addr = addr;
-    struct paging_vnode_node *node = RB_FIND(vnode_tree, &st->vnode_tree[level], &find);
+    struct paging_vnode_node *node = rb_vnode_find(st, level, addr);
 
     if (node == NULL) {
         // Create vnode from the upper level vnode
@@ -310,7 +331,7 @@ static inline errval_t create_region_node(struct paging_state *st, lvaddr_t addr
     if (ret) {
         *ret = n;
     }
-    RB_INSERT(region_tree, &st->region_tree, n);
+    rb_region_insert(st, n);
     return SYS_ERR_OK;
 }
 
@@ -321,9 +342,7 @@ static inline errval_t lookup_or_create_region_node(struct paging_state *st,
 {
     errval_t err;
 
-    struct paging_region_node find;
-    find.addr = addr;
-    struct paging_region_node *node = RB_FIND(region_tree, &st->region_tree, &find);
+    struct paging_region_node *node = rb_region_find(st, addr);
 
     if (node == NULL && create) {
         // Create the region node

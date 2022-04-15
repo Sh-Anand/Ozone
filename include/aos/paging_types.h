@@ -40,31 +40,41 @@ typedef int paging_flags_t;
 #define PAGING_ADDR_BITS 48
 #define PAGING_TABLE_LEVELS 4
 
-struct paging_vnode_node {
-    RB_ENTRY(paging_vnode_node) rb_entry;
-    struct capref vnode_cap;
-    struct capref mapping_cap;
+// General node type to work with RB trees
+struct paging_rb_tree_node {
+    RB_ENTRY(paging_rb_tree_node) rb_entry;
     lvaddr_t addr;
 };
 
-int	paging_vnode_node_cmp(struct paging_vnode_node *, struct paging_vnode_node *);
+int	paging_rb_tree_node_cmp(struct paging_rb_tree_node *, struct paging_rb_tree_node *);
+
+RB_HEAD(paging_rb_tree, paging_rb_tree_node);  // tree type declaration
+
+struct paging_vnode_node {
+    // "Inherit" struct paging_general_node
+    RB_ENTRY(paging_rb_tree_node) rb_entry;
+    lvaddr_t addr;
+    // Other fields
+    struct capref vnode_cap;
+    struct capref mapping_cap;
+};
 
 struct paging_region_node {
-    RB_ENTRY(paging_region_node) rb_entry;
+    // "Inherit" struct paging_general_node
+    RB_ENTRY(paging_rb_tree_node) rb_entry;
+    lvaddr_t addr;
+    // Other fields
     LIST_ENTRY(paging_region_node) fl_link;
     struct capref mapping_cap;
-    lvaddr_t addr;
     uint8_t bits;
     bool free;
     bool placeholder;
 };
 
-int	paging_region_node_cmp(struct paging_region_node *, struct paging_region_node *);
-
 // struct to store the paging status of a process
 struct paging_state {
-    RB_HEAD(vnode_tree, paging_vnode_node) vnode_tree[PAGING_TABLE_LEVELS];
-    RB_HEAD(region_tree, paging_region_node) region_tree;
+    struct paging_rb_tree vnode_tree[PAGING_TABLE_LEVELS];
+    struct paging_rb_tree region_tree;
     struct slot_allocator *slot_alloc;
     struct slab_allocator vnode_slabs;
     struct slab_allocator region_slabs;
