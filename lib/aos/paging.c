@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 
+// #define DEBUG_REFILL
+
 static const lvaddr_t TABLE_ADDR_MASK[] = { MASK(PAGING_ADDR_BITS), VMSAv8_64_L0_MASK,
                                             VMSAv8_64_L1_BLOCK_MASK,
                                             VMSAv8_64_L2_BLOCK_MASK,
@@ -203,12 +205,13 @@ static inline void decode_indices(size_t level, lvaddr_t rvaddr, size_t bytes,
 
 /**
  * \brief Helper function to map src (frame or vnode) into dest (vnode)
- *        Can trigger slot refill.
+ *        Will not trigger slot refill.
  */
 static inline errval_t apply_mapping(struct paging_state *st, struct capref dest,
                                      struct capref src, capaddr_t slot, uint64_t attr,
                                      uint64_t off, uint64_t pte_count,
-                                     struct paging_mapping_node_head *mappings)
+                                     struct paging_mapping_node_head *mappings,
+                                     bool store_frame_cap)
 {
     assert(!capref_is_null(dest));
     assert(!capref_is_null(src));
@@ -231,7 +234,11 @@ static inline errval_t apply_mapping(struct paging_state *st, struct capref dest
 
     if (mappings) {
         struct paging_mapping_child_node *child = slab_alloc(&st->mapping_child_slabs);
+        memset(child, 0, sizeof(*child));  // NULL_CAP is 0
         child->mapping_cap = mapping_cap;
+        if (store_frame_cap) {
+            child->self_paging_frame_cap = src;
+        }
         LIST_INSERT_HEAD(mappings, child, link);
     }  // discard otherwise
 
@@ -293,7 +300,6 @@ static inline void delete_vnode_node(struct paging_state *st, size_t level,
 
 static inline errval_t create_and_install_vnode_node(struct paging_state *st,
                                                      lvaddr_t addr, size_t level,
-                                                     size_t index,
                                                      struct capref parent_cap,
                                                      struct paging_vnode_node **node_ptr)
 {
@@ -312,8 +318,9 @@ static inline errval_t create_and_install_vnode_node(struct paging_state *st,
     }
 
     // Install the page table
-    err = apply_mapping(st, parent_cap, (*node_ptr)->vnode_cap, index,
-                        KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1, NULL);
+    err = apply_mapping(st, parent_cap, (*node_ptr)->vnode_cap,
+                        get_child_index(addr, level - 1),
+                        KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1, NULL, false);
     if (err_is_fail(err)) {
         goto FAILURE_APPLY_MAPPING;
     }
@@ -341,31 +348,71 @@ static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t leve
     errval_t err;
 
     struct paging_vnode_node *node = rb_vnode_find(st, level, addr);
-
-    if (node == NULL) {
-        // Create vnode from the upper level vnode
-        assert(level > 0 && "L0 node not exist");
-        struct paging_vnode_node *parent = NULL;
-        err = lookup_or_create_vnode_node(st, level - 1,
-                                          addr & ~(TABLE_ADDR_MASK[level - 1]), &parent);
-        if (err_is_fail(err)) {
-            DEBUG_PRINTF("lookup_or_create_vnode_node(%lu) failed\n", level);
-            return err;  // no need to clean up, since the node is accessible from rb tree
-        }
-
-        // Create and install the current vnode
-        assert(!capref_is_null(parent->vnode_cap));
-        err = create_and_install_vnode_node(
-            st, addr, level, get_child_index(addr, level - 1), parent->vnode_cap, &node);
-        if (err_is_fail(err)) {
-            DEBUG_PRINTF("create_and_install_vnode_node(%lu) index=%lu failed\n", level,
-                         get_child_index(addr, level - 1));
-            return err;  // no need to clean up
-        }
+    if (node != NULL) {
+        goto DONE;
     }
 
+    // Create vnode from the upper level vnode
+    assert(level > 0 && "L0 node not exist");
+    struct paging_vnode_node *parent = NULL;
+    err = lookup_or_create_vnode_node(st, level - 1, addr & ~(TABLE_ADDR_MASK[level - 1]),
+                                      &parent);
+    if (err_is_fail(err)) {
+        DEBUG_PRINTF("lookup_or_create_vnode_node(%lu) failed\n", level);
+        return err;  // return directly, no need to clean up
+    }
+    assert(!capref_is_null(parent->vnode_cap));
+
+    // The operation above may trigger refill/vnode alloc that creates the vnode node
+    node = rb_vnode_find(st, level, addr);
+    if ((node = rb_vnode_find(st, level, addr)) != NULL) {
+        goto DONE;
+    }
+
+    // Create the vnode cap
+    struct capref vnode_cap;
+    err = pt_alloc(st, PAGE_TABLE_TYPE[level], &vnode_cap);
+    if (err_is_fail(err)) {
+        goto FAILURE_PT_ALLOC;
+    }
+
+    // The operation above may trigger refill/vnode alloc that creates the vnode node
+    if ((node = rb_vnode_find(st, level, addr)) != NULL) {
+        err = SYS_ERR_OK;  // fall back to the undo path, but return OK
+        goto UNDO_PT_ALLOC;
+    }
+
+    // Install the page table
+    err = apply_mapping(st, parent->vnode_cap, vnode_cap,
+                        get_child_index(addr, level - 1),
+                        KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1, NULL, false);
+    if ((node = rb_vnode_find(st, level, addr)) != NULL) {
+        err = SYS_ERR_OK;  // fall back to the undo path, and return OK, regardless of error
+        goto UNDO_PT_ALLOC;
+    }
+    if (err_is_fail(err)) {
+        goto FAILURE_APPLY_MAPPING;
+    }
+
+    // Create the vnode node, should not trigger refill
+    err = create_vnode_node(st, addr, level, &node);
+    if (err_is_fail(err)) {
+        goto FAILURE_CREATE_VNODE_NODE;
+    }
+    node->vnode_cap = vnode_cap;
+
+DONE:
     *ret = node;
+    assert(!capref_is_null(node->vnode_cap));
     return SYS_ERR_OK;
+
+FAILURE_CREATE_VNODE_NODE:
+FAILURE_APPLY_MAPPING:
+UNDO_PT_ALLOC:
+    cap_destroy(vnode_cap);
+FAILURE_PT_ALLOC:
+    *ret = node;
+    return err;
 }
 
 // free is initialized to false
@@ -435,23 +482,40 @@ static inline errval_t create_mapping_node(struct paging_state *st,
     return SYS_ERR_OK;
 }
 
+static inline errval_t
+unmap_and_delete_mapping_child(struct paging_state *st,
+                               struct paging_mapping_child_node *child)
+{
+    errval_t err = cap_destroy(child->mapping_cap);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    if (!capref_is_null(child->self_paging_frame_cap)) {
+        err = cap_destroy(child->self_paging_frame_cap);
+        if (err_is_fail(err)) {
+            return err;
+        }
+    }
+    slab_free(&st->mapping_child_slabs, child);
+    return SYS_ERR_OK;
+}
+
 static inline errval_t unmap_mapping_link(struct paging_state *st,
                                           struct paging_mapping_node_head *head)
 {
     struct paging_mapping_child_node *child, *tmp;
     LIST_FOREACH_SAFE(child, head, link, tmp)
     {
-        errval_t err = cap_destroy(child->mapping_cap);
+        errval_t err = unmap_and_delete_mapping_child(st, child);
         if (err_is_fail(err)) {
             return err;
         }
-        slab_free(&st->mapping_child_slabs, child);
     }
     return SYS_ERR_OK;
 }
 
-static inline errval_t unmap_and_delete(struct paging_state *st,
-                                        struct paging_mapping_node *n)
+static inline errval_t unmap_and_delete_mapping_node(struct paging_state *st,
+                                                     struct paging_mapping_node *n)
 {
     // Unmap and delete all children mapping cap
     errval_t err = unmap_mapping_link(st, &n->mappings);
@@ -470,44 +534,60 @@ static inline errval_t ensure_enough_slabs(struct paging_state *st)
     }
 
     if (slab_freecount(&st->vnode_slabs) < VNODE_SLAB_REFILL_THRESHOLD) {
-        // DEBUG_PRINTF("paging: refill vnode slabs\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill vnode slabs\n");
+#endif
         st->refilling = true;
         errval_t err = st->vnode_slabs.refill_func(&st->vnode_slabs);
         st->refilling = false;
         if (err_is_fail(err)) {
             return err;
         }
-        // DEBUG_PRINTF("paging: refill vnode slabs done\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill vnode slabs done\n");
+#endif
     }
     if (slab_freecount(&st->region_slabs) < REGION_SLAB_REFILL_THRESHOLD) {
-        // DEBUG_PRINTF("paging: refill region slabs\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill region slabs\n");
+#endif
         st->refilling = true;
         errval_t err = st->region_slabs.refill_func(&st->region_slabs);
         st->refilling = false;
         if (err_is_fail(err)) {
             return err;
         }
-        // DEBUG_PRINTF("paging: refill region slabs done\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill region slabs done\n");
+#endif
     }
     if (slab_freecount(&st->mapping_node_slabs) < MAPPING_NODE_SLAB_REFILL_THRESHOLD) {
-        // DEBUG_PRINTF("paging: refill mapping node slabs\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill mapping node slabs\n");
+#endif
         st->refilling = true;
         errval_t err = st->mapping_node_slabs.refill_func(&st->mapping_node_slabs);
         st->refilling = false;
         if (err_is_fail(err)) {
             return err;
         }
-        // DEBUG_PRINTF("paging: refill mapping node slabs done\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill mapping node slabs done\n");
+#endif
     }
     if (slab_freecount(&st->mapping_child_slabs) < MAPPING_CHILD_SLAB_REFILL_THRESHOLD) {
-        // DEBUG_PRINTF("paging: refill mapping child slabs\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill mapping child slabs\n");
+#endif
         st->refilling = true;
         errval_t err = st->mapping_child_slabs.refill_func(&st->mapping_child_slabs);
         st->refilling = false;
         if (err_is_fail(err)) {
             return err;
         }
-        // DEBUG_PRINTF("paging: refill mapping child slabs done\n");
+#if defined(DEBUG_REFILL)
+        DEBUG_PRINTF("paging: refill mapping child slabs done\n");
+#endif
     }
     return SYS_ERR_OK;
 }
@@ -547,7 +627,7 @@ static errval_t chop_down_region(struct paging_state *st,
 
         // Lookup or create buddy node
         struct paging_region_node *right = NULL;
-        err = lookup_or_create_region_node(st, left->addr | BIT(left->bits), left->bits,
+        err = lookup_or_create_region_node(st, left->addr ^ BIT(left->bits), left->bits,
                                            &right, true);
         if (err_is_fail(err)) {
             return err;  // here is nothing much we can do here
@@ -579,13 +659,16 @@ static errval_t chop_down_region(struct paging_state *st,
  * @param bytes
  * @param attr            If 0, immediately return SYS_ERR_OK.
  * @param mappings
+ * @param store_frame_cap If true, store the frame capability to ONE OF the
+ *                        paging_mapping_child_node that is created (no guarantee on which
+ *                        one)
  * @return
  * @note  On error, this function guaranteed that all mappings that are already performed
  *        are inserted into the HEAD of mappings. Page table construction is not reversed.
  */
 static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref frame,
                           size_t offset, size_t bytes, uint64_t attr,
-                          struct paging_mapping_node_head *mappings)
+                          struct paging_mapping_node_head *mappings, bool store_frame_cap)
 {
     if (attr == 0) {  // for placeholder
         return SYS_ERR_OK;
@@ -605,6 +688,7 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
 
     for (lvaddr_t l3_addr = l3_addr_start; l3_addr < l3_addr_end;
          l3_addr += VMSAv8_64_L2_BLOCK_SIZE) {
+
         err = ensure_enough_slabs(st);
         if (err_is_fail(err)) {
             return err;
@@ -629,9 +713,20 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
 #if 0
         debug_printf("child_start = %lu, end = %lu, count = %lu; offset = %lu\n", child_start, child_end, child_count, offset);
 #endif
-        err = apply_mapping(st, l3_node->vnode_cap, frame, child_start, attr, offset,
-                            child_count, mappings);
+
+        // Allocate the mapping capability slot
+        struct capref mapping_cap;
+        err = st->slot_alloc->alloc(st->slot_alloc, &mapping_cap);
         if (err_is_fail(err)) {
+            return err;
+        }
+
+        assert(!capref_is_null(l3_node->vnode_cap));
+        err = apply_mapping(st, l3_node->vnode_cap, frame, child_start, attr, offset,
+                            child_count, mappings, store_frame_cap);
+        store_frame_cap = false;  // no longer store the frame
+        if (err_is_fail(err)) {
+            st->slot_alloc->free(st->slot_alloc, mapping_cap);
             return err;
         }
         offset += child_mapping_size;
@@ -679,9 +774,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
             if (node->free) {
                 remove_from_free_list(node);  // refill will not touch it
             } else {
-                DEBUG_PRINTF("paging: fixed mapping to already used region 0x%lx/%lu\n",
-                             node->addr, BIT(node->bits));
-                return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
+                continue;  // look for a larger one
             }
 
             err = chop_down_region(st, &node, vaddr - node->addr, bits);
@@ -699,9 +792,10 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
             }
 
             // Actually map the frame, which may span multiple tables
-            err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings);
+            err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings,
+                            false);
             if (err_is_fail(err)) {
-                DEBUG_PRINTF("Failed to map_frame\n");
+                DEBUG_PRINTF("failed to map_frame (map_naturally_aligned_fixed)\n");
                 goto FAILURE_MAP_FRAME;
             }
 
@@ -717,15 +811,16 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
         }
     }
 
-    DEBUG_PRINTF("paging: run out of memory\n");
-    return LIB_ERR_PAGING_NO_MEMORY;
+    DEBUG_PRINTF("paging: fixed mapping to already used region");
+    return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
 
 FAILURE_MAP_FRAME:
     // Continue to unmap_and_delete
 
-    err2 = unmap_and_delete(st, mapping);
+    err2 = unmap_and_delete_mapping_node(st, mapping);
     if (err_is_fail(err2)) {
-        DEBUG_PRINTF("unmap_and_delete failed on the way handling failure\n");
+        DEBUG_PRINTF("unmap_and_delete_mapping_node failed on the way handling "
+                     "failure\n");
         err = err_push(err, err2);
     }
 FAILURE_CREATE_MAPPING_NODE:
@@ -802,7 +897,7 @@ static errval_t map_dynamic_using_node(struct paging_state *st, void **buf, uint
 
     err = chop_down_region(st, &node, 0, bits);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("Failed to chop_down_region\n");
+        DEBUG_PRINTF("failed to chop_down_region\n");
         goto FAILURE_CHOP_DOWN_REGION;
     }
     assert(node->bits == bits);
@@ -811,14 +906,16 @@ static errval_t map_dynamic_using_node(struct paging_state *st, void **buf, uint
 
     err = create_mapping_node(st, node, &mapping);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("Failed to create_mapping_node\n");
+        DEBUG_PRINTF("failed to create_mapping_node\n");
         goto FAILURE_CREATE_MAPPING_NODE;
     }
 
     // Actually map the frame, which may span multiple tables
-    err = map_frame(st, node->addr, frame, 0, bytes, attr, &mapping->mappings);
+    err = map_frame(st, node->addr, frame, 0, bytes, attr, &mapping->mappings, false);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("Failed to map_frame\n");
+        DEBUG_PRINTF("failed to map_frame (map_dynamic_using_node node=0x%lx << %u, "
+                     "frame bytes = %lu)\n",
+                     node->addr, node->bits, bytes);
         goto FAILURE_MAP_FRAME;
     }
 
@@ -835,9 +932,10 @@ static errval_t map_dynamic_using_node(struct paging_state *st, void **buf, uint
 FAILURE_MAP_FRAME:
     // Continue to unmap_and_delete
 
-    err2 = unmap_and_delete(st, mapping);
+    err2 = unmap_and_delete_mapping_node(st, mapping);
     if (err_is_fail(err2)) {
-        DEBUG_PRINTF("unmap_and_delete failed on the way handling failure\n");
+        DEBUG_PRINTF("unmap_and_delete_mapping_node failed on the way handling "
+                     "failure\n");
         err = err_push(err, err2);
     }
 FAILURE_CREATE_MAPPING_NODE:
@@ -894,12 +992,13 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
  * @param bytes
  * @param offset
  * @param attr
+ * @param store_frame_cap
  * @return
  * @note  On error, mapping is undone in this function.
  */
 static errval_t map_into_placeholder(struct paging_state *st, lvaddr_t vaddr,
                                      struct capref frame, size_t bytes, size_t offset,
-                                     uint64_t attr)
+                                     uint64_t attr, bool store_frame_cap)
 {
 #if 0
     DEBUG_PRINTF("map_into_placeholder 0x%lx/%lu, offset = 0x%lu\n", vaddr, bytes, offset);
@@ -922,7 +1021,8 @@ static errval_t map_into_placeholder(struct paging_state *st, lvaddr_t vaddr,
         if (mapping == NULL) {
             DEBUG_PRINTF("b = %u, mapping = NULL\n", b);
         } else {
-            DEBUG_PRINTF("b = %u, mapping = 0x%lx/%u bits\n", b, mapping->addr, mapping->region->bits);
+            DEBUG_PRINTF("b = %u, mapping = 0x%lx/%u bits\n", b, mapping->addr,
+                         mapping->region->bits);
         }
 #endif
 
@@ -933,9 +1033,10 @@ static errval_t map_into_placeholder(struct paging_state *st, lvaddr_t vaddr,
 
             // Actually map the frame, which may span multiple tables
             // map_frame ensures that new mapping are inserted to the head
-            err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings);
+            err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings,
+                            store_frame_cap);
             if (err_is_fail(err)) {
-                DEBUG_PRINTF("Failed to map_frame\n");
+                DEBUG_PRINTF("failed to map_frame (map_into_placeholder)\n");
                 goto FAILURE_MAP_FRAME;
             }
 
@@ -950,18 +1051,17 @@ static errval_t map_into_placeholder(struct paging_state *st, lvaddr_t vaddr,
 FAILURE_MAP_FRAME:
     // Undo the mapping only in this function
     {
-        struct paging_mapping_child_node *node, *tmp;
-        LIST_FOREACH_SAFE(node, &mapping->mappings, link, tmp)
+        struct paging_mapping_child_node *child, *tmp;
+        LIST_FOREACH_SAFE(child, &mapping->mappings, link, tmp)
         {
-            if (node == old_mapping_head) {
+            if (child == old_mapping_head) {
                 break;
             }
-            err2 = cap_destroy(node->mapping_cap);
+            err2 = unmap_and_delete_mapping_child(st, child);
             if (err_is_fail(err2)) {
                 err = err_push(err2, err2);
                 break;
             }
-            slab_free(&st->mapping_child_slabs, node);
         }
         mapping->mappings.lh_first = old_mapping_head;
     }
@@ -969,11 +1069,80 @@ FAILURE_MAP_FRAME:
     return err;
 }
 
+/**
+ * Unmap a region of memory.
+ * @param st
+ * @param vaddr
+ * @param frame
+ * @param bytes
+ * @param offset
+ * @param attr
+ * @return
+ * @note  On error, done unmapping is NOT reverted (mapped again).
+ */
+static errval_t unmap(struct paging_state *st, lvaddr_t vaddr)
+{
+#if 0
+    DEBUG_PRINTF("unmap 0x%lx\n", vaddr);
+#endif
+
+    errval_t err;
+
+    struct paging_mapping_node *mapping = rb_mapping_find(st, vaddr);
+    if (mapping == NULL) {
+        return LIB_ERR_PAGING_UNMAP_NOT_FOUND;
+    }
+
+    struct paging_region_node *node = mapping->region;
+    assert(node->addr == mapping->addr);
+    assert(!node->free);
+
+    // Destroy the mapping caps
+    unmap_and_delete_mapping_node(st, mapping);
+    mapping = NULL;
+
+    // Merge node iteratively
+    while (node->bits < PAGING_ADDR_BITS) {
+        // Lookup buddy node
+        struct paging_region_node *buddy = NULL;
+        const lvaddr_t buddy_addr = node->addr ^ BIT(node->bits);
+        err = lookup_or_create_region_node(st, buddy_addr, node->bits, &buddy, false);
+        if (err_is_fail(err) && err != LIB_ERR_PAGING_REGION_NODE_NOT_FOUND) {
+            DEBUG_PRINTF("fail to lookup_or_create_region_node 0x%lx/%u bits\n",
+                         buddy_addr, node->bits);
+            return err;  // here is nothing much we can do here
+        }
+
+        if (err == LIB_ERR_PAGING_REGION_NODE_NOT_FOUND || !buddy->free) {
+            break;  // the buddy is not free, or the buddy node is not at the same level
+        } else {
+            remove_from_free_list(buddy);
+        }
+
+        // Combine the node with its buddy and switch to the upper level one
+        assert(node->bits == buddy->bits);
+        if ((buddy->addr & BIT(buddy->bits)) == 0) {
+            node = buddy;
+        }
+        node->bits++;
+    }
+
+    insert_to_free_list(st, node);
+#if 0
+    DEBUG_PRINTF("unmap insert 0x%lx/%lu to free list\n", node->addr, BIT(node->bits));
+#endif
+    return SYS_ERR_OK;
+}
+
 static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
                                         size_t *size)
 {
     if (st == NULL) {
         DEBUG_PRINTF("paging: NULL paging_state\n");
+        return ERR_INVALID_ARGS;
+    }
+    if (vaddr < st->start_addr) {
+        DEBUG_PRINTF("paging: vaddr < start_addr\n");
         return ERR_INVALID_ARGS;
     }
     if (vaddr > BIT(PAGING_ADDR_BITS)) {
@@ -1017,6 +1186,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     thread_mutex_init(&st->frame_alloc_mutex);
     st->slot_alloc = ca;
+    st->start_addr = start_vaddr;
 
     slab_init(&st->region_slabs, sizeof(struct paging_region_node), slab_default_refill);
     slab_init(&st->vnode_slabs, sizeof(struct paging_vnode_node), slab_default_refill);
@@ -1050,7 +1220,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     struct paging_vnode_node *l0 = NULL;
     err = create_vnode_node(st, 0, 0, &l0);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("paging: failed to create L0 vnode\n")
+        DEBUG_PRINTF("failed to create L0 vnode node\n")
         return err;
     }
     l0->vnode_cap = pdir;
@@ -1058,7 +1228,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     struct paging_region_node *init_region = NULL;
     err = create_region_node(st, 0, PAGING_ADDR_BITS, &init_region);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("paging: failed to create L0 region\n")
+        DEBUG_PRINTF("failed to create L0 region node\n")
         return err;
     }
     insert_to_free_list(st, init_region);
@@ -1067,7 +1237,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
         // Grab the region before start_vaddr with attr 0, not actually mapping anything
         err = map_fixed(st, 0, NULL_CAP, 0, start_vaddr, 0);
         if (err_is_fail(err)) {
-            DEBUG_PRINTF("paging: failed to grab the region before start_vaddr\n")
+            DEBUG_PRINTF("failed to grab the region before start_vaddr\n")
             return err;
         }
     }
@@ -1188,7 +1358,7 @@ errval_t paging_init_onthread(struct thread *t)
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t alignment)
 {
-    errval_t err = assert_arguments(st, 0, &bytes);
+    errval_t err = assert_arguments(st, st->start_addr /* useless */, &bytes);
     if (err_is_fail(err)) {
         return err;
     }
@@ -1213,7 +1383,7 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr(struct paging_state *st, void **buf, size_t bytes,
                                struct capref frame, int flags)
 {
-    errval_t err = assert_arguments(st, 0, &bytes);
+    errval_t err = assert_arguments(st, st->start_addr /* useless */, &bytes);
     if (err_is_fail(err)) {
         return err;
     }
@@ -1244,7 +1414,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
     }
 
     // Try placeholder
-    err = map_into_placeholder(st, vaddr, frame, bytes, 0, flags_to_attr(flags));
+    err = map_into_placeholder(st, vaddr, frame, bytes, 0, flags_to_attr(flags), false);
     if (err_is_ok(err)) {
         return SYS_ERR_OK;
     } else if (err != LIB_ERR_PAGING_PLACEHOLDER_NOT_FOUND) {
@@ -1270,7 +1440,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
  */
 errval_t paging_unmap(struct paging_state *st, const void *region)
 {
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return unmap(st, (lvaddr_t)region);
 }
 
 static void __attribute((noreturn))
@@ -1317,8 +1487,9 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
 
         err = map_into_placeholder(
             get_current_paging_state(), ROUND_DOWN((lvaddr_t)addr, BASE_PAGE_SIZE), frame,
-            BASE_PAGE_SIZE, 0, flags_to_attr(VREGION_FLAGS_READ_WRITE));
+            BASE_PAGE_SIZE, 0, flags_to_attr(VREGION_FLAGS_READ_WRITE), true);
         if (err_is_fail(err)) {
+            // XXX: the frame capability may or may not be stored yet, ignore it for now
             handle_real_page_fault(type, subtype, addr, regs);
         } else {
             DEBUG_PRINTF("paging: installed page to %p\n", addr);
