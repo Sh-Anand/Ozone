@@ -221,6 +221,7 @@ errors libaos LIB_ERR_ {
     failure PAGING_REGION_NODE_NOT_FOUND  "Failed to find the region node",
     failure PAGING_NO_MEMORY  "Paging ran out of memory",
     failure PAGING_FIXED_MAP_OCCUPIED  "Tried to fixed map to a region that is already occupied",
+    failure PAGING_PLACEHOLDER_NOT_FOUND  "Failed to find the placeholder node",
 
     // nested errors in specific functions
     failure FRAME_ALLOC         "Failure in frame_alloc()",

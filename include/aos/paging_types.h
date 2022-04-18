@@ -56,7 +56,7 @@ struct paging_vnode_node {
     lvaddr_t addr;
     // Other fields
     struct capref vnode_cap;
-    struct capref mapping_cap;
+    // Mapping cap is discarded now
 };
 
 struct paging_region_node {
@@ -65,19 +65,34 @@ struct paging_region_node {
     lvaddr_t addr;
     // Other fields
     LIST_ENTRY(paging_region_node) fl_link;
-    struct capref mapping_cap;
     uint8_t bits;
     bool free;
-    bool placeholder;
+};
+
+struct paging_mapping_child_node {
+    LIST_ENTRY(paging_mapping_child_node) link;
+    struct capref mapping_cap;
+};
+
+struct paging_mapping_node {
+    // "Inherit" struct paging_general_node
+    RB_ENTRY(paging_rb_tree_node) rb_entry;
+    lvaddr_t addr;
+    // Other fields
+    LIST_HEAD(paging_mapping_node_head, paging_mapping_child_node) mappings;
+    struct paging_region_node *region;
 };
 
 // struct to store the paging status of a process
 struct paging_state {
     struct paging_rb_tree vnode_tree[PAGING_TABLE_LEVELS];
     struct paging_rb_tree region_tree;
+    struct paging_rb_tree mapping_tree;
     struct slot_allocator *slot_alloc;
     struct slab_allocator vnode_slabs;
     struct slab_allocator region_slabs;
+    struct slab_allocator mapping_node_slabs;
+    struct slab_allocator mapping_child_slabs;
     struct thread_mutex frame_alloc_mutex;
     LIST_HEAD(paging_free_list_head, paging_region_node) free_list[PAGING_ADDR_BITS - BASE_PAGE_BITS + 1];
     bool refilling;

@@ -31,7 +31,7 @@ __BEGIN_DECLS
 #define MASK(n) MASK_T(uint64_t, n)
 
 /* An n-bit field selector, beginning at bit m */
-#define FIELD(m,n,x) (((x) >> m) & MASK(n))
+#define FIELD(m,n,x) (((x) >> (m)) & MASK(n))
 
 /* Round n up to the next multiple of size */
 #define ROUND_UP(n, size) ((((n) + (size) - 1)) & (~((size) - 1)))
