@@ -17,6 +17,7 @@
 
 #include <aos/aos.h>
 #include <aos/morecore.h>
+#include <aos/coreboot.h>
 #include <aos/paging.h>
 #include <aos/waitset.h>
 #include <aos/aos_rpc.h>
@@ -226,6 +227,30 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
     return SYS_ERR_OK;
 }
 
+static errval_t boot_core(coreid_t mpid) {
+    errval_t err;
+
+    struct capref frame;
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL); //TODO: REPLACE WITH A FIXED UMP FRAME SIZE LATER!
+
+    if(err_is_fail(err))
+        return err;
+
+    struct frame_identity frame_id;
+    err = frame_identify(frame, &frame_id);
+    if(err_is_fail(err))
+        return err;
+    
+    //CHANGE cpu_a57_qemu to cpu_imx8x when using the board
+    err = coreboot(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", frame_id);
+
+    if(err_is_fail(err))
+        return err;
+
+    DEBUG_PRINTF("CORE %d SUCCESSFULLY BOOTED\n", mpid);
+    return SYS_ERR_OK;
+}
+
 // Register this function after spawning a process to register a receive handler to that
 // child process
 static void rpc_recv_handler(void *arg)
@@ -300,12 +325,17 @@ static int bsp_main(int argc, char *argv[])
     // TODO: initialize mem allocator, vspace management here
 
     // Grading
-    grading_test_early();
+    //grading_test_early();
 
     // TODO: Spawn system processes, boot second core etc. here
-
+    
+    //Booting second core
+    err = boot_core(1);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to boot second core");
+    
     // Grading
-    grading_test_late();
+    //grading_test_late();
 
     debug_printf("Message handler loop\n");
     // Hang around
