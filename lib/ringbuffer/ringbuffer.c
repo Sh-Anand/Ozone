@@ -31,7 +31,13 @@ errval_t ring_init(void *buffer)
 		return LIB_ERR_MALLOC_FAIL;
 	}
 	
-	memset(buffer, 0, sizeof(struct ringbuffer));
+	// make sure that the address is page aligned
+	assert(((uint64_t)buffer) % PAGE_SIZE == 0);
+	
+	struct ringbuffer *rb = (struct ringbuffer*)buffer;
+	rb->head = 0;
+	rb->tail = 0;
+	rb->elements = 0;
 	
 	return SYS_ERR_OK;
 }

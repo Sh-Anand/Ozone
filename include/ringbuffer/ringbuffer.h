@@ -9,9 +9,9 @@
 #include <strings.h>
 
 /**
- * @brief Initializes a ringbuffer of size 63, which each element being equal to a single cacheline. The resulting structure will be pagealigned.
+ * @brief Initializes a ringbuffer of size 63, which each element being equal to a single cacheline.
  * 
- * @param buffer Pointer wto at least one page of memory.
+ * @param buffer Pointer to at least one page of memory. This address MUST be pagealigned.
  * @return LIB_ERR_MALLOC_FAIL if the memory allocation failed, SYS_ERR_OK otherwise. 
  */
 errval_t ring_init(void *buffer);
