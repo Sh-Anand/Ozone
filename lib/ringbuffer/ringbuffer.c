@@ -46,11 +46,11 @@ errval_t ring_init(void *buffer)
  * TODO: define protocol
  * Protocol for transferring data:
  * 
+ * 8 bytes: size
+ * ${size} bytes: message
  * 
- * 
- * 
- * 
- * 
+ * This is very simple and enough for a unidirectional channel from one endpoint to another.
+ * This is implemented in the producer and consumer functions.
  * 
  * 
  */
@@ -178,16 +178,26 @@ errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, s
 	}
 	
 	// insert into buffer (this part should block until complete, or irrecoverable error happens)
-	uint8_t tmp[64];
-	assert(size <= CACHE_LINE_SIZE - sizeof(size_t)); // for now, assert that the message is small enough to fit into CACHE_LINE_SIZE - sizeof(size_t) bytes to avoid fragmentation
+	uint8_t tmp[CACHE_LINE_SIZE];
+	size_t offset = 0;
+	size_t start = sizeof(size_t);
+	size_t cap = CACHE_LINE_SIZE - start;
 	
-	memset(tmp, 0, CACHE_LINE_SIZE);
-	*((size_t*)tmp) = size;
-	memcpy(tmp + sizeof(size_t), payload, size);
+	while (offset < size) {
+		// clear the temporary storage
+		memset(tmp, 0, CACHE_LINE_SIZE);
+		*((size_t*)tmp) = size;
+		memcpy(tmp + start, (void*)((size_t)payload + offset), MIN(size - offset, cap)); // copy the first part of this message into the buffer
+		
+		offset += cap;
+		start = 0;
+		cap = CACHE_LINE_SIZE - start;
+		
+		do {
+			err = ring_insert(rp->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
+		} while (err == LIB_ERR_NOT_IMPLEMENTED);
 	
-	do {
-		err = ring_insert(rp->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
-	} while (err == LIB_ERR_NOT_IMPLEMENTED);
+	}
 	
 	// if no errors happened, return OK
 	err = SYS_ERR_OK;
@@ -238,10 +248,22 @@ errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *si
 	} while (err == LIB_ERR_NOT_IMPLEMENTED);
 	
 	*size = *((size_t*)tmp);
-	assert(*size <= CACHE_LINE_SIZE - sizeof(size_t)); // for now, assert that the message is small enough to fit into CACHE_LINE_SIZE - sizeof(size_t) bytes to avoid fragmentation
-	
 	*payload = malloc(*size);
-	memcpy(*payload, tmp + 8, *size);
+	
+	memcpy(*payload, (void*)((size_t)tmp + sizeof(size_t)), MIN(CACHE_LINE_SIZE - sizeof(size_t), *size));
+	
+	size_t offset = CACHE_LINE_SIZE - sizeof(size_t);
+	
+	while (offset < *size) {
+		do {
+			err = ring_consume(rc->ringbuffer, tmp);
+		} while (err == LIB_ERR_NOT_IMPLEMENTED);
+		
+		memcpy((void*)((size_t)*payload + offset), tmp, MIN(*size - offset, CACHE_LINE_SIZE));
+		
+		offset += CACHE_LINE_SIZE;
+	}
+	
 	
 	// if no errors happened, return OK
 	err = SYS_ERR_OK;
