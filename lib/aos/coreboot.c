@@ -9,6 +9,8 @@
 
 #define ARMv8_KERNEL_OFFSET 0xffff000000000000
 
+#define KERNEL_STACK_PAGES 16
+
 extern struct bootinfo *bi;
 
 struct mem_info {
@@ -184,6 +186,140 @@ relocate_elf(genvaddr_t binary, struct mem_info *mem, lvaddr_t load_offset)
 }
 
 
+static errval_t load_and_relocate(const char *module_name, char *symbol_name, lvaddr_t offset, struct mem_region **module, genvaddr_t *entry_point) {
+
+    //load Elf exactly same as done in spawn for comments check setup_elf() in spawn.c
+    errval_t err;
+    struct mem_region *module_region = multiboot_find_module(bi, module_name);
+    *module = module_region;
+    size_t module_size = ROUND_UP(module_region->mrmod_size, BASE_PAGE_SIZE);
+
+    if (module_region == NULL) {
+        return CORE_BOOT_ERR_FIND_MODULE;
+    }
+
+    struct capref module_frame = {
+        .cnode = cnode_module,
+        .slot = module_region->mrmod_slot
+    };
+
+    void *module_addr;
+    err = paging_map_frame(get_current_paging_state(), &module_addr,
+                           module_size,
+                           module_frame);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_ELF_MAP);
+
+    //get a frame to load the x_driver
+    struct capref mem_frame;
+    err = frame_alloc(&mem_frame, module_size, NULL);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+
+    //map frame to our addr space
+    void *frame_addr;
+    err = paging_map_frame(get_current_paging_state(), &frame_addr, module_size, mem_frame);
+    if(err_is_fail(err))
+       return err_push(err, CORE_BOOT_ERR_ELF_MAP);
+
+    //get frame info and populate mem_info struct, used with load_elf
+    struct mem_info module_info;
+    struct frame_identity f_id;
+    err = frame_identify(mem_frame, &f_id);
+    if(err_is_fail(err))
+        return err;
+    module_info.buf = frame_addr;
+    module_info.phys_base = f_id.base;
+    module_info.size = f_id.bytes;
+
+    //find symbol from the ELF : recheck this part, feels weird
+    uintptr_t index;
+    struct Elf64_Sym *entrypoint = elf64_find_symbol_by_name((genvaddr_t) module_addr, module_size, symbol_name, 0, STT_FUNC, &index);
+    if(entrypoint == NULL)
+        return err_push(err, ELF_ERR_ALLOCATE);
+
+    //load the elf using given function, get physical address of loaded elf
+    genvaddr_t reloc_entry_point;
+    err = load_elf_binary((genvaddr_t) module_addr, &module_info, (genvaddr_t) entrypoint->st_value, &reloc_entry_point);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_ELF_MAP);
+
+    //increment the loaded addr by OFFSET to get addr of starting point (I think?)
+    reloc_entry_point += offset;
+
+    *entry_point = reloc_entry_point;
+
+    //relocate elf
+    err = relocate_elf((genvaddr_t) module_addr, &module_info, offset);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_ELF_MAP);
+
+    return SYS_ERR_OK;
+}
+
+static errval_t load_memreg_from_frame(struct armv8_coredata_memreg *memreg, struct capref frame) {
+    errval_t err;
+    struct frame_identity frame_id;
+    err = frame_identify(frame, &frame_id);
+    if(err_is_fail(err))
+        return err;
+    memreg->base = frame_id.base;
+    memreg->length = frame_id.bytes;
+
+    return SYS_ERR_OK;
+}
+
+static errval_t fill_coredata(struct armv8_core_data *coredata, coreid_t mpid, struct capref kcb, struct capref kernel_stack, genvaddr_t cpu_driver_entry, 
+                                struct armv8_coredata_memreg *memreg, struct armv8_coredata_memreg *init_memreg, struct armv8_coredata_memreg *urpc_frame) {
+    
+    errval_t err;
+
+    //set bootmagic
+    coredata->boot_magic = ARMV8_BOOTMAGIC_PSCI;
+
+    //set kernel stack top and bottom
+    struct frame_identity kernel_stack_id;
+    err = frame_identify(kernel_stack, &kernel_stack_id);
+    if(err_is_fail(err))
+        return err;
+    genpaddr_t kernel_stack_bottom = kernel_stack_id.base;
+    genpaddr_t kernel_stack_top = kernel_stack_bottom + kernel_stack_id.bytes;
+    coredata->cpu_driver_stack = kernel_stack_top;
+    coredata->cpu_driver_stack_limit = kernel_stack_bottom;
+
+    //set cpu driver entry point
+    coredata->cpu_driver_entry = cpu_driver_entry;
+
+    //set cmdline arguments (for now passing no args)
+    for(int i=0;i<128;i++)
+        coredata->cpu_driver_cmdline[i] = 0;
+
+    //set memreg for allocations
+    coredata->memory = *memreg;
+
+    //set urpc frame
+    coredata->urpc_frame = *urpc_frame;
+
+    //set monitor binary
+    coredata->monitor_binary = *init_memreg;
+
+    //set kcb physical addr
+    struct frame_identity kcb_id;
+    err = invoke_kcb_identify(kcb, &kcb_id);
+    if(err_is_fail(err))
+        return err;
+    coredata->kcb = kcb_id.base;
+
+    //set coreid of caller
+    coredata->src_core_id = disp_get_core_id();
+    coredata->src_arch_id = disp_get_core_id();
+
+    //set coreid of coredata core
+    coredata->dst_core_id = mpid;
+    coredata->dst_arch_id = mpid;
+
+    return SYS_ERR_OK;
+}
 
 errval_t coreboot(coreid_t mpid,
         const char *boot_driver,
@@ -212,6 +348,133 @@ errval_t coreboot(coreid_t mpid,
     //   of the boot driver and pass the (physical, of course) address of the 
     //   boot struct as argument.
 
+    DEBUG_PRINTF("INIT CORE : %d\n", mpid);
+    errval_t err;
+
+    //Get KCB cap
+    struct capref ram_16k_aligned;
+    err = ram_alloc_aligned(&ram_16k_aligned, OBJSIZE_KCB, 4*BASE_PAGE_SIZE);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_RAM_ALLOC);
+    
+    struct capref kcb;
+    err = slot_alloc(&kcb);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    
+    err = cap_retype(kcb, ram_16k_aligned, 0, ObjType_KernelControlBlock, OBJSIZE_KCB, 1);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_KCB_RETYPE);
+    DEBUG_PRINTF("KCB OBTAINED\n", mpid);
+
+    //load and reloc boot_driver elf
+    struct mem_region *module_boot_driver;
+    genvaddr_t entry_point_boot_driver;
+    err = load_and_relocate(boot_driver, "boot_entry_psci", 0, &module_boot_driver, &entry_point_boot_driver);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_ELF_LOAD_RELOCATE);
+    DEBUG_PRINTF("LOADED AND RELOCATED BOOT DRIVER\n", mpid);
+
+    //load and reloc cpu_driver elf
+    struct mem_region *module_cpu_driver;
+    genvaddr_t entry_point_cpu_driver;
+    err = load_and_relocate(cpu_driver, "arch_init", ARMv8_KERNEL_OFFSET, &module_cpu_driver, &entry_point_cpu_driver);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_ELF_LOAD_RELOCATE);
+    DEBUG_PRINTF("LOADED AND RELOCATED CPU DRIVER\n", mpid);
+
+    //load init and grab physical memory info
+    struct armv8_coredata_memreg init_memreg;
+    void *init_data;
+
+    struct mem_region *init_region = multiboot_find_module(bi, init);
+    struct capref init_frame = {
+        .cnode = cnode_module,
+        .slot = init_region->mrmod_slot,
+    };
+    err = load_memreg_from_frame(&init_memreg, init_frame);
+    if(err_is_fail(err))
+        return err;
+    DEBUG_PRINTF("PHYSICAL ADDR OF INIT OBTAINED\n", mpid);
+
+    //map init binary into our addr space
+    err = paging_map_frame(get_current_paging_state(), &init_data, ROUND_UP(init_memreg.length, BASE_PAGE_SIZE), init_frame);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_PAGING_MAP);
+    DEBUG_PRINTF("MAPPED INIT BINARY\n", mpid);
+
+    //create memory region for CPU driver allocations
+    struct armv8_coredata_memreg memreg;
+    struct capref allocation_frame;
+    size_t size_alloc = ROUND_UP(ARMV8_CORE_DATA_PAGES * BASE_PAGE_SIZE + elf_virtual_size((lvaddr_t) init_data), BASE_PAGE_SIZE);
+    err = frame_alloc(&allocation_frame, size_alloc, NULL);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+
+    err = load_memreg_from_frame(&memreg, allocation_frame);
+    if(err_is_fail(err))
+        return err;
+    DEBUG_PRINTF("MEMREG FOR CPU DRIVER ALLOCATIONS CREATED\n", mpid);
+
+    //allocate kernel stack
+    struct capref kernel_stack_cap;
+    size_t kernel_stack_size = KERNEL_STACK_PAGES * BASE_PAGE_SIZE;
+    err = frame_alloc(&kernel_stack_cap, kernel_stack_size, NULL);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    DEBUG_PRINTF("KERNEL STACK ALLOCATED\n", mpid);
+
+    void *kernel_stack;
+    err = paging_map_frame(get_current_paging_state(), &kernel_stack, kernel_stack_size, kernel_stack_cap);
+    if(err_is_fail(err))
+        return err_push(err, LIB_ERR_PAGING_MAP);
+
+    //load provided URPC frame into a coredata memreg
+    struct armv8_coredata_memreg urpc_memreg;
+    urpc_memreg.base = urpc_frame_id.base;
+    urpc_memreg.length = urpc_frame_id.bytes;
+    DEBUG_PRINTF("URPC FRAME SET\n", mpid);
+
+    //finally, create the coredata struct
+    //we are not mallocing coredata because we want the physical address
+    struct armv8_core_data *coredata;
+    struct capref coredata_frame;
+    size_t coredata_size = BASE_PAGE_SIZE;
+    err = frame_alloc(&coredata_frame, coredata_size, NULL);
+    if(err_is_fail(err))
+        return err;
+    DEBUG_PRINTF("COREDATA CREATED\n", mpid);
+
+    err = paging_map_frame(get_current_paging_state(), (void **) &coredata, BASE_PAGE_SIZE, coredata_frame);
+    if(err_is_fail(err))
+        return err;
+    DEBUG_PRINTF("COREDATA MAPPED\n", mpid);
+
+    //fill coredata struct
+    err = fill_coredata(coredata, mpid, kcb, kernel_stack_cap, entry_point_cpu_driver, &memreg, &init_memreg, &urpc_memreg);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_FILL_COREDATA);
+    DEBUG_PRINTF("COREDATA FILLED\n", mpid);
+
+    //TODO : CLEAR CACHE!!
+    arm64_dcache_wb_range((vm_offset_t) coredata, coredata_size);
+    arm64_dcache_wb_range((vm_offset_t) kernel_stack, kernel_stack_size);
+    arm64_idcache_wbinv_range((vm_offset_t) coredata, coredata_size);
+    arm64_idcache_wbinv_range((vm_offset_t) kernel_stack, kernel_stack_size);
+
+    DEBUG_PRINTF("CACHE FLUSHED\n", mpid);
+
+    //finally, invoke kernel cap with boot data pointer
+    struct frame_identity coredata_frame_id;
+    err = frame_identify(coredata_frame, &coredata_frame_id);
+    if(err_is_fail(err))
+        return err;
+
+    err = invoke_monitor_spawn_core(mpid, CPU_ARM8, entry_point_boot_driver, coredata_frame_id.base, 0);
+    if(err_is_fail(err))
+        return err_push(err, CORE_BOOT_ERR_INVOKE);
+
+    DEBUG_PRINTF("CORE BOOTED\n");
     return SYS_ERR_OK;
 
 }

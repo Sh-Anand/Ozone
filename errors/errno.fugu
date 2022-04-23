@@ -701,6 +701,16 @@ errors spawn SPAWN_ERR_ {
     failure RPC_HANDLER_NOT_SET  "RPC handler is not set",
 };
 
+// errors related to core boot
+errors coreboot CORE_BOOT_ERR_ {
+    failure KCB_RETYPE          "Could not retype KCB",
+    failure FIND_MODULE         "Failed to find module",
+    failure ELF_MAP             "Failed to map elf",
+    failure ELF_LOAD_RELOCATE   "Failed to load and relocate elf",
+    failure FILL_COREDATA       "Failed to fill coredata struct",
+    failure INVOKE              "Failed to invoke core",
+};
+
 // errors related to the process list
 errors proc_list PROC_LIST_ERR_ {
     failure ALLOC                "Failed to alloc proc node",
