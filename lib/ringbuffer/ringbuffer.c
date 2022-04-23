@@ -1,11 +1,10 @@
 #include <ringbuffer/ringbuffer.h>
 
+#include <aos/threads.h>
 #include <string.h>
 #include <stdlib.h>
 #include <aos/debug.h>
 #include <arch/aarch64/aos/cache.h>
-
-#include <stdio.h>
 
 #define RINGBUFFER_CAPACITY ((4096 - 3) / CACHE_LINE_SIZE)
 
@@ -17,6 +16,7 @@ struct ringbuffer_entry { // one cacheline (64 bytes)
 
 struct ringbuffer { // head, tail, size, list of cachelines
 	struct ringbuffer_entry entries[RINGBUFFER_CAPACITY]; // make sure that the cachelines are pagealigned
+	struct thread_mutex *mutex;
 	uint8_t head;
 	uint8_t tail;
 	uint8_t elements;
@@ -38,6 +38,8 @@ errval_t ring_init(void *buffer)
 	rb->head = 0;
 	rb->tail = 0;
 	rb->elements = 0;
+	rb->mutex = (struct thread_mutex*)malloc(sizeof(struct thread_mutex));
+	thread_mutex_init(rb->mutex);
 	
 	return SYS_ERR_OK;
 }
@@ -65,16 +67,16 @@ errval_t ring_init(void *buffer)
  * @return An error code indicating a failure, or SYS_ERR_OK.
  */
 static errval_t ring_insert(void *rb, void *payload) {
-	errval_t err;
 	
 	// check for null-pointer
 	if (rb == NULL) {
 		DEBUG_PRINTF("Cannot insert into ringbuffer: buffer is null pointer.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return ERR_INVALID_ARGS;
 	}
 	
+	errval_t err;
 	struct ringbuffer *rbuf = rb;
+	thread_mutex_lock(rbuf->mutex);
 	
 	// check if buffer is full
 	if (rbuf->elements == RINGBUFFER_CAPACITY) {
@@ -96,6 +98,8 @@ static errval_t ring_insert(void *rb, void *payload) {
 	
 	err = SYS_ERR_OK;
 exit:
+	
+	thread_mutex_unlock(rbuf->mutex);
 	return err;
 }
 
@@ -114,11 +118,12 @@ static errval_t ring_consume(void *rb, void *payload)
 	// check for null-pointer
 	if (rb == NULL) {
 		DEBUG_PRINTF("Cannot consume from ringbuffer: buffer is null pointer.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return ERR_INVALID_ARGS;
 	}
 	
 	struct ringbuffer *rbuf = rb;
+	thread_mutex_lock(rbuf->mutex);
+	
 	// check if buffer is empty
 	if (rbuf->elements == 0) {
 		DEBUG_PRINTF("Cannot consume from buffer: buffer empty\n");
@@ -139,6 +144,7 @@ static errval_t ring_consume(void *rb, void *payload)
 	err = SYS_ERR_OK;
 exit:
 	
+	thread_mutex_unlock(rbuf->mutex);
 	return err;
 }
 
