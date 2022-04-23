@@ -1,0 +1,7 @@
+[
+	build library {
+		target = "ringbuffer",
+		cFiles = [ "ringbuffer.c" ],
+		addLibraries = []
+	}
+]
