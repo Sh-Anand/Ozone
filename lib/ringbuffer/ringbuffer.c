@@ -6,20 +6,21 @@
 #include <aos/debug.h>
 #include <arch/aarch64/aos/cache.h>
 
-#define RINGBUFFER_CAPACITY ((4096 - 3) / CACHE_LINE_SIZE)
+#define RINGBUFFER_CAPACITY ((4096 / CACHE_LINE_SIZE) - 1)
+#define ENTRY_DATA_CAPACITY (CACHE_LINE_SIZE - sizeof(size_t))
 
 #define INDEX(x) (x % RINGBUFFER_CAPACITY)
+#define INCR(x) x = (x+1) % RINGBUFFER_CAPACITY;
 
-struct ringbuffer_entry { // one cacheline (64 bytes)
-	uint8_t data[CACHE_LINE_SIZE];
+struct ringbuffer_entry { // one cacheline (on our machine 64 bytes)
+	uint8_t data[CACHE_LINE_SIZE - sizeof(size_t)]; // the data contained in this block
+	size_t ready: 1; // whether this block is ready to be read
 };
 
 struct ringbuffer { // head, tail, size, list of cachelines
 	struct ringbuffer_entry entries[RINGBUFFER_CAPACITY]; // make sure that the cachelines are pagealigned
-	struct thread_mutex *mutex;
-	uint8_t head;
-	uint8_t tail;
-	uint8_t elements;
+	size_t head: 6;
+	size_t tail: 6;
 };
 
 
@@ -34,12 +35,8 @@ errval_t ring_init(void *buffer)
 	// make sure that the address is page aligned
 	assert(((uint64_t)buffer) % PAGE_SIZE == 0);
 	
-	struct ringbuffer *rb = (struct ringbuffer*)buffer;
-	rb->head = 0;
-	rb->tail = 0;
-	rb->elements = 0;
-	rb->mutex = (struct thread_mutex*)malloc(sizeof(struct thread_mutex));
-	thread_mutex_init(rb->mutex);
+	// zero the memory to clear all flags
+	memset(buffer, 0, PAGE_SIZE);
 	
 	return SYS_ERR_OK;
 }
@@ -57,13 +54,11 @@ errval_t ring_init(void *buffer)
  * 
  */
 
-
-// TODO: this should be atomic, ideally
 /**
- * @brief Inserts a block of exactly 64 bytes into the ringbuffer.
+ * @brief Inserts a block of exactly CACHE_LINE_SIZE - sizeof(size_t) bytes into the ringbuffer (on our machine that is 56 bytes).
  * 
  * @param rb A non null ringbuffer.
- * @param payload exactly 64 bytes of memory to be inserted into the buffer.
+ * @param payload exactly 56 bytes of memory to be inserted into the buffer.
  * @return An error code indicating a failure, or SYS_ERR_OK.
  */
 static errval_t ring_insert(void *rb, void *payload) {
@@ -74,47 +69,33 @@ static errval_t ring_insert(void *rb, void *payload) {
 		return ERR_INVALID_ARGS;
 	}
 	
-	errval_t err;
 	struct ringbuffer *rbuf = rb;
-	thread_mutex_lock(rbuf->mutex);
+	int head = INDEX(rbuf->head);
 	
-	// check if buffer is full
-	if (rbuf->elements == RINGBUFFER_CAPACITY) {
-		// TODO: implement blocking here
-		DEBUG_PRINTF("Cannot insert into ringbuffer: out of space.\n");
-		err = LIB_ERR_NOT_IMPLEMENTED;
-		goto exit;
-	}
+	// wait for the buffer entry to be free
+	while (rbuf->entries[head].ready) thread_yield();
+	dmb();
 	
-	// insert into buffer
-	void* dest = &(rbuf->entries[INDEX(rbuf->tail)]);
-	memcpy(dest, payload, CACHE_LINE_SIZE);
-	rbuf->tail = INDEX(rbuf->tail + 1);
-	rbuf->elements++;
+	// insert data into entry
+	memcpy(&(rbuf->entries[head]), payload, ENTRY_DATA_CAPACITY);
+	INCR(rbuf->head); // increment head pointer
 	
-	// write back to main memory
-	cpu_dcache_wb_range((vm_offset_t)dest, CACHE_LINE_SIZE); // write data back to memory
-	cpu_dcache_wb_range((vm_offset_t)&(rbuf->entries[RINGBUFFER_CAPACITY]), CACHE_LINE_SIZE); // write meta info at the end of the ringbuffer struct back to memory
+	dmb(); // wait for the write to complete
+	rbuf->entries[head].ready = 1;
+	// TODO: does the writebuffer need flushing here?
 	
-	err = SYS_ERR_OK;
-exit:
-	
-	thread_mutex_unlock(rbuf->mutex);
-	return err;
+	return SYS_ERR_OK;
 }
 
-// TODO: this should be atomic, ideally
 /**
  * @brief Consumes a block of exactly 64 bytes from the ringbuffer
  * 
  * @param rb A non null ringbuffer
- * @param payload exactly 64 bytes of space to write the data
+ * @param payload exactly ENTRY_DATA_CAPACITY bytes of space to write the data (on our machine this is 56 bytes)
  * @return An error code indicating a failure, or SYS_ERR_OK. 
  */
 static errval_t ring_consume(void *rb, void *payload)
 {
-	errval_t err;
-	
 	// check for null-pointer
 	if (rb == NULL) {
 		DEBUG_PRINTF("Cannot consume from ringbuffer: buffer is null pointer.\n");
@@ -122,30 +103,22 @@ static errval_t ring_consume(void *rb, void *payload)
 	}
 	
 	struct ringbuffer *rbuf = rb;
-	thread_mutex_lock(rbuf->mutex);
+	int tail = INDEX(rbuf->tail);
 	
-	// check if buffer is empty
-	if (rbuf->elements == 0) {
-		DEBUG_PRINTF("Cannot consume from buffer: buffer empty\n");
-		err = LIB_ERR_NOT_IMPLEMENTED;
-		goto exit;
-	}
+	// wait for the data to be ready
+	while (! rbuf->entries[tail].ready) thread_yield();
+	dmb();
 	
 	// read value from buffer
-	memcpy(payload, &(rbuf->entries[INDEX(rbuf->head)]), CACHE_LINE_SIZE);
+	memcpy(payload, &(rbuf->entries[tail]), ENTRY_DATA_CAPACITY);
+	INCR(rbuf->tail); // increment the tail pointer
 	
-	// remove element from buffer
-	rbuf->head = INDEX(rbuf->head + 1);
-	rbuf->elements--;
+	dmb();
+	rbuf->entries[tail].ready = 0;
 	
-	// writeback to memory
-	cpu_dcache_wb_range((vm_offset_t)&(rbuf->entries[RINGBUFFER_CAPACITY]), CACHE_LINE_SIZE); // write meta info at the end of the ringbuffer struct back to memory
+	// TODO: does the writebuffer need flushing?
 	
-	err = SYS_ERR_OK;
-exit:
-	
-	thread_mutex_unlock(rbuf->mutex);
-	return err;
+	return SYS_ERR_OK;
 }
 
 errval_t ring_producer_init(struct ring_producer *rp, void *ring_buffer)
@@ -174,30 +147,28 @@ errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, s
 	// check for null-pointer
 	if (rp == NULL) {
 		DEBUG_PRINTF("Ringbuffer producer cannot transmit: producer is null-ptr.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return ERR_INVALID_ARGS;
 	}
 	if (rp->ringbuffer == NULL) {
 		DEBUG_PRINTF("Ringbuffer producer cannot transmit: ringbuffer is null-ptr.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return  ERR_INVALID_ARGS;
 	}
 	
 	// insert into buffer (this part should block until complete, or irrecoverable error happens)
-	uint8_t tmp[CACHE_LINE_SIZE];
+	uint8_t tmp[ENTRY_DATA_CAPACITY];
 	size_t offset = 0;
 	size_t start = sizeof(size_t);
-	size_t cap = CACHE_LINE_SIZE - start;
+	size_t cap = ENTRY_DATA_CAPACITY - start;
 	
 	while (offset < size) {
 		// clear the temporary storage
-		memset(tmp, 0, CACHE_LINE_SIZE);
+		memset(tmp, 0, ENTRY_DATA_CAPACITY);
 		*((size_t*)tmp) = size;
 		memcpy(tmp + start, (void*)((size_t)payload + offset), MIN(size - offset, cap)); // copy the first part of this message into the buffer
 		
 		offset += cap;
 		start = 0;
-		cap = CACHE_LINE_SIZE - start;
+		cap = ENTRY_DATA_CAPACITY - start;
 		
 		do {
 			err = ring_insert(rp->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
@@ -206,11 +177,7 @@ errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, s
 	}
 	
 	// if no errors happened, return OK
-	err = SYS_ERR_OK;
-	
-exit:
-	
-	return err;
+	return SYS_ERR_OK;
 }
 
 errval_t ring_consumer_init(struct ring_consumer *rc, void *ring_buffer)
@@ -238,17 +205,15 @@ errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *si
 	// check for null-pointer
 	if (rc == NULL) {
 		DEBUG_PRINTF("Ringbuffer consumer cannot consume: consumer is null-ptr.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return ERR_INVALID_ARGS;
 	}
 	if (rc->ringbuffer == NULL) {
 		DEBUG_PRINTF("Ringbuffer consumer cannot consume: ring_buffer is null-ptr.\n");
-		err = ERR_INVALID_ARGS;
-		goto exit;
+		return ERR_INVALID_ARGS;
 	}
 	
 	// consume from buffer (this part should block until complete, or irrecoverable error happens)
-	uint8_t tmp[CACHE_LINE_SIZE];
+	uint8_t tmp[ENTRY_DATA_CAPACITY];
 	do {
 		err = ring_consume(rc->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
 	} while (err == LIB_ERR_NOT_IMPLEMENTED);
@@ -256,25 +221,20 @@ errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *si
 	*size = *((size_t*)tmp);
 	*payload = malloc(*size);
 	
-	memcpy(*payload, (void*)((size_t)tmp + sizeof(size_t)), MIN(CACHE_LINE_SIZE - sizeof(size_t), *size));
+	memcpy(*payload, (void*)((size_t)tmp + sizeof(size_t)), MIN(ENTRY_DATA_CAPACITY - sizeof(size_t), *size));
 	
-	size_t offset = CACHE_LINE_SIZE - sizeof(size_t);
+	size_t offset = ENTRY_DATA_CAPACITY - sizeof(size_t);
 	
 	while (offset < *size) {
 		do {
 			err = ring_consume(rc->ringbuffer, tmp);
 		} while (err == LIB_ERR_NOT_IMPLEMENTED);
 		
-		memcpy((void*)((size_t)*payload + offset), tmp, MIN(*size - offset, CACHE_LINE_SIZE));
+		memcpy((void*)((size_t)*payload + offset), tmp, MIN(*size - offset, ENTRY_DATA_CAPACITY));
 		
-		offset += CACHE_LINE_SIZE;
+		offset += ENTRY_DATA_CAPACITY;
 	}
 	
-	
 	// if no errors happened, return OK
-	err = SYS_ERR_OK;
-	
-exit:
-	
-	return err;
+	return SYS_ERR_OK;
 }
