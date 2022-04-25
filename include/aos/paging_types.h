@@ -71,6 +71,7 @@ struct paging_region_node {
 
 struct paging_mapping_child_node {
     LIST_ENTRY(paging_mapping_child_node) link;
+    struct capref vnode_cap;
     struct capref mapping_cap;
     struct capref self_paging_frame_cap;
 };

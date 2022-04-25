@@ -214,6 +214,9 @@ static void paging_force_refill(struct paging_state *st)
 {
     st->region_slabs.refill_func(&st->region_slabs);
     st->vnode_slabs.refill_func(&st->vnode_slabs);
+    st->region_slabs.refill_func(&st->region_slabs);
+    st->mapping_node_slabs.refill_func(&st->mapping_node_slabs);
+    st->mapping_child_slabs.refill_func(&st->mapping_child_slabs);
 }
 
 void grading_test_paging(struct mm *mm, struct paging_state *st)

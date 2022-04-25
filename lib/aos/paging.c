@@ -229,12 +229,14 @@ static inline errval_t apply_mapping(struct paging_state *st, struct capref dest
     err = vnode_map(dest, src, slot, attr, off, pte_count, mapping_cap);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_VNODE_MAP);
+        DEBUG_PRINTF("failed to vnode_map\n")
         goto FAILURE_VNODE_MAP;
     }
 
     if (mappings) {
         struct paging_mapping_child_node *child = slab_alloc(&st->mapping_child_slabs);
         memset(child, 0, sizeof(*child));  // NULL_CAP is 0
+        child->vnode_cap = dest;
         child->mapping_cap = mapping_cap;
         if (store_frame_cap) {
             child->self_paging_frame_cap = src;
@@ -322,6 +324,7 @@ static inline errval_t create_and_install_vnode_node(struct paging_state *st,
                         get_child_index(addr, level - 1),
                         KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1, NULL, false);
     if (err_is_fail(err)) {
+        DEBUG_PRINTF("failed to apply_mapping (create_and_install_vnode_node)\n");
         goto FAILURE_APPLY_MAPPING;
     }
 
@@ -391,6 +394,7 @@ static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t leve
         goto UNDO_PT_ALLOC;
     }
     if (err_is_fail(err)) {
+        DEBUG_PRINTF("failed to apply_mapping (lookup_or_create_vnode_node)\n");
         goto FAILURE_APPLY_MAPPING;
     }
 
@@ -479,6 +483,9 @@ static inline errval_t create_mapping_node(struct paging_state *st,
         *ret = n;
     }
     rb_mapping_insert(st, n);
+#if 0
+    DEBUG_PRINTF("paging: new mapping node: 0x%lx/%lu\n", region->addr, BIT(region->bits))
+#endif
     return SYS_ERR_OK;
 }
 
@@ -486,7 +493,11 @@ static inline errval_t
 unmap_and_delete_mapping_child(struct paging_state *st,
                                struct paging_mapping_child_node *child)
 {
-    errval_t err = cap_destroy(child->mapping_cap);
+    errval_t err = vnode_unmap(child->vnode_cap, child->mapping_cap);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    err = cap_destroy(child->mapping_cap);
     if (err_is_fail(err)) {
         return err;
     }
@@ -523,6 +534,9 @@ static inline errval_t unmap_and_delete_mapping_node(struct paging_state *st,
         return err;
     }
     rb_mapping_remove(st, n);
+#if 0
+    DEBUG_PRINTF("paging: delete mapping node: 0x%lx/%lu\n", n->region->addr, BIT(n->region->bits))
+#endif
     slab_free(&st->mapping_node_slabs, n);
     return SYS_ERR_OK;
 }
@@ -726,6 +740,7 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
                             child_count, mappings, store_frame_cap);
         store_frame_cap = false;  // no longer store the frame
         if (err_is_fail(err)) {
+            DEBUG_PRINTF("failed to apply_mapping (map_frame, child_count = %lu)\n", child_count);
             st->slot_alloc->free(st->slot_alloc, mapping_cap);
             return err;
         }
@@ -811,7 +826,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
         }
     }
 
-    DEBUG_PRINTF("paging: fixed mapping to already used region");
+    DEBUG_PRINTF("paging: fixed mapping to already used region\n");
     return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
 
 FAILURE_MAP_FRAME:
