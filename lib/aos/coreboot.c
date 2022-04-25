@@ -185,7 +185,6 @@ relocate_elf(genvaddr_t binary, struct mem_info *mem, lvaddr_t load_offset)
     return SYS_ERR_OK;
 }
 
-
 static errval_t load_and_relocate(const char *module_name, char *symbol_name, lvaddr_t offset, struct mem_region **module, genvaddr_t *entry_point) {
 
     //load Elf exactly same as done in spawn for comments check setup_elf() in spawn.c

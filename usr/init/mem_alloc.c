@@ -77,8 +77,7 @@ errval_t initialize_ram_alloc(void)
     };
 
     for (int i = 0; i < bi->regions_length; i++) {
-        if (bi->regions[i].mr_type == RegionType_Empty) {
-
+        if (bi->regions[i].mr_type == RegionType_Empty && !(bi->regions[i].mr_consumed)) {
             struct capability c;
             err = cap_direct_identify(mem_cap, &c);
             if (err_is_fail(err)) {
@@ -97,6 +96,7 @@ errval_t initialize_ram_alloc(void)
                 DEBUG_ERR(err, "Warning: adding RAM region %d (%p/%zu) FAILED", i, bi->regions[i].mr_base, bi->regions[i].mr_bytes);
             }
 
+            bi->regions[i].mr_consumed = true;
             mem_cap.slot++;
         }
     }
