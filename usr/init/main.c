@@ -232,40 +232,43 @@ static errval_t handle_general_recv(void *rpc, enum msg_type identifier,
     return SYS_ERR_OK;
 }
 
-static errval_t boot_core(coreid_t mpid) {
+static errval_t boot_core(coreid_t mpid)
+{
     errval_t err;
 
     struct capref urpc_frame;
-    err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE, NULL); //TODO: REPLACE WITH A FIXED UMP FRAME SIZE LATER!
+    err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE,
+                      NULL);  // TODO: REPLACE WITH A FIXED UMP FRAME SIZE LATER!
 
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
 
     struct frame_identity urpc_frame_id;
     err = frame_identify(urpc_frame, &urpc_frame_id);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
-    
+
     void *urpc_buffer;
-    err = paging_map_frame(get_current_paging_state(), &urpc_buffer, URPC_FRAME_SIZE, urpc_frame);
-    if(err_is_fail(err))
+    err = paging_map_frame(get_current_paging_state(), &urpc_buffer, URPC_FRAME_SIZE,
+                           urpc_frame);
+    if (err_is_fail(err))
         return err;
-    
-    //INIT ring buffer
+
+    // INIT ring buffer
     err = ring_init(urpc_buffer);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
-    
-    //INIT URPC PRODUCER
+
+    // INIT URPC PRODUCER
     struct ring_producer *urpc_sender = malloc(sizeof(struct ring_producer));
     err = ring_producer_init(urpc_sender, urpc_buffer);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
-    
-    //CHANGE cpu_a57_qemu to cpu_imx8x when using the board
+
+    // CHANGE cpu_a57_qemu to cpu_imx8x when using the board
     err = coreboot(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", urpc_frame_id);
 
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
 
     DEBUG_PRINTF("CORE %d SUCCESSFULLY BOOTED\n", mpid);
@@ -274,12 +277,12 @@ static errval_t boot_core(coreid_t mpid) {
     // first allocate some memory for the child
     struct capref core_ram;
     err = ram_alloc(&core_ram, RAM_PER_CORE);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
 
     struct capability c;
     err = cap_direct_identify(core_ram, &c);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         return err;
     struct mem_region region;
     region.mr_base = c.u.ram.base;
@@ -287,18 +290,19 @@ static errval_t boot_core(coreid_t mpid) {
     region.mr_consumed = false;
     region.mr_type = RegionType_Empty;
 
-    size_t size_buf = sizeof(struct bootinfo) + (bi->regions_length + 1)*sizeof(struct mem_region);
+    size_t size_buf = sizeof(struct bootinfo)
+                      + (bi->regions_length + 1) * sizeof(struct mem_region);
     struct bootinfo *bi_core = malloc(size_buf);
     bi_core->host_msg = bi->host_msg;
     bi_core->host_msg_bits = bi->host_msg_bits;
     bi_core->mem_spawn_core = bi->mem_spawn_core;
     bi_core->regions_length = bi->regions_length + 1;
 
-    memcpy(bi_core->regions, bi->regions, sizeof(struct mem_region)*bi->regions_length);
+    memcpy(bi_core->regions, bi->regions, sizeof(struct mem_region) * bi->regions_length);
 
     bi_core->regions[bi->regions_length] = region;
 
-    //send bootinfo across
+    // send bootinfo across
     err = ring_producer_transmit(urpc_sender, bi_core, size_buf);
 
     DEBUG_PRINTF("BSP BOOTINFO HAS %d regions\n", bi->regions_length);
@@ -379,17 +383,17 @@ static int bsp_main(int argc, char *argv[])
     // TODO: initialize mem allocator, vspace management here
 
     // Grading
-    //grading_test_early();
+     grading_test_early();
 
     // TODO: Spawn system processes, boot second core etc. here
-    
-    //Booting second core
+
+    // Booting second core
     err = boot_core(1);
-    if(err_is_fail(err))
+    if (err_is_fail(err))
         DEBUG_ERR(err, "failed to boot second core");
-    
+
     // Grading
-    //grading_test_late();
+     grading_test_late();
 
     debug_printf("Message handler loop\n");
     // Hang around
@@ -405,26 +409,26 @@ static int bsp_main(int argc, char *argv[])
     return EXIT_SUCCESS;
 }
 
-// Call with the appropriately prepared bootinfo struct with the allocated RAM in the last location of the memregs array
-static errval_t forge_ram(struct bootinfo *bootinfo) {
-    errval_t err; 
-    
-    //It is guaranteed that the last region in the bootinfo is the RAM we need. Forge it now
-    struct mem_region region = bootinfo->regions[bootinfo->regions_length-1];
-    
-    //Sanity checks
+// Call with the appropriately prepared bootinfo struct with the allocated RAM in the last
+// location of the memregs array
+static errval_t forge_ram(struct bootinfo *bootinfo)
+{
+    errval_t err;
+
+    // It is guaranteed that the last region in the bootinfo is the RAM we need. Forge it now
+    struct mem_region region = bootinfo->regions[bootinfo->regions_length - 1];
+
+    // Sanity checks
     assert(region.mr_type == RegionType_Empty);
 
-    //As seen from the init ram alloc function in mem_alloc.c, we place the RAM cap in the first slot of cnode_super
-    struct capref ram = {
-        .cnode = cnode_super,
-        .slot = 0
-    };
+    // As seen from the init ram alloc function in mem_alloc.c, we place the RAM cap in
+    // the first slot of cnode_super
+    struct capref ram = { .cnode = cnode_super, .slot = 0 };
 
-    //Finally, forge
+    // Finally, forge
     err = ram_forge(ram, region.mr_base, region.mr_bytes, disp_get_current_core_id());
 
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "Failed to forge RAM");
         return err;
     }
@@ -434,7 +438,7 @@ static errval_t forge_ram(struct bootinfo *bootinfo) {
 
 // // Forge caps to all the modules in the memregs structure
 // static errval_t forge_modules(struct bootinfo *bi) {
-    
+
 // }
 
 static int app_main(int argc, char *argv[])
@@ -449,8 +453,9 @@ static int app_main(int argc, char *argv[])
 
     // map URPC frame to our addr
     void *urpc_addr;
-    err = paging_map_frame(get_current_paging_state(), &urpc_addr, URPC_FRAME_SIZE, cap_urpc);
-    if(err_is_fail(err)) {
+    err = paging_map_frame(get_current_paging_state(), &urpc_addr, URPC_FRAME_SIZE,
+                           cap_urpc);
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main mapping URPC frame");
         abort();
     }
@@ -458,24 +463,24 @@ static int app_main(int argc, char *argv[])
     // init ring buffer consumer
     struct ring_consumer urpc_recv;
     err = ring_consumer_init(&urpc_recv, urpc_addr);
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main init URPC receiver");
         abort();
     }
 
-    // create bootinfo 
+    // create bootinfo
     size_t bi_size;
     err = ring_consumer_recv(&urpc_recv, (void **)&bi, &bi_size);
 
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to get bootinfo from BSP core");
         abort();
     }
-    
+
     // forge the received RAM
     err = forge_ram(bi);
 
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to forge ram in app main");
         abort();
     }
@@ -484,16 +489,16 @@ static int app_main(int argc, char *argv[])
 
     // initialize ram allocator
     err = initialize_ram_alloc();
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to initialize ram allocator");
         abort();
     }
 
     spawn_set_rpc_handler(rpc_recv_handler);
 
-    // grading_test_early();
+    grading_test_early();
 
-    // grading_test_late();
+//    grading_test_late();
 
     struct waitset *default_ws = get_default_waitset();
     while (true) {
@@ -529,27 +534,27 @@ int main(int argc, char *argv[])
 
     char *platform;
     switch (platform_info.platform) {
-        case PI_PLATFORM_QEMU:
-            platform = "QEMU";
-            break;
-        case PI_PLATFORM_IMX8X:
-            platform = "IMX8X";
-            break;
-        default:
-            platform = "UNKNOWN";
+    case PI_PLATFORM_QEMU:
+        platform = "QEMU";
+        break;
+    case PI_PLATFORM_IMX8X:
+        platform = "IMX8X";
+        break;
+    default:
+        platform = "UNKNOWN";
     }
 
-    debug_printf("init domain starting on core %" PRIuCOREID " (%s), invoked as:", my_core_id, platform);
+    debug_printf("init domain starting on core %" PRIuCOREID " (%s), invoked as:",
+                 my_core_id, platform);
     for (int i = 0; i < argc; i++) {
-       printf(" %s", argv[i]);
+        printf(" %s", argv[i]);
     }
     printf("\n");
 
-
-
     fflush(stdout);
 
-
-    if(my_core_id == 0) return bsp_main(argc, argv);
-    else                return app_main(argc, argv);
+    if (my_core_id == 0)
+        return bsp_main(argc, argv);
+    else
+        return app_main(argc, argv);
 }
