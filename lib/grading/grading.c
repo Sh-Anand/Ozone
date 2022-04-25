@@ -125,8 +125,8 @@ void grading_test_early(void)
                                   // something causes a pagefault*/
 
     grading_test_paging(&aos_mm, get_current_paging_state());
-    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 10000);
-    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 10000);
+//    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 10000);
+//    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 10000);
 
     // debug_printf("tests complete\n");
     // while(1);
