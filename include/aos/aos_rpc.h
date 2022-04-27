@@ -27,9 +27,22 @@ enum rpc_type {
     TYPE_UMP,
 };
 
+enum rpc_msg_type {
+    RPC_ACK_MSG,
+    RPC_ERR_MSG,
+    RPC_NUM,
+    RPC_STR,
+    RPC_RAM_REQUEST,
+    RPC_PROCESS_SPAWN,
+    RPC_PROCESS_GET_NAME,
+    RPC_PROCESS_GET_ALL_PIDS,
+    RPC_TERMINAL,
+    RPC_MSG_COUNT
+};
+
 struct aos_rpc_msg {
     size_t size;
-    enum msg_type type;
+    enum rpc_msg_type type;
     void *buff;
 };
 
@@ -48,18 +61,6 @@ struct aos_rpc {
 struct rpc_process_spawn_call_msg {
     coreid_t core;
     char cmdline[0];
-} __attribute__ ((packed));
-
-struct rpc_process_spawn_return_msg {
-    domainid_t pid;
-} __attribute__ ((packed));
-
-struct rpc_process_get_name_call_msg {
-    domainid_t pid;
-} __attribute__ ((packed));
-
-struct rpc_process_get_name_return_msg {
-    char name[0];
 } __attribute__ ((packed));
 
 struct rpc_process_get_all_pids_return_msg {
