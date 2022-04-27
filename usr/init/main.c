@@ -343,9 +343,32 @@ static errval_t forge_ram(struct bootinfo *bootinfo)
 }
 
 // // Forge caps to all the modules in the memregs structure
-// static errval_t forge_modules(struct bootinfo *bi) {
+static errval_t forge_modules(struct bootinfo *bootinfo) {
+    errval_t err;
 
-// }
+    //create an L2 node into the ROOTCN_SLOT_MODULECN
+    err = cnode_create_foreign_l2(cap_root, ROOTCN_SLOT_MODULECN, &cnode_module);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to create L2 node for cnode_module");
+        return err;
+    }
+
+    for(int i=0; i < bootinfo->regions_length; i++) {
+        if(bootinfo->regions[i].mr_type == RegionType_Module) {
+            struct capref module = {
+                .cnode = cnode_module,
+                .slot = bootinfo->regions[i].mrmod_slot
+            };
+            err = frame_forge(module, bootinfo->regions[i].mr_base, bootinfo->regions[i].mr_bytes, disp_get_core_id());
+            if(err_is_fail(err)) {
+                DEBUG_ERR(err, "Failed to forge frame for module in region %d", i);
+                return err;
+            }
+        }
+    }
+
+    return SYS_ERR_OK;
+}
 
 static int urpc_server_worker(void *params)
 {
@@ -432,6 +455,13 @@ static int app_main(int argc, char *argv[])
     err = initialize_ram_alloc();
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to initialize ram allocator");
+        abort();
+    }
+
+    // forge modules and set the MODULECN cnode
+    err = forge_modules(bi);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to forge modules");
         abort();
     }
 
