@@ -104,16 +104,16 @@ void grading_test_early(void)
     __attribute__((unused)) lvaddr_t addr0, addr1, addr2, addr3, addr4, addr5;
     __attribute__((unused)) struct capref fixed_frame0 = test_mem_map_fixed(base, 8192);
     base += 8192;
-    __attribute__((unused)) struct capref fixed_frame1 = test_mem_map_fixed(base, 1 << 21);
-    base += 1 << 21;
+    __attribute__((unused)) struct capref fixed_frame1 = test_mem_map_fixed(base, 1 <<
+    21); base += 1 << 21;
     __attribute__((unused)) struct capref fixed_frame2 = test_mem_map_fixed(base, 16384);
     base += 16384;
-    __attribute__((unused)) struct capref fixed_frame3 = test_mem_map_fixed(base, 1 << 21);
-    base += 1 << 21;
-    __attribute__((unused)) struct capref fixed_frame4 = test_mem_map_fixed(base, 3 << 20);
-    base += 3 << 20;
-    __attribute__((unused)) struct capref fixed_frame5 = test_mem_map_fixed(base, 1 << 21);
-    base += 1 << 21;
+    __attribute__((unused)) struct capref fixed_frame3 = test_mem_map_fixed(base, 1 <<
+    21); base += 1 << 21;
+    __attribute__((unused)) struct capref fixed_frame4 = test_mem_map_fixed(base, 3 <<
+    20); base += 3 << 20;
+    __attribute__((unused)) struct capref fixed_frame5 = test_mem_map_fixed(base, 1 <<
+    21); base += 1 << 21;
 
     __attribute__((unused)) struct capref frame0 = test_mem_alloc(&addr0, 4096);
     __attribute__((unused)) struct capref frame1 = test_mem_alloc(&addr1, 8192);
@@ -125,14 +125,14 @@ void grading_test_early(void)
                                   // something causes a pagefault*/
 
     grading_test_paging(&aos_mm, get_current_paging_state());
-//    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 10000);
-//    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 10000);
+    //    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 10000);
+    //    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 10000);
 
     // debug_printf("tests complete\n");
     // while(1);
 }
 
-static void delay(int count)
+__attribute__((__unused__)) static void delay(int count)
 {
     volatile int a[3] = { 0, 1 };
     for (int i = 0; i < count; i++) {
@@ -157,42 +157,41 @@ void grading_test_late(void)
     //         assert(err_is_ok(err));
     //         assert(pid != -1);
 
-//    DEBUG_PRINTF("Run 10 spawnTester 10...\n");
-//    for (int i = 1; i <= 10; i++) {
-//        err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
-//        assert(err_is_ok(err));
-//        assert(pid != -1);
-//        printf("%d-th call succeed\n", i);
-//    }
+    //    DEBUG_PRINTF("Run 10 spawnTester 10...\n");
+    //    for (int i = 1; i <= 10; i++) {
+    //        err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
+    //        assert(err_is_ok(err));
+    //        assert(pid != -1);
+    //        printf("%d-th call succeed\n", i);
+    //    }
 
-//    domainid_t *pids = NULL;
-//    size_t pid_count = 0;
-//    err = spawn_get_all_pids(&pids, &pid_count);
-//    if (err_is_fail(err)) {
-//        DEBUG_PRINTF("  Getting all PIDs failed.\n");
-//    }
-//    assert(pids != NULL && "NULL pids");
-//    DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
-//
-//    for (int i = 0; i < pid_count; i++) {
-//        char *name;
-//        err = spawn_get_name(pids[i], &name);
-//        if (err_is_fail(err)) {
-//            DEBUG_PRINTF("  Getting name failed.\n");
-//        }
-//        DEBUG_PRINTF("  %u %s\n", pids[i], name);
-//        free(name);
-//    }
+    //    domainid_t *pids = NULL;
+    //    size_t pid_count = 0;
+    //    err = spawn_get_all_pids(&pids, &pid_count);
+    //    if (err_is_fail(err)) {
+    //        DEBUG_PRINTF("  Getting all PIDs failed.\n");
+    //    }
+    //    assert(pids != NULL && "NULL pids");
+    //    DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
+    //
+    //    for (int i = 0; i < pid_count; i++) {
+    //        char *name;
+    //        err = spawn_get_name(pids[i], &name);
+    //        if (err_is_fail(err)) {
+    //            DEBUG_PRINTF("  Getting name failed.\n");
+    //        }
+    //        DEBUG_PRINTF("  %u %s\n", pids[i], name);
+    //        free(name);
+    //    }
 
-    DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
-    err = spawn_load_by_name("hello", &info[0], &pid);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "spawn_load_by_name failed");
+    if (disp_get_core_id() == 0) {
+        DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
+        err = spawn_load_by_name("hello", &info[0], &pid);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "spawn_load_by_name failed");
+        }
+        assert(pid != -1);
     }
-    assert(pid != -1);
-
-
-    delay(200000000);
 
     //    DEBUG_PRINTF("Kill the first hello...\n");
     //    err = invoke_dispatcher_stop(info[0].dispatcher_cap_in_parent);

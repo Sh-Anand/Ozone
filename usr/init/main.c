@@ -39,6 +39,7 @@ struct platform_info platform_info;
 
 struct ring_producer *urpc_sender = NULL;  // currently only for core 0
 struct ring_consumer *urpc_recv = NULL;    // currently only for core 1
+struct thread *urpc_recv_thread = NULL;    // currently only for core 1
 
 /**
  * @brief TODO: make use of this function
@@ -212,7 +213,7 @@ static void rpc_recv_handler(void *arg)
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
-            return;
+            goto RE_REGISTER;
         }
         assert(!capref_is_null(new_slot));
         lmp_chan_set_recv_slot(lc, new_slot);
@@ -220,8 +221,13 @@ static void rpc_recv_handler(void *arg)
 
     uint8_t *buf = (uint8_t *)msg.words;
     uint8_t type = buf[0];
+    if (type >= RPC_MSG_COUNT) {
+        DEBUG_PRINTF("Invalid RPC msg %u\n", type);
+        rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
+        goto RE_REGISTER;
+    }
     buf += 1;
-    size_t size = msg.buf.msglen * (sizeof(uintptr_t)) - MSG_TYPE_SIZE;
+    size_t size = msg.buf.msglen * (sizeof(uintptr_t)) - 1;
 
     // we have a frame cap, map into our space and set buf to mapped address
     // TODO: now cap is only for frame-based message, which prevent us from receving cap
@@ -231,7 +237,7 @@ static void rpc_recv_handler(void *arg)
                                ROUND_UP(size, BASE_PAGE_SIZE), cap);
         if (err_is_fail(err)) {
             rpc_nack(lc, err_push(err, LIB_ERR_PAGING_MAP));
-            return;
+            goto RE_REGISTER;
         }
         size = BASE_PAGE_SIZE;
     }
@@ -251,6 +257,8 @@ static void rpc_recv_handler(void *arg)
         free(reply_payload);
     }
 
+
+RE_REGISTER:
     // Re-register
     err = lmp_chan_register_recv(lc, get_default_waitset(),
                                  MKCLOSURE(rpc_recv_handler, arg));
@@ -339,22 +347,35 @@ static errval_t forge_ram(struct bootinfo *bootinfo)
 
 // }
 
-// static int urpc_receive_worker(void *params)
-//{
-//     // struct thread_param *p = params;
-//     DEBUG_PRINTF("Trying to malloc 64MB...\n");
-//     size_t region_size = 64 * 1024 * 1024;
-//     char *b = malloc(region_size);
-//     if (b == NULL) {
-//         print_err_if_any(LIB_ERR_MALLOC_FAIL);
-//     } else {
-//         DEBUG_PRINTF("malloc succeeded, going to memset whole 64MB, will take "
-//                      "some time...\n");
-//         memset(b, 0, region_size);
-//         DEBUG_PRINTF("memset succeeded\n");
-//     }
-//     return EXIT_SUCCESS;
-// }
+static int urpc_server_worker(void *params)
+{
+    uint8_t *recv_payload;
+    size_t recv_size;
+    while (true) {
+        errval_t err = ring_consumer_recv(urpc_recv, (void **)&recv_payload, &recv_size);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "ring_consumer_recv failed\n");
+            return EXIT_FAILURE;
+        }
+HERE;
+        uint8_t type = recv_payload[0];
+        if (type >= RPC_MSG_COUNT) {
+            DEBUG_PRINTF("Invalid URPC msg %u\n", type);
+            continue;
+        }
+HERE;
+        void *reply_payload = NULL;
+        size_t reply_size = 0;
+        struct capref reply_cap = NULL_CAP;
+        err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size, &reply_cap);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "in rpc handler %u\n", type);
+        }
+HERE;
+        // FIXME: reply is discarded for now
+    }
+    return EXIT_SUCCESS;
+}
 
 
 static int app_main(int argc, char *argv[])
@@ -418,7 +439,13 @@ static int app_main(int argc, char *argv[])
 
     grading_test_early();
 
-    //    grading_test_late();
+        grading_test_late();
+
+    urpc_recv_thread = thread_create(urpc_server_worker, NULL);
+    if (urpc_recv_thread == NULL) {
+        DEBUG_ERR(err, "failed to create urpc_recv_thread");
+        abort();
+    }
 
     struct waitset *default_ws = get_default_waitset();
     while (true) {

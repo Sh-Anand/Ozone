@@ -6,6 +6,9 @@
 #include "mem_alloc.h"
 #include <spawn/spawn.h>
 #include <grading.h>
+#include <ringbuffer/ringbuffer.h>
+
+extern struct ring_producer *urpc_sender;  // currently only for core 0 to core 1
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -71,16 +74,34 @@ HANDLER(spawn_msg_handler)
     CAST_IN_MSG(msg, struct rpc_process_spawn_call_msg);
     grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
 
-    struct spawninfo info;
-    domainid_t pid;
-    errval_t err = spawn_load_cmdline(msg->cmdline, &info, &pid);
-    if (err_is_fail(err)) {
-        return err;
+    if (msg->core == disp_get_core_id()) {
+        // Spawn on the current core
+
+        struct spawninfo info;
+        domainid_t pid;
+        errval_t err = spawn_load_cmdline(msg->cmdline, &info, &pid);
+        if (err_is_fail(err)) {
+            return err;
+        }
+
+        MALLOC_OUT_MSG(reply, domainid_t);
+        *reply = pid;
+        return SYS_ERR_OK;
+    } else {
+        // TODO: for now only forward to core 1
+
+        // XXX: trick to retrieve the rpc identifier
+        errval_t err = ring_producer_transmit(urpc_sender, ((uint8_t *)in_payload) - 1, in_size + 1);
+        if (err_is_fail(err)) {
+            return err;
+        }
+
+        // FIXME: for now the reply is forged
+        MALLOC_OUT_MSG(reply, domainid_t);
+        *reply = -1;
+        return SYS_ERR_OK;
     }
 
-    MALLOC_OUT_MSG(reply, domainid_t);
-    *reply = pid;
-    return SYS_ERR_OK;
 }
 
 HANDLER(process_get_name_handler)

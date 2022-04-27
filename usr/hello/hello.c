@@ -114,7 +114,9 @@ int main(int argc, char *argv[])
                            "  self_paging\n"
                            "Threads:\n"
                            "  mt_self_paging\n"
-                           "Others are interpreted as spawn commands\n");
+                           "Spawn:\n"
+                           "  spawn <core> <command line>\n"
+                           "  <command line to spawn on the current core>\n");
 
                 } else if (strcmp(buf, "exit") == 0) {
                     printf("Goodbye, world!\n");
@@ -247,7 +249,6 @@ int main(int argc, char *argv[])
                     sleep(1);
 
                 } else if (strcmp(buf, "mt_self_paging") == 0) {
-
                     printf("Going to create 16 threads...\n");
 
                     for (int i = 0; i < 16; i++) {
@@ -263,10 +264,25 @@ int main(int argc, char *argv[])
                     for (int i = 0; i < 16; i++) {
                         thread_join(threads[i], NULL);
                     }
+                } else if (strncmp(buf, "spawn ", 6) == 0) {
+                    char *cmdline = NULL;
+
+                    coreid_t core;
+                    core = strtol(buf + 6, &cmdline, 10);
+                    assert(core <= 1);
+
+                    while(*cmdline == ' ') cmdline++;
+
+                    domainid_t pid = 0;
+                    printf("Hello is going to exit to unblock init!\n");
+                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), cmdline, core,
+                                                &pid);
+                    print_err_if_any(err);
+                    return EXIT_SUCCESS;
                 } else {
                     domainid_t pid = 0;
                     printf("Hello is going to exit to unblock init!\n");
-                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, 0,
+                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, disp_get_current_core_id(),
                                                 &pid);
                     print_err_if_any(err);
                     return EXIT_SUCCESS;
