@@ -56,7 +56,7 @@ void user_panic_fn(const char *file, const char *func, int line,
 # define DEBUG_ERR(err, msg...) ((void)0)
 # define HERE ((void)0)
 #else
-# define DEBUG_PRINTF(fmt...) debug_printf(fmt);
+# define DEBUG_PRINTF(fmt...) debug_printf(fmt)
 # define DEBUG_ERR(err, msg...) debug_err(__FILE__, __func__, __LINE__, err, msg)
 # include <aos/dispatch.h>
 # define HERE fprintf(stderr, "Disp %.*s.%u: %s, %s, %u\n", \

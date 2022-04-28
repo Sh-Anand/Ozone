@@ -260,7 +260,7 @@ static void binding_handler(void *arg)
     }
 
     // XXX: no checking for now, might be risky if user program exploit this endpoint
-    DEBUG_PRINTF("spawn: receive binding request from process %lu\n", msg.words[0])
+    DEBUG_PRINTF("spawn: receive binding request from process %lu\n", msg.words[0]);
     err = lmp_chan_accept(si->lc, PROC_ENDPOINT_BUF_LEN, cap);
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to accept");

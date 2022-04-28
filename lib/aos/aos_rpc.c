@@ -52,7 +52,7 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t s
 
     } else {
         // Buffer doesn't fit, make and map frame cap
-        DEBUG_PRINTF("rpc_marshall: alloc frame\n")
+        DEBUG_PRINTF("rpc_marshall: alloc frame\n");
 
         if (!capref_is_null(cap)) {
             return LIB_ERR_RPC_LARGE_MSG_WITH_CAP;

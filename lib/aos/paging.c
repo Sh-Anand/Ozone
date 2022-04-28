@@ -229,7 +229,7 @@ static inline errval_t apply_mapping(struct paging_state *st, struct capref dest
     err = vnode_map(dest, src, slot, attr, off, pte_count, mapping_cap);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_VNODE_MAP);
-        DEBUG_PRINTF("failed to vnode_map\n")
+        DEBUG_PRINTF("failed to vnode_map\n");
         goto FAILURE_VNODE_MAP;
     }
 
@@ -1235,7 +1235,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     struct paging_vnode_node *l0 = NULL;
     err = create_vnode_node(st, 0, 0, &l0);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("failed to create L0 vnode node\n")
+        DEBUG_PRINTF("failed to create L0 vnode node\n");
         return err;
     }
     l0->vnode_cap = pdir;
@@ -1243,7 +1243,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     struct paging_region_node *init_region = NULL;
     err = create_region_node(st, 0, PAGING_ADDR_BITS, &init_region);
     if (err_is_fail(err)) {
-        DEBUG_PRINTF("failed to create L0 region node\n")
+        DEBUG_PRINTF("failed to create L0 region node\n");
         return err;
     }
     insert_to_free_list(st, init_region);
@@ -1252,7 +1252,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
         // Grab the region before start_vaddr with attr 0, not actually mapping anything
         err = map_fixed(st, 0, NULL_CAP, 0, start_vaddr, 0);
         if (err_is_fail(err)) {
-            DEBUG_PRINTF("failed to grab the region before start_vaddr\n")
+            DEBUG_PRINTF("failed to grab the region before start_vaddr\n");
             return err;
         }
     }
@@ -1526,7 +1526,7 @@ __attribute__((__unused__)) static errval_t set_page_fault_handler(void)
         DEBUG_ERR(err, "paging: fail to set exception handler");
         return err;
     } else {
-        DEBUG_PRINTF("paging: page fault handler set\n");
+        DEBUG_PRINTF("page fault handler set\n");
     }
     return SYS_ERR_OK;
 }
