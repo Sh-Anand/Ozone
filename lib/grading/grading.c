@@ -152,37 +152,37 @@ void grading_test_late(void)
     domainid_t pid = -1;
     errval_t err;
 
-    //    DEBUG_PRINTF("Run spawnTester 10...\n");
-    //         err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
-    //         assert(err_is_ok(err));
-    //         assert(pid != -1);
+       DEBUG_PRINTF("Run spawnTester 10...\n");
+            err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
+            assert(err_is_ok(err));
+            assert(pid != -1);
 
-    //    DEBUG_PRINTF("Run 10 spawnTester 10...\n");
-    //    for (int i = 1; i <= 10; i++) {
-    //        err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
-    //        assert(err_is_ok(err));
-    //        assert(pid != -1);
-    //        printf("%d-th call succeed\n", i);
-    //    }
+       DEBUG_PRINTF("Run 10 spawnTester 10...\n");
+       for (int i = 1; i <= 10; i++) {
+           err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
+           assert(err_is_ok(err));
+           assert(pid != -1);
+           printf("%d-th call succeed\n", i);
+       }
 
-    //    domainid_t *pids = NULL;
-    //    size_t pid_count = 0;
-    //    err = spawn_get_all_pids(&pids, &pid_count);
-    //    if (err_is_fail(err)) {
-    //        DEBUG_PRINTF("  Getting all PIDs failed.\n");
-    //    }
-    //    assert(pids != NULL && "NULL pids");
-    //    DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
-    //
-    //    for (int i = 0; i < pid_count; i++) {
-    //        char *name;
-    //        err = spawn_get_name(pids[i], &name);
-    //        if (err_is_fail(err)) {
-    //            DEBUG_PRINTF("  Getting name failed.\n");
-    //        }
-    //        DEBUG_PRINTF("  %u %s\n", pids[i], name);
-    //        free(name);
-    //    }
+       domainid_t *pids = NULL;
+       size_t pid_count = 0;
+       err = spawn_get_all_pids(&pids, &pid_count);
+       if (err_is_fail(err)) {
+           DEBUG_PRINTF("  Getting all PIDs failed.\n");
+       }
+       assert(pids != NULL && "NULL pids");
+       DEBUG_PRINTF("  Get %lu PID(s):\n", pid_count);
+    
+       for (int i = 0; i < pid_count; i++) {
+           char *name;
+           err = spawn_get_name(pids[i], &name);
+           if (err_is_fail(err)) {
+               DEBUG_PRINTF("  Getting name failed.\n");
+           }
+           DEBUG_PRINTF("  %u %s\n", pids[i], name);
+           free(name);
+       }
 
     if (disp_get_core_id() == 0) {
         DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");

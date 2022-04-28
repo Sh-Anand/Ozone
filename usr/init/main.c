@@ -177,8 +177,19 @@ static errval_t boot_core(coreid_t mpid)
 
     // send bootinfo across
     err = ring_producer_transmit(urpc_sender, bi_core, size_buf);
+    if(err_is_fail(err))
+        return err;
+    
+    // send mm_strings cap across
+    struct frame_identity mm_strings_id;
+    err = frame_identify(cap_mmstrings, &mm_strings_id);
+    if(err_is_fail(err))
+        return err;
+    
+    err = ring_producer_transmit(urpc_sender, &mm_strings_id, sizeof(struct frame_identity));
+    if(err_is_fail(err))
+        return err;
 
-    DEBUG_PRINTF("BSP BOOTINFO HAS %d regions\n", bi->regions_length);
     return SYS_ERR_OK;
 }
 
@@ -458,6 +469,23 @@ static int app_main(int argc, char *argv[])
         abort();
     }
 
+    // get cap_mmstrings
+    struct frame_identity *mm_strings_id;
+    size_t frameid_size;
+    err = ring_consumer_recv(urpc_recv, (void **)&mm_strings_id, &frameid_size);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to get mmstrings cap");
+        abort();
+    }
+    struct capref cap_mmstrings_bsp;
+    err = slot_alloc(&cap_mmstrings_bsp);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to allocate slot for mmstrings");
+        abort();
+    }
+    err = frame_forge(cap_mmstrings_bsp, mm_strings_id->base, mm_strings_id->bytes, disp_get_current_core_id());
+    cap_mmstrings = cap_mmstrings_bsp;
+
     // forge modules and set the MODULECN cnode
     err = forge_modules(bi);
     if(err_is_fail(err)) {
@@ -469,7 +497,7 @@ static int app_main(int argc, char *argv[])
 
     grading_test_early();
 
-        grading_test_late();
+    grading_test_late();
 
     urpc_recv_thread = thread_create(urpc_server_worker, NULL);
     if (urpc_recv_thread == NULL) {
