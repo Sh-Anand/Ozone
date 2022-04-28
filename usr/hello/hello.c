@@ -257,32 +257,30 @@ int main(int argc, char *argv[])
                     for (int i = 0; i < 16; i++) {
                         thread_join(threads[i], NULL);
                     }
-                } else if (strncmp(buf, "spawn ", 6) == 0) {
-                    char *cmdline = NULL;
+                } else {
+                    char *cmdline = buf;
 
-                    coreid_t core;
-                    core = strtol(buf + 6, &cmdline, 10);
-                    assert(core <= 1);
+                    coreid_t core = disp_get_core_id();
 
-                    while(*cmdline == ' ') cmdline++;
+                    if (strncmp(buf, "spawn ", 6) == 0) {
+                        core = strtol(buf + 6, &cmdline, 10);
+                        assert(core <= 1);
+                        while (*cmdline == ' ') cmdline++;
+                    }
 
                     domainid_t pid = 0;
-                    printf("Hello is going to exit to unblock init!\n");
                     err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), cmdline, core,
                                                 &pid);
-                    print_err_if_any(err);
-                    return EXIT_SUCCESS;
-                } else {
-                    domainid_t pid = 0;
-                    printf("Hello is going to exit to unblock init!\n");
-                    err = aos_rpc_process_spawn(aos_rpc_get_process_channel(), buf, disp_get_current_core_id(),
-                                                &pid);
-                    print_err_if_any(err);
-                    return EXIT_SUCCESS;
+                    if (err_is_ok(err)) {
+                        DEBUG_PRINTF("going to exit to unblock init!\n");
+                        return EXIT_SUCCESS;
+                    } else {
+                        print_err_if_any(err);
+                    }
                 }
                 break;  // prompt for the next command
 
-            } else if (c == 127) {
+            } else if (c == 127 || c == 8) {
                 if (offset > 0) {
                     printf("\b \b");  // destructive backspace
                     fflush(stdout);

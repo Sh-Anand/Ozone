@@ -9,6 +9,7 @@
 #include <ringbuffer/ringbuffer.h>
 
 extern struct ring_producer *urpc_send;  // currently only for core 0 to core 1
+extern struct ring_consumer *urpc_recv;  // currently only for core 0 from core 1
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -96,12 +97,27 @@ HANDLER(spawn_msg_handler)
             return err;
         }
 
-        // FIXME: for now the reply is forged
-        MALLOC_OUT_MSG(reply, domainid_t);
-        *reply = -1;
-        return SYS_ERR_OK;
-    }
+        uint8_t *ret_payload = NULL;
+        size_t ret_size;
+        err = ring_consumer_recv(urpc_recv, (void **)&ret_payload, &ret_size);
+        if (err_is_fail(err)) {
+            goto RET;
+        }
 
+        if (*((rpc_identifier_t *)ret_payload) == RPC_ACK_MSG) {
+            MALLOC_OUT_MSG(reply, domainid_t);
+            *reply = *((domainid_t *)(ret_payload + sizeof(rpc_identifier_t)));
+            err = SYS_ERR_OK;
+            goto RET;
+        } else {
+            err = *((errval_t *)(ret_payload + sizeof(rpc_identifier_t)));
+            goto RET;
+        }
+
+    RET:
+        free(ret_payload);
+        return err;
+    }
 }
 
 HANDLER(process_get_name_handler)

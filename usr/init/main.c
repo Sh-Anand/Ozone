@@ -130,7 +130,7 @@ static errval_t boot_core(coreid_t mpid)
         return err;
     }
 
-    // INIT ring buffer
+    // Init ring buffer
     err = ring_init(urpc_buffer);
     if (err_is_fail(err))
         return err;
@@ -139,7 +139,7 @@ static errval_t boot_core(coreid_t mpid)
         return err;
     }
 
-    // INIT URPC PRODUCER
+    // Init URPC producer
     urpc_send = malloc(sizeof(struct ring_producer));
     if (urpc_send == NULL) {
         return LIB_ERR_MALLOC_FAIL;
@@ -149,6 +149,7 @@ static errval_t boot_core(coreid_t mpid)
         return err;
     }
 
+    // Init UPRC consumer
     urpc_recv = malloc(sizeof(struct ring_consumer));
     if (urpc_recv == NULL) {
         return LIB_ERR_MALLOC_FAIL;
@@ -158,8 +159,35 @@ static errval_t boot_core(coreid_t mpid)
         return err;
     }
 
-    // CHANGE cpu_a57_qemu to cpu_imx8x when using the board
-    err = coreboot(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", urpc_frame_id);
+    // Choose the right bootloader and cpu driver image
+
+    err = invoke_kernel_get_platform_info(cap_kernel, &platform_info);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "failed to obtain the platform info from the kernel\n");
+    }
+
+    char *bootloader_image;
+    switch (platform_info.arch) {
+    case PI_ARCH_ARMV8A:
+        bootloader_image = "boot_armv8_generic";
+        break;
+    default:
+        USER_PANIC("unsupported arch %d\n", platform_info.arch);
+    }
+
+    char *cpu_driver_image;
+    switch (platform_info.platform) {
+    case PI_PLATFORM_QEMU:
+        cpu_driver_image = "cpu_a57_qemu";
+        break;
+    case PI_PLATFORM_IMX8X:
+        cpu_driver_image = "cpu_imx8x";
+        break;
+    default:
+        USER_PANIC("unknown platform %d\n", platform_info.platform);
+    }
+
+    err = coreboot(mpid, bootloader_image, cpu_driver_image, "init", urpc_frame_id);
 
     if (err_is_fail(err))
         return err;
@@ -199,13 +227,13 @@ static errval_t boot_core(coreid_t mpid)
     err = ring_producer_transmit(urpc_send, bi_core, size_buf);
     if(err_is_fail(err))
         return err;
-    
+
     // send mm_strings cap across
     struct frame_identity mm_strings_id;
     err = frame_identify(cap_mmstrings, &mm_strings_id);
     if(err_is_fail(err))
         return err;
-    
+
     err = ring_producer_transmit(urpc_send, &mm_strings_id, sizeof(struct frame_identity));
     if(err_is_fail(err))
         return err;
@@ -406,9 +434,12 @@ static errval_t forge_modules(struct bootinfo *bootinfo) {
 
 static int urpc_server_worker(void *params)
 {
+    (void)params;
     uint8_t *recv_payload;
     size_t recv_size;
     while (true) {
+        recv_payload = NULL;
+
         errval_t err = ring_consumer_recv(urpc_recv, (void **)&recv_payload, &recv_size);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ring_consumer_recv failed\n");
@@ -418,19 +449,51 @@ static int urpc_server_worker(void *params)
         uint8_t type = recv_payload[0];
         if (type >= RPC_MSG_COUNT) {
             DEBUG_PRINTF("Invalid URPC msg %u\n", type);
-            continue;
+            goto FREE_RECV_PAYLOAD;
         }
 
         void *reply_payload = NULL;
         size_t reply_size = 0;
         struct capref reply_cap = NULL_CAP;
         err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size, &reply_cap);
+
+        uint8_t *reply_buf = NULL;
+
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "in rpc handler %u\n", type);
+            reply_buf = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
+            if (reply_buf == NULL) {
+                DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+                goto FREE_REPLY_PAYLOAD;
+            }
+            *((rpc_identifier_t *)reply_buf) = RPC_ERR_MSG;
+
+        } else {
+            reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
+            if (reply_buf == NULL) {
+                DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+                goto FREE_REPLY_PAYLOAD;
+            }
+            *((rpc_identifier_t *)reply_buf) = RPC_ACK_MSG;
+            if (reply_size != 0) {
+                memcpy(reply_buf + sizeof(rpc_identifier_t), reply_payload, reply_size);
+            }
         }
 
-        // FIXME: reply is discarded for now
+        err = ring_producer_transmit(urpc_send, reply_buf, sizeof(rpc_identifier_t) + reply_size);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "Fail to reply URPC\n");
+            goto FREE_REPLY_BUF;
+        }
+
+    FREE_REPLY_BUF:
+        free(reply_buf);
+    FREE_REPLY_PAYLOAD:
+        free(reply_payload);
+    FREE_RECV_PAYLOAD:
+        free(recv_payload);
+
     }
+
     return EXIT_SUCCESS;
 }
 

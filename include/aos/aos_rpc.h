@@ -40,6 +40,8 @@ enum rpc_msg_type {
     RPC_MSG_COUNT
 };
 
+typedef uint8_t rpc_identifier_t;
+
 struct aos_rpc_msg {
     size_t size;
     enum rpc_msg_type type;
