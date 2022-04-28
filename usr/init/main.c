@@ -41,6 +41,8 @@ struct ring_producer *urpc_send = NULL;  // currently only for core 0 and 1
 struct ring_consumer *urpc_recv = NULL;  // currently only for core 0 and 1
 struct thread *urpc_recv_thread = NULL;  // currently only for core 1
 
+
+
 /**
  * @brief TODO: make use of this function
  *
@@ -353,14 +355,21 @@ static int bsp_main(int argc, char *argv[])
     // TODO: Spawn system processes, boot second core etc. here
 
     // Booting second core
-    err = boot_core(1);
-    if (err_is_fail(err))
-        DEBUG_ERR(err, "failed to boot second core");
+    for(int i = 1;i< 4;i++) {
+        err = boot_core(i);
+        if (err_is_fail(err))
+            DEBUG_ERR(err, "failed to boot second core");
+    }
 
     // Grading
     grading_test_late();
 
     debug_printf("Message handler loop\n");
+
+    // Turn off the core
+    // uint8_t payload = RPC_SHUTDOWN;
+    // err = ring_producer_transmit(urpc_send, &payload, sizeof(uint8_t));
+    // err = psci_cpu_on(1, cpu_driver_entry_point, 0);
     // Hang around
     struct waitset *default_ws = get_default_waitset();
     while (true) {

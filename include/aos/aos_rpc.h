@@ -37,6 +37,7 @@ enum rpc_msg_type {
     RPC_PROCESS_GET_NAME,
     RPC_PROCESS_GET_ALL_PIDS,
     RPC_TERMINAL,
+    RPC_SHUTDOWN,
     RPC_MSG_COUNT
 };
 
