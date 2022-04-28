@@ -37,9 +37,9 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 struct platform_info platform_info;
 
-struct ring_producer *urpc_sender = NULL;  // currently only for core 0
-struct ring_consumer *urpc_recv = NULL;    // currently only for core 1
-struct thread *urpc_recv_thread = NULL;    // currently only for core 1
+struct ring_producer *urpc_send = NULL;  // currently only for core 0 and 1
+struct ring_consumer *urpc_recv = NULL;  // currently only for core 0 and 1
+struct thread *urpc_recv_thread = NULL;  // currently only for core 1
 
 /**
  * @brief TODO: make use of this function
@@ -113,30 +113,50 @@ static errval_t boot_core(coreid_t mpid)
     err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE,
                       NULL);  // TODO: REPLACE WITH A FIXED UMP FRAME SIZE LATER!
 
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err;
+    }
 
     struct frame_identity urpc_frame_id;
     err = frame_identify(urpc_frame, &urpc_frame_id);
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err;
+    }
 
-    void *urpc_buffer;
-    err = paging_map_frame(get_current_paging_state(), &urpc_buffer, URPC_FRAME_SIZE,
+    uint8_t *urpc_buffer;
+    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer, URPC_FRAME_SIZE,
                            urpc_frame);
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err;
+    }
 
     // INIT ring buffer
     err = ring_init(urpc_buffer);
     if (err_is_fail(err))
         return err;
+    err = ring_init(urpc_buffer + BASE_PAGE_SIZE);
+    if (err_is_fail(err)) {
+        return err;
+    }
 
     // INIT URPC PRODUCER
-    urpc_sender = malloc(sizeof(struct ring_producer));
-    err = ring_producer_init(urpc_sender, urpc_buffer);
-    if (err_is_fail(err))
+    urpc_send = malloc(sizeof(struct ring_producer));
+    if (urpc_send == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+    err = ring_producer_init(urpc_send, urpc_buffer);
+    if (err_is_fail(err)) {
         return err;
+    }
+
+    urpc_recv = malloc(sizeof(struct ring_consumer));
+    if (urpc_recv == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+    err = ring_consumer_init(urpc_recv, urpc_buffer + BASE_PAGE_SIZE);
+    if (err_is_fail(err)) {
+        return err;
+    }
 
     // CHANGE cpu_a57_qemu to cpu_imx8x when using the board
     err = coreboot(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", urpc_frame_id);
@@ -176,7 +196,7 @@ static errval_t boot_core(coreid_t mpid)
     bi_core->regions[bi->regions_length] = region;
 
     // send bootinfo across
-    err = ring_producer_transmit(urpc_sender, bi_core, size_buf);
+    err = ring_producer_transmit(urpc_send, bi_core, size_buf);
     if(err_is_fail(err))
         return err;
     
@@ -186,7 +206,7 @@ static errval_t boot_core(coreid_t mpid)
     if(err_is_fail(err))
         return err;
     
-    err = ring_producer_transmit(urpc_sender, &mm_strings_id, sizeof(struct frame_identity));
+    err = ring_producer_transmit(urpc_send, &mm_strings_id, sizeof(struct frame_identity));
     if(err_is_fail(err))
         return err;
 
@@ -358,11 +378,13 @@ static errval_t forge_modules(struct bootinfo *bootinfo) {
     errval_t err;
 
     //create an L2 node into the ROOTCN_SLOT_MODULECN
-    err = cnode_create_foreign_l2(cap_root, ROOTCN_SLOT_MODULECN, &cnode_module);
+    struct cnoderef modulecn_ref;
+    err = cnode_create_foreign_l2(cap_root, ROOTCN_SLOT_MODULECN, &modulecn_ref);
     if(err_is_fail(err)) {
         DEBUG_ERR(err, "Failed to create L2 node for cnode_module");
         return err;
     }
+    assert(cnodecmp(modulecn_ref, cnode_module));
 
     for(int i=0; i < bootinfo->regions_length; i++) {
         if(bootinfo->regions[i].mr_type == RegionType_Module) {
@@ -370,6 +392,7 @@ static errval_t forge_modules(struct bootinfo *bootinfo) {
                 .cnode = cnode_module,
                 .slot = bootinfo->regions[i].mrmod_slot
             };
+            DEBUG_PRINTF("slot = %u\n", bootinfo->regions[i].mrmod_slot);
             err = frame_forge(module, bootinfo->regions[i].mr_base, bootinfo->regions[i].mr_bytes, disp_get_core_id());
             if(err_is_fail(err)) {
                 DEBUG_ERR(err, "Failed to forge frame for module in region %d", i);
@@ -391,13 +414,13 @@ static int urpc_server_worker(void *params)
             DEBUG_ERR(err, "ring_consumer_recv failed\n");
             return EXIT_FAILURE;
         }
-HERE;
+
         uint8_t type = recv_payload[0];
         if (type >= RPC_MSG_COUNT) {
             DEBUG_PRINTF("Invalid URPC msg %u\n", type);
             continue;
         }
-HERE;
+
         void *reply_payload = NULL;
         size_t reply_size = 0;
         struct capref reply_cap = NULL_CAP;
@@ -405,7 +428,7 @@ HERE;
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "in rpc handler %u\n", type);
         }
-HERE;
+
         // FIXME: reply is discarded for now
     }
     return EXIT_SUCCESS;
@@ -423,8 +446,8 @@ static int app_main(int argc, char *argv[])
     errval_t err;
 
     // map URPC frame to our addr
-    void *urpc_addr;
-    err = paging_map_frame(get_current_paging_state(), &urpc_addr, URPC_FRAME_SIZE,
+    uint8_t *urpc_addr;
+    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_addr, URPC_FRAME_SIZE,
                            cap_urpc);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main mapping URPC frame");
@@ -440,6 +463,17 @@ static int app_main(int argc, char *argv[])
     err = ring_consumer_init(urpc_recv, urpc_addr);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main init URPC receiver");
+        abort();
+    }
+
+    urpc_send = malloc(sizeof(struct ring_producer));
+    if (urpc_send == NULL) {
+        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc ring_producer");
+        abort();
+    }
+    err = ring_producer_init(urpc_send, urpc_addr + BASE_PAGE_SIZE);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in app_main init URPC sender");
         abort();
     }
 
@@ -469,6 +503,13 @@ static int app_main(int argc, char *argv[])
         abort();
     }
 
+    // forge modules and set the MODULECN cnode
+    err = forge_modules(bi);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to forge modules");
+        abort();
+    }
+
     // get cap_mmstrings
     struct frame_identity *mm_strings_id;
     size_t frameid_size;
@@ -477,19 +518,9 @@ static int app_main(int argc, char *argv[])
         DEBUG_ERR(err, "failed to get mmstrings cap");
         abort();
     }
-    struct capref cap_mmstrings_bsp;
-    err = slot_alloc(&cap_mmstrings_bsp);
+    err = frame_forge(cap_mmstrings, mm_strings_id->base, mm_strings_id->bytes, disp_get_current_core_id());
     if(err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to allocate slot for mmstrings");
-        abort();
-    }
-    err = frame_forge(cap_mmstrings_bsp, mm_strings_id->base, mm_strings_id->bytes, disp_get_current_core_id());
-    cap_mmstrings = cap_mmstrings_bsp;
-
-    // forge modules and set the MODULECN cnode
-    err = forge_modules(bi);
-    if(err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to forge modules");
+        DEBUG_ERR(err, "failed to forge cap_mmstrings");
         abort();
     }
 

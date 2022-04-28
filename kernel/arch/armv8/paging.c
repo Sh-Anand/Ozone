@@ -540,7 +540,7 @@ caps_map_l3(struct capability* dest,
     }
 
     // check offset within frame
-    if ((offset + pte_count * BASE_PAGE_SIZE > get_size(src)) ||
+    if (/*(offset + pte_count * BASE_PAGE_SIZE > get_size(src)) ||*/
         ((offset % BASE_PAGE_SIZE) != 0)) {
         return SYS_ERR_FRAME_OFFSET_INVALID;
     }

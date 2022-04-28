@@ -70,17 +70,10 @@ int main(int argc, char *argv[])
 {
     errval_t err;
 
-    printf("Hello, world! from userspace and through RPC, presented by AOS team 1\n");
+    printf("Hello, world! from userspace, on core %u, and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
     }
-
-    if (argc < 2 || strcmp(argv[1], "AOS") != 0) {
-        printf("Goodbye world!");
-        return EXIT_SUCCESS;
-    }
-
-    printf("Entering shell since argv[1] == \"AOS\"\n");
 
     char buf[SHELL_BUF_SIZE];
     uword_t offset;

@@ -692,7 +692,7 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
     DEBUG_PRINTF("map_frame 0x%lx/%lu, offset = 0x%lu\n", addr, bytes, offset);
 #endif
 
-    assert(ROUND_UP(bytes, BASE_PAGE_SIZE) == bytes);
+//    assert(ROUND_UP(bytes, BASE_PAGE_SIZE) == bytes);
     assert(ROUND_UP(offset, BASE_PAGE_SIZE) == offset);
 
     errval_t err;
@@ -1172,7 +1172,7 @@ static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
         DEBUG_PRINTF("paging: size too large\n");
         return ERR_INVALID_ARGS;
     }
-    *size = ROUND_UP(*size, BASE_PAGE_SIZE);
+//    *size = ROUND_UP(*size, BASE_PAGE_SIZE);
     return SYS_ERR_OK;
 }
 
@@ -1507,7 +1507,9 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
             // XXX: the frame capability may or may not be stored yet, ignore it for now
             handle_real_page_fault(type, subtype, addr, regs);
         } else {
+#if 0
             DEBUG_PRINTF("paging: installed page to %p\n", addr);
+#endif
         }
 
     } else {
