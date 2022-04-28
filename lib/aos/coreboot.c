@@ -19,6 +19,7 @@ struct mem_info {
     lpaddr_t              phys_base; // Physical base address   
 };
 
+
 /**
  * Load a ELF image into memory.
  *
