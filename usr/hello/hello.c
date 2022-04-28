@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
 
                     if (strncmp(buf, "spawn ", 6) == 0) {
                         core = strtol(buf + 6, &cmdline, 10);
-                        assert(core <= 1);
+                        assert(core < 4);
                         while (*cmdline == ' ') cmdline++;
                     }
 
