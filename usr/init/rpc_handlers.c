@@ -8,8 +8,8 @@
 #include <grading.h>
 #include <ringbuffer/ringbuffer.h>
 
-extern struct ring_producer *urpc_send;  // currently only for core 0 to core 1
-extern struct ring_consumer *urpc_recv;  // currently only for core 0 from core 1
+extern struct ring_producer *urpc_send[MAX_COREID];  // currently only for core 0 to core 1
+extern struct ring_consumer *urpc_recv[MAX_COREID];  // currently only for core 0 from core 1
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -92,14 +92,14 @@ HANDLER(spawn_msg_handler)
         // TODO: for now only forward to core 1
 
         // XXX: trick to retrieve the rpc identifier
-        errval_t err = ring_producer_transmit(urpc_send, ((uint8_t *)in_payload) - 1, in_size + 1);
+        errval_t err = ring_producer_transmit(urpc_send[msg->core], ((uint8_t *)in_payload) - 1, in_size + 1);
         if (err_is_fail(err)) {
             return err;
         }
 
         uint8_t *ret_payload = NULL;
         size_t ret_size;
-        err = ring_consumer_recv(urpc_recv, (void **)&ret_payload, &ret_size);
+        err = ring_consumer_recv(urpc_recv[msg->core], (void **)&ret_payload, &ret_size);
         if (err_is_fail(err)) {
             goto RET;
         }

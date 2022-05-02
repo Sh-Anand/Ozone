@@ -37,9 +37,9 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 struct platform_info platform_info;
 
-struct ring_producer *urpc_send = NULL;  // currently only for core 0 and 1
-struct ring_consumer *urpc_recv = NULL;  // currently only for core 0 and 1
-struct thread *urpc_recv_thread = NULL;  // currently only for core 1
+struct ring_producer *urpc_send[MAX_COREID] = { NULL };  // currently only for core 0 and 1+
+struct ring_consumer *urpc_recv[MAX_COREID] = { NULL };  // currently only for core 0 and 1+
+struct thread *urpc_recv_thread = NULL;  // currently only for core 1+
 
 
 
@@ -142,21 +142,21 @@ static errval_t boot_core(coreid_t mpid)
     }
 
     // Init URPC producer
-    urpc_send = malloc(sizeof(struct ring_producer));
-    if (urpc_send == NULL) {
+    urpc_send[mpid] = malloc(sizeof(struct ring_producer));
+    if (urpc_send[mpid] == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
-    err = ring_producer_init(urpc_send, urpc_buffer);
+    err = ring_producer_init(urpc_send[mpid], urpc_buffer);
     if (err_is_fail(err)) {
         return err;
     }
 
     // Init UPRC consumer
-    urpc_recv = malloc(sizeof(struct ring_consumer));
-    if (urpc_recv == NULL) {
+    urpc_recv[mpid] = malloc(sizeof(struct ring_consumer));
+    if (urpc_recv[mpid] == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
-    err = ring_consumer_init(urpc_recv, urpc_buffer + BASE_PAGE_SIZE);
+    err = ring_consumer_init(urpc_recv[mpid], urpc_buffer + BASE_PAGE_SIZE);
     if (err_is_fail(err)) {
         return err;
     }
@@ -226,7 +226,7 @@ static errval_t boot_core(coreid_t mpid)
     bi_core->regions[bi->regions_length] = region;
 
     // send bootinfo across
-    err = ring_producer_transmit(urpc_send, bi_core, size_buf);
+    err = ring_producer_transmit(urpc_send[mpid], bi_core, size_buf);
     if(err_is_fail(err))
         return err;
 
@@ -236,7 +236,7 @@ static errval_t boot_core(coreid_t mpid)
     if(err_is_fail(err))
         return err;
 
-    err = ring_producer_transmit(urpc_send, &mm_strings_id, sizeof(struct frame_identity));
+    err = ring_producer_transmit(urpc_send[mpid], &mm_strings_id, sizeof(struct frame_identity));
     if(err_is_fail(err))
         return err;
 
@@ -449,7 +449,7 @@ static int urpc_server_worker(void *params)
     while (true) {
         recv_payload = NULL;
 
-        errval_t err = ring_consumer_recv(urpc_recv, (void **)&recv_payload, &recv_size);
+        errval_t err = ring_consumer_recv(urpc_recv[0], (void **)&recv_payload, &recv_size);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ring_consumer_recv failed\n");
             return EXIT_FAILURE;
@@ -488,7 +488,7 @@ static int urpc_server_worker(void *params)
             }
         }
 
-        err = ring_producer_transmit(urpc_send, reply_buf, sizeof(rpc_identifier_t) + reply_size);
+        err = ring_producer_transmit(urpc_send[0], reply_buf, sizeof(rpc_identifier_t) + reply_size);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "Fail to reply URPC\n");
             goto FREE_REPLY_BUF;
@@ -527,23 +527,23 @@ static int app_main(int argc, char *argv[])
     }
 
     // init ring buffer consumer
-    urpc_recv = malloc(sizeof(struct ring_consumer));
-    if (urpc_recv == NULL) {
+    urpc_recv[0] = malloc(sizeof(struct ring_consumer));
+    if (urpc_recv[0] == NULL) {
         DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc ring_consumer");
         abort();
     }
-    err = ring_consumer_init(urpc_recv, urpc_addr);
+    err = ring_consumer_init(urpc_recv[0], urpc_addr);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main init URPC receiver");
         abort();
     }
 
-    urpc_send = malloc(sizeof(struct ring_producer));
-    if (urpc_send == NULL) {
+    urpc_send[0] = malloc(sizeof(struct ring_producer));
+    if (urpc_send[0] == NULL) {
         DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc ring_producer");
         abort();
     }
-    err = ring_producer_init(urpc_send, urpc_addr + BASE_PAGE_SIZE);
+    err = ring_producer_init(urpc_send[0], urpc_addr + BASE_PAGE_SIZE);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main init URPC sender");
         abort();
@@ -551,7 +551,7 @@ static int app_main(int argc, char *argv[])
 
     // create bootinfo
     size_t bi_size;
-    err = ring_consumer_recv(urpc_recv, (void **)&bi, &bi_size);
+    err = ring_consumer_recv(urpc_recv[0], (void **)&bi, &bi_size);
 
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to get bootinfo from BSP core");
@@ -585,7 +585,7 @@ static int app_main(int argc, char *argv[])
     // get cap_mmstrings
     struct frame_identity *mm_strings_id;
     size_t frameid_size;
-    err = ring_consumer_recv(urpc_recv, (void **)&mm_strings_id, &frameid_size);
+    err = ring_consumer_recv(urpc_recv[0], (void **)&mm_strings_id, &frameid_size);
     if(err_is_fail(err)) {
         DEBUG_ERR(err, "failed to get mmstrings cap");
         abort();
