@@ -31,5 +31,6 @@ struct ring_consumer {
 
 errval_t ring_consumer_init(struct ring_consumer *rc, void *ring_buffer);
 errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *size);
+errval_t ring_consumer_recv_non_blocking(struct ring_consumer *rc, void **payload, size_t *size);
 
 #endif  // AOS_RINGBUFFER_H

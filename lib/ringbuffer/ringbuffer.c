@@ -28,8 +28,8 @@ errval_t ring_init(void *buffer)
 {
 	//struct ringbuffer *rb = (struct ringbuffer *)malloc(sizeof(struct ringbuffer));
 	if (buffer == NULL) {
-		DEBUG_PRINTF("Could not initialze ringbuffer: failed to allocate struct ringbuffer.\n");
-		return LIB_ERR_MALLOC_FAIL;
+		DEBUG_PRINTF("Could not initialze ringbuffer: recieved null pointer.\n");
+		return ERR_INVALID_ARGS;
 	}
 	
 	// make sure that the address is page aligned
@@ -89,6 +89,7 @@ static errval_t ring_insert(void *rb, void *payload) {
 
 /**
  * @brief Consumes a block of exactly 64 bytes from the ringbuffer
+ * This function blocks until an element can be read from the buffer.
  * 
  * @param rb A non null ringbuffer
  * @param payload exactly ENTRY_DATA_CAPACITY bytes of space to write the data (on our machine this is 56 bytes)
@@ -117,6 +118,65 @@ static errval_t ring_consume(void *rb, void *payload)
 	rbuf->entries[tail].ready = 0;
 	
 	// TODO: does the writebuffer need flushing?
+	
+	return SYS_ERR_OK;
+}
+
+
+/**
+ * @brief Consumes a block of exactly 64 bytes from the ringbuffer.
+ * This function will not block, but return RING_NO_MSG when buffer is empty
+ * 
+ * @param rb A non null ringbuffer
+ * @param payload exactly ENTRY_DATA_CAPACITY bytes of space to write the data (on our machine this is 56 bytes)
+ * @return An error code indicating a failure, LIB_ERR_RING_NO_MSG if buffer is empty, or SYS_ERR_OK. 
+ */
+static errval_t ring_consume_non_blocking(void *rb, void *payload) __attribute__((unused));
+static errval_t ring_consume_non_blocking(void *rb, void *payload)
+{
+	// check for null-pointer
+	if (rb == NULL) {
+		DEBUG_PRINTF("Cannot consume from ringbuffer: buffer is null pointer.\n");
+		return ERR_INVALID_ARGS;
+	}
+	
+	struct ringbuffer *rbuf = rb;
+	int tail = INDEX(rbuf->tail);
+	
+	// wait for the data to be ready
+	if (! rbuf->entries[tail].ready) return LIB_ERR_RING_NO_MSG;
+	dmb();
+	
+	// read value from buffer
+	memcpy(payload, &(rbuf->entries[tail]), ENTRY_DATA_CAPACITY);
+	INCR(rbuf->tail); // increment the tail pointer
+	
+	dmb();
+	rbuf->entries[tail].ready = 0;
+	
+	// TODO: does the writebuffer need flushing?
+	
+	return SYS_ERR_OK;
+}
+
+/**
+ * @brief Tests whether the buffer currently holds data ready to be read.
+ * @param rb A non null ringbuffer
+ * @param empty is written to 1 if buffer is empty, 0 otherwise
+ * @return ERR_INVALID_ARGS if rb is null, SYS_ERR_OK otherwise.
+ * 
+ */
+static errval_t ring_is_empty(void *rb, uint8_t *empty) __attribute__((unused));
+static errval_t ring_is_empty(void *rb, uint8_t *empty)
+{
+	if (rb == NULL) {
+		DEBUG_PRINTF("Cannot check if buffer is empty for null buffer!\n");
+		return ERR_INVALID_ARGS;
+	}
+	
+	struct ringbuffer *rbuf = rb;
+	int tail = INDEX(rbuf->tail);
+	*empty = !rbuf->entries[tail].ready;
 	
 	return SYS_ERR_OK;
 }
@@ -170,9 +230,8 @@ errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, s
 		start = 0;
 		cap = ENTRY_DATA_CAPACITY - start;
 		
-		do {
-			err = ring_insert(rp->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
-		} while (err == LIB_ERR_NOT_IMPLEMENTED);
+		err = ring_insert(rp->ringbuffer, tmp); // this error can only be SYS_ERR_OK
+		assert(err == SYS_ERR_OK);
 	
 	}
 	
@@ -214,9 +273,9 @@ errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *si
 	
 	// consume from buffer (this part should block until complete, or irrecoverable error happens)
 	uint8_t tmp[ENTRY_DATA_CAPACITY];
-	do {
-		err = ring_consume(rc->ringbuffer, tmp); // retry until success (cannot produce irrecoverable error for now)
-	} while (err == LIB_ERR_NOT_IMPLEMENTED);
+	
+	err = ring_consume(rc->ringbuffer, tmp); // this error can only be SYS_ERR_OK
+	assert(err == SYS_ERR_OK);
 	
 	*size = *((size_t*)tmp);
 	*payload = malloc(*size);
@@ -226,9 +285,8 @@ errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *si
 	size_t offset = ENTRY_DATA_CAPACITY - sizeof(size_t);
 	
 	while (offset < *size) {
-		do {
-			err = ring_consume(rc->ringbuffer, tmp);
-		} while (err == LIB_ERR_NOT_IMPLEMENTED);
+		err = ring_consume(rc->ringbuffer, tmp); // this error can only be SYS_ERR_OK
+		assert(err == SYS_ERR_OK);
 		
 		memcpy((void*)((size_t)*payload + offset), tmp, MIN(*size - offset, ENTRY_DATA_CAPACITY));
 		
