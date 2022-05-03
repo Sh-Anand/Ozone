@@ -383,6 +383,14 @@ errors libaos LIB_ERR_ {
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",
 
+    // Ring buffer
+    failure RING_INIT           "Failure in ring_init()",
+    failure RING_PRODUCER_INIT  "Failure in ring_producer_init()",
+    failure RING_PRODUCER_SEND  "Failure in ring_producer_send()",
+    failure RING_CONSUMER_INIT  "Failure in ring_consumer_init()",
+    failure RING_CONSUMER_RECV  "Failure in ring_consumer_recv()",
+    failure RING_NO_MSG         "No incoming UMP message",
+
     //RPC
     failure RPC_LARGE_MSG_WITH_CAP        "Large message cannot have a cap to send",
     failure RPC_SEND_NUM        "Failure in sending a number",
