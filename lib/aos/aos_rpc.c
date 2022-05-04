@@ -52,13 +52,16 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t s
 
     } else {
         // Buffer doesn't fit, make and map frame cap
+#if 0
         DEBUG_PRINTF("rpc_marshall: alloc frame\n");
+#endif
 
         if (!capref_is_null(cap)) {
             return LIB_ERR_RPC_LARGE_MSG_WITH_CAP;
         }
 
-        size_t rounded_size = ROUND_UP(size, BASE_PAGE_SIZE);
+        size_t rounded_size = ROUND_UP(size + sizeof(size_t) + sizeof(rpc_identifier_t),
+                                       BASE_PAGE_SIZE);
 
         struct capref frame_cap;
         err = frame_alloc(&frame_cap, rounded_size, NULL);
@@ -66,12 +69,17 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t s
             err_push(err, LIB_ERR_FRAME_ALLOC);
         }
 
-        void *addr;
-        err = paging_map_frame(get_current_paging_state(), &addr, rounded_size, frame_cap);
+        uint8_t *addr;
+        err = paging_map_frame(get_current_paging_state(), (void **)&addr, rounded_size,
+                               frame_cap);
         if (err_is_fail(err)) {
             err_push(err, LIB_ERR_PAGING_MAP);
         }
-        memcpy(addr, buf, size);
+
+        *((size_t *)addr) = size;
+        // Put identifier before actual payload, consistent with single message
+        *((rpc_identifier_t *)(addr + sizeof(size_t))) = identifier;
+        memcpy(addr + sizeof(size_t) + sizeof(rpc_identifier_t), buf, size);
         *ret_cap = frame_cap;
     }
 
@@ -192,7 +200,6 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type iden
 
         // This can happen when the current call results from slot_alloc
         if (!reserved_slot_is_null_thread_safe()) {
-
             THREAD_MUTEX_ENTER(&reserved_slot_mutex)
             {
                 // Use the reserved slot first, since slot_alloc can trigger a refill
@@ -360,9 +367,9 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
 errval_t aos_rpc_process_get_name(struct aos_rpc *rpc, domainid_t pid, char **name)
 {
     char *return_msg = NULL;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME, NULL_CAP,
-                                        &pid, sizeof(domainid_t), NULL,
-                                        (void **)&return_msg, NULL);
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME, NULL_CAP, &pid,
+                                        sizeof(domainid_t), NULL, (void **)&return_msg,
+                                        NULL);
     if (err_is_fail(err)) {
         free(return_msg);
         return err;
@@ -377,8 +384,8 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
 {
     struct rpc_process_get_all_pids_return_msg *return_msg = NULL;
     size_t return_size = 0;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_ALL_PIDS, NULL_CAP, NULL,
-                                        0, NULL, (void **)&return_msg, &return_size);
+    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_ALL_PIDS, NULL_CAP, NULL, 0,
+                                        NULL, (void **)&return_msg, &return_size);
     if (err_is_ok(err)) {
         *pid_count = return_msg->count;
         *pids = malloc(return_msg->count * sizeof(domainid_t));

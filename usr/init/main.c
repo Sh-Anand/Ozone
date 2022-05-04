@@ -140,7 +140,7 @@ static void rpc_recv_handler(void *arg)
 
     uint8_t *buf = (uint8_t *)msg.words;
     uint8_t type = buf[0];
-    if (type >= RPC_MSG_COUNT) {
+    if (type >= RPC_MSG_COUNT || type <= RPC_ERR_MSG) {
         DEBUG_PRINTF("Invalid RPC msg %u\n", type);
         rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
@@ -161,13 +161,16 @@ static void rpc_recv_handler(void *arg)
         }
 
         // Replace buf and size
-        err = paging_map_frame(get_current_paging_state(), (void **)&buf,
+        uint8_t *payload;
+        err = paging_map_frame(get_current_paging_state(), (void **)&payload,
                                frame_id.bytes, cap);
         if (err_is_fail(err)) {
             rpc_nack(lc, err_push(err, LIB_ERR_PAGING_MAP));
             goto RE_REGISTER;
         }
-        size = frame_id.bytes;
+        size = *((size_t *) payload);
+        assert(*(payload + sizeof(size_t)) == type);
+        buf = payload + sizeof(size_t) + sizeof(rpc_identifier_t);
     }
 
     void *reply_payload = NULL;
@@ -183,6 +186,13 @@ static void rpc_recv_handler(void *arg)
     // Clean up, regardless of err is ok or fail
     if (reply_payload != NULL) {
         free(reply_payload);
+    }
+
+    if (!capref_is_null(cap)) {
+        err = paging_unmap(get_current_paging_state(), buf - sizeof(size_t) - sizeof(rpc_identifier_t));
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "rpc_recv_handler: failed to unmap");
+        }
     }
 
 
@@ -220,6 +230,7 @@ static void urpc_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
+    DEBUG_PRINTF("type = %u, handler = %p\n", type, rpc_handlers[type]);
     err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size,
                              &reply_cap);
 
@@ -232,7 +243,8 @@ static void urpc_handler(void *arg)
             goto FREE_REPLY_PAYLOAD;
         }
         *((rpc_identifier_t *)reply_buf) = RPC_ERR_MSG;
-
+        *((errval_t *)(reply_buf + sizeof(rpc_identifier_t))) = err;
+        reply_size = sizeof(errval_t);
     } else {
         reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
         if (reply_buf == NULL) {
