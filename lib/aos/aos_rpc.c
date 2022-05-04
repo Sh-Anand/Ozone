@@ -294,7 +294,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
         err = cap_direct_identify(*ret_cap, &c);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to get the frame info\n");
-            return err_push(err, MM_ERR_FIND_NODE);
+            return err_push(err, MM_ERR_INVALID_CAP);
         }
         assert(c.type == ObjType_RAM);
         assert(c.u.ram.bytes >= bytes);

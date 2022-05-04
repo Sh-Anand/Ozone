@@ -18,12 +18,25 @@
 #include <aos/solution.h>
 #include <mdb/types.h>
 
+/**
+ * @brief Initialize the instance of mm
+ * 
+ * @param mm The mm to initialize
+ * @param objtype Should be ObjType_RAM
+ * @param slab_refill_func A function to refill slabs
+ * @param slot_alloc_func A function to alloc slots
+ * @param slot_refill_func A function to refill slots
+ * @param slot_alloc_inst A instance of a slot allocator
+ * @return errval_t 
+ */
 errval_t mm_init(struct mm *mm, enum objtype objtype,
                      slab_refill_func_t slab_refill_func,
                      slot_alloc_t slot_alloc_func,
                      slot_refill_t slot_refill_func,
                      void *slot_alloc_inst)
 {
+    assert(objtype == ObjType_RAM);
+
     mm->slot_alloc_inst = slot_alloc_inst;
     mm->slot_refill = slot_refill_func;
     mm->slot_alloc = slot_alloc_func;
@@ -32,7 +45,7 @@ errval_t mm_init(struct mm *mm, enum objtype objtype,
     mm->pending_root = NULL;
 
     slab_init(&mm->slabs, sizeof(struct mm_node), slab_refill_func);
-    for (int i = 0; i < MM_NODE_TABLE_SIZE; i++) mm->node_table[i] = NULL;
+    for (int i = 0; i < MM_NODE_TABLE_SIZE; i++) mm->node_table[i] = NULL; // Setup linked-list table
 
     return SYS_ERR_OK;
 }
@@ -42,29 +55,61 @@ void mm_destroy(struct mm *mm)
     assert(!"NYI");
 }
 
-inline unsigned char __address_alignment2_bits(genpaddr_t address) {    
+/**
+ * @brief Return the alignment bits of the passed address
+ * 
+ * @param address Some address to calculate the alignment of
+ * @return Bit equivalent of the alignemnt of the address
+ */
+static unsigned char __address_alignment2_bits(genpaddr_t address) {
+    if (address == 0) return MM_ADDR_BITS - 1;
     return __builtin_ctzl(address);
 }
 
-inline unsigned char __floor_block_size2_bits(gensize_t block_size) {
-    assert(block_size > 0);
+/**
+ * @brief Returns the floored block_size
+ * 
+ * @param block_size The size to convert
+ * @return The bit size that is enough if the size is a power of 2 but less otherwise
+ */
+static unsigned char __floor_block_size2_bits(gensize_t block_size) {
+    if (block_size == 0) return 0;
     return (MM_ADDR_BITS - 1 - __builtin_clzl(block_size));
 }
 
-inline unsigned char __ceil_block_size2_bits(gensize_t block_size) {
-    assert(block_size > 1);
-    return (MM_ADDR_BITS - __builtin_clzl(block_size - 1));
+/**
+ * @brief Returns the ceiled block_size
+ * 
+ * @param block_size The size to convert
+ * @return The bit size that is as least as large as the passed size
+ */
+static unsigned char __ceil_block_size2_bits(gensize_t block_size) {
+    if (block_size <= 1) return 0;
+    else return (MM_ADDR_BITS - __builtin_clzl(block_size - 1));
 }
 
-inline gensize_t __bits_to_gensize(unsigned char bits) {
+// 
+/**
+ * @brief Convert a bit size to a normal size
+ * 
+ * @param bits The bit size
+ * @return gensize_t The normal size equivalent
+ */
+static gensize_t __bits_to_gensize(unsigned char bits) {
     assert(bits < MM_ADDR_BITS);
     return ((gensize_t) 1) << bits;
 }
 
-// No intrinsic available :/
-static inline capaddr_t __mm__capref_to_key(struct capref cap) {
+/**
+ * @brief Return the key to use in the pending tree
+ * 
+ * @param cap The capability to calculate the key of
+ * @return capaddr_t Reversed capability addr (tree should balance nicely then)
+ */
+static capaddr_t __mm_capref_to_key(struct capref cap) {
     capaddr_t key = get_cap_addr(cap);
     
+    // There is no intrinsic available :/
     key = (key & 0xFFFF0000U) >> 16 | (key & 0x0000FFFFU) << 16;
     key = (key & 0xFF00FF00U) >> 8 | (key & 0x00FF00FFU) << 8;
     key = (key & 0xF0F0F0F0U) >> 4 | (key & 0x0F0F0F0FU) << 4;
@@ -74,32 +119,47 @@ static inline capaddr_t __mm__capref_to_key(struct capref cap) {
     return key;
 }
 
-inline bool __mm_pseudo_random_bit(capaddr_t key) {
+/**
+ * @brief Calculates a pseudo random bit for the given key
+ * 
+ * When we decide whether to replace a node that should be removed by its predecessor or successor use this pseudo random bit to maintain balance better.
+ * 
+ * @param key The key to calculate the bit of
+ * @return A pseudo-random bit
+ */
+static bool __mm_pseudo_random_bit(capaddr_t key) {
     return __builtin_parity(key);
 }
 
-inline struct mm_block __mm_create_block(struct capref root_cap, gensize_t root_offset, unsigned char size_bits, unsigned char alignment_bits) {
-    struct mm_block block;
+/**
+ * @brief Create a new node
+ * 
+ * @param mm The instance of mm to use
+ * @param node Where to store the result
+ * @param root_cap The RAM capability the block is a part of (was originally added to the mm)
+ * @param root_offset The offset into the root_cap
+ * @param size_bits Size stored as bits. size = 2 ^ size_bits. At most MM_ADDR_BITS - 1
+ * @param alignment_bits Alignment stored as bits. alignment = 2 ^ alignment_bits. At most MM_ADDR_BITS - 1
+ * @param parent The parent node (i.e. we are a result of a split of it) or NULL if we are a root
+ * @return errval_t 
+ */
+static errval_t __mm_create_node(struct mm *mm, struct mm_node **node, struct capref root_cap, gensize_t root_offset, unsigned char size_bits, unsigned char alignment_bits, struct mm_node *parent) {
+    assert(size_bits < MM_ADDR_BITS);
+    assert(alignment_bits < MM_ADDR_BITS);
 
-    block.root_cap = root_cap;
-    block.root_offset = root_offset;
-    block.size_bits = size_bits;
-    block.alignment_bits = alignment_bits;
+    static bool is_refilling = false; // Avoid nested refilling
+    errval_t err;
 
-    return block;
-}
-
-static inline errval_t __mm_create_node(struct mm *mm, struct mm_node **node, struct mm_block block, struct mm_node *parent) {
-    static bool is_refilling = false;
-
-    if (!is_refilling && slab_freecount(&mm->slabs) <= (MM_ADDR_BITS - BASE_PAGE_BITS - 1) * 2) { // at most 2 slabs are needed for each of the layers to reach a BASE_PAGE_SIZE leaf
+    // Refill if required
+    if (!is_refilling && slab_freecount(&mm->slabs) <= MM_SLAB_RESERVE) {
 		is_refilling = true;
-        slab_default_refill(&mm->slabs);
-		is_refilling = false;
+        err = slab_default_refill(&mm->slabs);
+        is_refilling = false;
+        if (err_is_fail(err)) return err_push(err, MM_ERR_NODE_REFILL);
     }
 
     *node = slab_alloc(&mm->slabs);
-    if (*node == NULL) return MM_ERR_SLOT_NOSLOTS;
+    if (*node == NULL) return MM_ERR_NODE_ALLOC;
 
     (*node)->left = NULL;
     (*node)->right = NULL;
@@ -109,32 +169,70 @@ static inline errval_t __mm_create_node(struct mm *mm, struct mm_node **node, st
     (*node)->key = 0;
 
     (*node)->parent = parent;
-    (*node)->block = block;
+
+    (*node)->block.root_cap = root_cap;
+    (*node)->block.root_offset = root_offset;
+    (*node)->block.size_bits = size_bits;
+    (*node)->block.alignment_bits = alignment_bits;
 
     return SYS_ERR_OK;
 }
 
-inline void __mm_add_node_list(struct mm *mm, struct mm_node *node) {
+/**
+ * @brief Destroys the given node
+ * 
+ * @param mm The mm instance
+ * @param node The node to free
+ */
+static void __mm_destroy_node(struct mm *mm, struct mm_node *node) {
+    assert(node->left == NULL);
+    assert(node->right == NULL);
+    assert(node->is_pending == false);
+    assert(node->is_leaf == true);
+    assert(node->key == 0);
+    assert(node->parent != NULL); // Right now a root node should never be deleted! (might change if we implement deinitialization)
+
+    slab_free(&mm->slabs, node);
+}
+
+/**
+ * @brief Add a node to the free-list
+ * 
+ * @param mm The mm instance
+ * @param node The node to add
+ */
+static void __mm_add_node_list(struct mm *mm, struct mm_node *node) {
     const int index = MM_NODE_TABLE_INDEX(node->block.size_bits, node->block.alignment_bits);
 
+    // Ensure that we are not currently in either data_structure
     assert(node->left == NULL);
     assert(node->right == NULL);
     assert(node->is_pending == false);
     assert(node->is_leaf == true);
     assert(node->key == 0);
 
+    // Insert the node into the linked list and update the old first element.
     if (mm->node_table[index] != NULL) mm->node_table[index]->left = node;
     node->right = mm->node_table[index];
     mm->node_table[index] = node;
 }
 
-inline void __mm_remove_node_list(struct mm *mm, struct mm_node *node) {
+/**
+ * @brief Remove a node from the free-list
+ * 
+ * @param mm The mm instance
+ * @param node The node to remove
+ */
+static void __mm_remove_node_list(struct mm *mm, struct mm_node *node) {
     const int index = MM_NODE_TABLE_INDEX(node->block.size_bits, node->block.alignment_bits);
 
+    // Assert that all fields but left/right are untouched
     assert(node != NULL);
     assert(node->is_pending == false);
     assert(node->is_leaf == true);
     assert(node->key == 0);
+
+    // Remove the element from the list and update the neighbors (if they exist)
 
     if (node->right != NULL) {
         node->right->left = node->left;
@@ -142,85 +240,159 @@ inline void __mm_remove_node_list(struct mm *mm, struct mm_node *node) {
 
     if (node->left != NULL) {
         node->left->right = node->right;
-    } else {
+    } else { // We are the first node, hence we should be pointed to by the table
         assert(mm->node_table[index] == node);
         mm->node_table[index] = node->right;
     }
 
+    // Reset pointers to indicate that we are not part of any data structure
     node->left = NULL;
     node->right = NULL;
 }
 
+/**
+ * @brief Collapse the parents of the node, until some child is pending
+ * 
+ * @param mm The mm instance
+ * @param node A pointer to the node to remove (has to removed from the tree but not yet added back to the list)
+ */
+static void __mm_collapsing_add_node_list(struct mm *mm, struct mm_node *node) {
+    assert(node->is_pending == false);
+    assert(node->is_leaf == true);
 
-static inline void __mm__add_node_tree(struct mm *mm, struct mm_node *node, struct capref cap) {
+    // As long as our sibling is not pending, merge the blocks together again
+    while (node->parent != NULL) {
+        assert(node->parent->is_pending == false);
+        assert(node->parent->is_leaf == false);
+        if (node->parent->left == node) { // We are the left child
+            if (node->parent->right->is_pending || !node->parent->right->is_leaf) break;
+            else __mm_remove_node_list(mm, node->parent->right);
+        } else { // We are the right child
+            assert(node->parent->right == node);
+            if (node->parent->left->is_pending || !node->parent->left->is_leaf) break;
+            else __mm_remove_node_list(mm, node->parent->left);
+        }
+
+        __mm_destroy_node(mm, node->parent->left);
+        __mm_destroy_node(mm, node->parent->right);
+        node->parent->left = NULL;
+        node->parent->right = NULL;
+        node->parent->is_leaf = true;
+
+        node = node->parent;
+    }
+
+    __mm_add_node_list(mm, node);
+}
+
+/**
+ * @brief Search the slot where the given key should be inserted (or the slot pointing to the key if it already exists)
+ * 
+ * @param slot The slot to start with
+ * @param key The key to search for
+ * @return struct mm_node**
+ */
+static struct mm_node** __mm_search_slot_tree(struct mm_node **slot, capaddr_t key) {
+    while (*slot != NULL && key != (*slot)->key) {
+        if (key < (*slot)->key) slot = &((*slot)->left);
+        else slot = &((*slot)->right);
+    }
+
+    return slot;
+}
+
+/**
+ * @brief Add a node to the pending-tree
+ * 
+ * @param mm The mm instance
+ * @param node The node to add
+ * @param cap The capref with which we want to be able to find the node again (i.e. the pending cap)
+ */
+static void __mm_add_node_tree(struct mm *mm, struct mm_node *node, struct capref cap) {
+    // Ensure that we are not currently in either data_structure
     assert(node->left == NULL);
     assert(node->right == NULL);
     assert(node->is_pending == false);
     assert(node->is_leaf == true);
     assert(node->key == 0);
 
+    // Set key and is_pending as we are adding the node to the tree
     node->is_pending = true;
-    node->key = __mm__capref_to_key(cap);
+    node->key = __mm_capref_to_key(cap);
 
-    struct mm_node **slot = &mm->pending_root;
-    while (*slot != NULL) {
-        assert(node->key != (*slot)->key);
-        if (node->key < (*slot)->key) slot = &((*slot)->left);
-        else slot = &((*slot)->right);
-    }
+    // Search the pending tree until we find a free spot (i.e. a pointer to a pointer to a node)
+    struct mm_node **slot = __mm_search_slot_tree(&mm->pending_root, node->key);
+    // The current key should not have been inserted before
+    assert(*slot == NULL);
 
+    // Add the node to the tree
     *slot = node;
 }
 
-static inline struct mm_node* __mm__remove_node_tree(struct mm *mm, struct capref cap) {
-    capaddr_t key = __mm__capref_to_key(cap);
+/**
+ * @brief Remove a node from the pending-tree
+ * 
+ * @param mm The mm instance
+ * @param cap The capref we used while adding the node to the tree
+ * @return struct mm_node* The pointer to the removed node (for further use) or NULL if node is not present
+ */
+static struct mm_node* __mm_remove_node_tree(struct mm *mm, struct capref cap) {
+    capaddr_t key = __mm_capref_to_key(cap);
 
-    struct mm_node *parent = NULL;
-    struct mm_node **node_p = &mm->pending_root;
-    while (key != (*node_p)->key) {
-        parent = *node_p;
-        if (key < parent->key) node_p = &parent->left;
-        else node_p = &parent->right;
-        assert(*node_p != NULL);
-    }
-    struct mm_node *node = *node_p, *predecessor, *predecessor_parent = NULL;
-    if (__mm_pseudo_random_bit(key)) {
-        predecessor = node->left;        
-        if (predecessor == NULL) *node_p = node->right;
-        else {
-            while (predecessor->right != NULL) {
-                predecessor_parent = predecessor;
-                predecessor = predecessor->right;
+    // Find the slot referencing the node to be removed
+    struct mm_node **slot = __mm_search_slot_tree(&mm->pending_root, key);
+    if (*slot == NULL) return NULL;
+
+    struct mm_node *node = *slot; // Store a pointer to the node, as we will relink the slot
+
+    struct mm_node *substitute;
+    // Replace the node in the tree
+    // If either child is NULL, substitute by the other
+    if (node->left == NULL) substitute = node->right;
+    else if (node->right == NULL) substitute = node->left;
+    // Otherwise decide pseudo-randomly whether to substitute by the predecessor or the successor
+    else {
+        struct mm_node *predecessor_parent = NULL;
+        if (__mm_pseudo_random_bit(key)) {
+            // Find the predecessor
+            substitute = node->left;
+            while (substitute->right != NULL) {
+                predecessor_parent = substitute;
+                substitute = substitute->right;
             }
+            // If it has a real parent, make it's left child the parents right one
             if (predecessor_parent != NULL) {
-                predecessor_parent->right = predecessor->left;
-                predecessor->left = node->left;
+                predecessor_parent->right = substitute->left;
+                substitute->left = node->left;
             }
-            
-            predecessor->right = node->right;
-            *node_p = predecessor;
-        }
-    } else {
-        predecessor = node->right;
-        if (predecessor == NULL) *node_p = node->left;
-        else {
-            while (predecessor->left != NULL) {
-                predecessor_parent = predecessor;
-                predecessor = predecessor->left;
+            // The substitute has to take the right child of the parent as it's own
+            substitute->right = node->right;
+        } else {
+            // Find the successor
+            substitute = node->right;
+            while (substitute->left != NULL) {
+                predecessor_parent = substitute;
+                substitute = substitute->left;
             }
+            // If it has a real parent, make it's right child the parents left one
             if (predecessor_parent != NULL) {
-                predecessor_parent->left = predecessor->right;
-                predecessor->right = node->right;
+                predecessor_parent->left = substitute->right;
+                substitute->right = node->right;
             }
-            
-            predecessor->left = node->left;            
-            *node_p = predecessor;
+            // The substitute has to take the left child of the parent as it's own
+            substitute->left = node->left;
         }
     }
+    // Link the substitute instead of the node
+    *slot = substitute;
+    
+
+    // Assert that node has not been changed since it was added
     assert(node->is_pending == true);
     assert(node->is_leaf == true);
     assert(node->key == key);
 
+    // Remove it from the tree
     node->left = NULL;
     node->right = NULL;
     node->is_pending = false;
@@ -229,117 +401,137 @@ static inline struct mm_node* __mm__remove_node_tree(struct mm *mm, struct capre
     return node;
 }
 
-static inline errval_t __mm_add_aligned(struct mm *mm, struct mm_block block, struct mm_node *parent, struct mm_node **node_p) {
-    assert(node_p == NULL || *node_p == NULL);
-
-    struct mm_node *node;
-    errval_t err = __mm_create_node(mm, &node, block, parent);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to allocate node\n");
-        return err_push(err, MM_ERR_SLOT_NOSLOTS);
-    }
-
-    if (node_p != NULL) *node_p = node;
-
-    __mm_add_node_list(mm, node);
-
-    return SYS_ERR_OK;
-}
-
+/**
+ * @brief Add a RAM capability to mm
+ * 
+ * @param mm The mm instance
+ * @param cap A RAM capability to be added
+ * @return errval_t 
+ */
 errval_t mm_add(struct mm *mm, struct capref cap)
 {
+    errval_t err;
+    // Identify the capability to obtain the physical address and size
     struct capability c;
-    errval_t err = cap_direct_identify(cap, &c);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to get the frame info\n");
-        return err_push(err, MM_ERR_FIND_NODE);
-    }
-    assert(c.type == ObjType_RAM);
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) return err_push(err, MM_ERR_INVALID_CAP);
+    if (c.type != ObjType_RAM) return MM_ERR_INVALID_CAP;
     
     genpaddr_t base = c.u.ram.base;
     gensize_t offset = 0, bytes = c.u.ram.bytes;
 
+    struct mm_node *nodes[MM_SLAB_RESERVE];
+    int nodes_cnt = 0;
+
+    // Split the memory region into power-of-2 sized blocks which are at least aligned by their size
     while (offset < bytes) {
+        assert(nodes_cnt < MM_SLAB_RESERVE);
+        // Calculate size and alignment
         unsigned char alignment_bits = __address_alignment2_bits(base + offset);
         unsigned char block_size_bits = MIN(__floor_block_size2_bits(bytes - offset), alignment_bits);
         gensize_t block_size = __bits_to_gensize(block_size_bits);
 
-        struct mm_block block = __mm_create_block(cap, offset, block_size_bits, alignment_bits);
-        err = __mm_add_aligned(mm, block, NULL, NULL);
+        // Create block and add it to mm
+        err = __mm_create_node(mm, &nodes[nodes_cnt++], cap, offset, block_size_bits, alignment_bits, NULL);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to add capabilities\n");
-            return err_push(err, MM_ERR_MM_ADD);
+            for (int i = 0; i < nodes_cnt; i++) __mm_destroy_node(mm, nodes[i]);
+            return err_push(err, MM_ERR_NODE_CREATE);
         }
 
         offset += block_size;
     }
 
+    for (int i = 0; i < nodes_cnt; i++) __mm_add_node_list(mm, nodes[i]);
+
     return SYS_ERR_OK;
 }
 
+/**
+ * @brief Allocate a RAM capability that has at least the given size and which's address is a multiple of the alignment
+ * 
+ * @param mm The mm instance
+ * @param size The minimum size of the block
+ * @param alignment The minimum alignment or 1 if none is required
+ * @param retcap Where to return the allocated RAM capability
+ * @return errval_t 
+ */
 errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct capref *retcap)
 {
     errval_t err;
     size = MAX(size, BASE_PAGE_SIZE);
-    alignment = MAX(alignment, BASE_PAGE_SIZE);
+    assert(alignment > 0);
 
     unsigned char block_size_bits = __ceil_block_size2_bits(size), alignment_bits = __address_alignment2_bits(alignment);
-    if (__bits_to_gensize(alignment_bits) != alignment) {
-        return MM_ERR_UNSUPPORTED_ALIGNMENT;
-    }
-    alignment_bits = MAX(block_size_bits, alignment_bits);
+    if (block_size_bits >= MM_ADDR_BITS) return MM_ERR_NO_MEMORY;
+    if (alignment_bits >= MM_ADDR_BITS || __bits_to_gensize(alignment_bits) != alignment) return MM_ERR_UNSUPPORTED_ALIGNMENT;
+    
+    // Alignment will be at least BASE_PAGE_BITS or block_size_bits
+    alignment_bits = MAX(MAX(alignment_bits, BASE_PAGE_BITS), block_size_bits);
+    alignment = __bits_to_gensize(alignment_bits); // The value is currently not used afterwards, but might be in the future
 
     unsigned char search_block_size_bits = block_size_bits, search_alignment_bits;
-    assert(block_size_bits < MM_ADDR_BITS);
+    // Increase the block size until we find a satisfactory memory region
     while (search_block_size_bits < MM_ADDR_BITS) {
         search_alignment_bits = MAX(search_block_size_bits, alignment_bits);
 
+        // Test all alignments for the current size
         while (search_alignment_bits < MM_ADDR_BITS && mm->node_table[MM_NODE_TABLE_INDEX(search_block_size_bits, search_alignment_bits)] == NULL) search_alignment_bits++;
         if (search_alignment_bits < MM_ADDR_BITS) break;
 
         search_block_size_bits++;
     }
-    if (search_block_size_bits == MM_ADDR_BITS) {
-        DEBUG_ERR(MM_ERR_NOT_FOUND, "no satisfactory memory available\n");
-        return MM_ERR_NOT_FOUND;
-    }
+    // Our search did not find any region that satisfies alignment and block size
+    if (search_block_size_bits == MM_ADDR_BITS) return MM_ERR_NO_MEMORY;
 
     gensize_t search_block_size = __bits_to_gensize(search_block_size_bits);
     struct mm_node *node = mm->node_table[MM_NODE_TABLE_INDEX(search_block_size_bits, search_alignment_bits)];
-    assert(node != NULL);
 
+    // Split the node into smaller ones until we reach the target block size
     while (search_block_size_bits > block_size_bits) {
-        struct mm_block block = node->block;
+        assert(node != NULL);
+        assert(node->is_leaf);
 
         __mm_remove_node_list(mm, node);
+        node->is_leaf = false;
 
-
-        struct mm_block child0 = __mm_create_block(block.root_cap, block.root_offset, search_block_size_bits - 1, search_alignment_bits); 
-        err = __mm_add_aligned(mm, child0, node, &node->left);
+        // Split the node in half
+        err = __mm_create_node(mm, &node->left, node->block.root_cap, node->block.root_offset, search_block_size_bits - 1, search_alignment_bits, node);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to add capabilities\n");
-            return err_push(err, MM_ERR_MM_ADD);
+            // We did not create a child, so just add the node back to the list
+            assert(node->left == NULL);
+            node->is_leaf = true;
+            __mm_collapsing_add_node_list(mm, node);
+            return err_push(err, MM_ERR_NODE_CREATE);
         }
         assert(node->left != NULL);
+        assert(node->left->is_leaf);
 
-        struct mm_block child1 = __mm_create_block(block.root_cap, block.root_offset + search_block_size / 2, search_block_size_bits - 1, search_alignment_bits - 1); 
-        err = __mm_add_aligned(mm, child1, node, &node->right);
+        err = __mm_create_node(mm, &node->right, node->block.root_cap, node->block.root_offset + search_block_size / 2, search_block_size_bits - 1, search_alignment_bits - 1, node);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "failed to add capabilities\n");
-            return err_push(err, MM_ERR_MM_ADD);
-        }       
+            assert(node->right == NULL);
+            __mm_destroy_node(mm, node->left);
+            node->left = NULL;
+            node->is_leaf = true;
+            __mm_collapsing_add_node_list(mm, node);
+            return err_push(err, MM_ERR_NODE_CREATE);
+        }
         assert(node->right != NULL);
+        assert(node->right->is_leaf);
+
+        __mm_add_node_list(mm, node->left);
+        __mm_add_node_list(mm, node->right);
         
         search_block_size /= 2;
         search_block_size_bits--;
         if (search_alignment_bits > alignment_bits) search_alignment_bits--;
 
-        assert(node->is_leaf);
         node->is_leaf = false;
         node = mm->node_table[MM_NODE_TABLE_INDEX(search_block_size_bits, search_alignment_bits)];
-        assert(node != NULL);
     }
 
+    // Check that we got a valid node satisfying all constraints
+    assert(node != NULL);
+    assert(node->is_leaf);
     assert(node->block.size_bits == search_block_size_bits);
     assert(node->block.alignment_bits == search_alignment_bits);
     assert(search_block_size_bits == block_size_bits);
@@ -349,65 +541,53 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
     __mm_remove_node_list(mm, node);
 
     err = mm->slot_alloc(mm->slot_alloc_inst, 1, retcap);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to alloc capabilities\n");
-        return err_push(err, MM_ERR_SLOT_NOSLOTS);
-    }
+    if (err_is_fail(err)) return err_push(err, MM_ERR_SLOT_EMPTY);
     
     err = cap_retype(*retcap, node->block.root_cap, node->block.root_offset, ObjType_RAM, search_block_size, 1);
-    if (err_is_fail(err)) {
-        printf("%i\n", search_block_size);
-        DEBUG_ERR(err, "failed to snip part of capability\n");
-        return err_push(err, MM_ERR_CHUNK_NODE);
-    }
+    if (err_is_fail(err)) return err_push(err, MM_ERR_CANNOT_SPLIT_CAP);
 
-    __mm__add_node_tree(mm, node, *retcap);
+    // Add the node to the pending tree
+    __mm_add_node_tree(mm, node, *retcap);
 
     return SYS_ERR_OK;
 }
 
+/**
+ * @brief Allocate a RAM capability that has at least the given size
+ * 
+ * @param mm The mm instance
+ * @param size The minimum size of the block
+ * @param retcap Where to return the allocated RAM capability
+ * @return errval_t 
+ */
 errval_t mm_alloc(struct mm *mm, size_t size, struct capref *retcap)
 {
-    return mm_alloc_aligned(mm, size, 0, retcap);
+    return mm_alloc_aligned(mm, size, 1, retcap);
 }
 
-
+/**
+ * @brief Free a previously allocated RAM capability (and destroy it)
+ * 
+ * @param mm The mm instance
+ * @param cap The RAM capability to free
+ * @return errval_t 
+ */
 errval_t mm_free(struct mm *mm, struct capref cap)
 {
-    errval_t err = cap_destroy(cap);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to snip part of capability2\n");
-        return err_push(err, MM_ERR_CHUNK_NODE);
-    }
+    errval_t err;
 
-    struct mm_node *node = __mm__remove_node_tree(mm, cap);
+    // Remove the node itself from the tree
+    struct mm_node *node = __mm_remove_node_tree(mm, cap);
+    if (node == NULL) return MM_ERR_NO_PENDING_CAP;
     assert(node->is_pending == false);
     assert(node->is_leaf == true);
+
+    // Add the node back to the list, but collapse it as long as our siblings are not pending
+    __mm_collapsing_add_node_list(mm, node);
     
-    struct mm_node *parent = node->parent;
-
-    while (parent != NULL) {
-        if (parent->left == node) {
-            if (parent->right->is_pending || !parent->right->is_leaf) break;
-            else __mm_remove_node_list(mm, parent->right);
-        } else {
-            assert(parent->right == node);
-            if (parent->left->is_pending || !parent->left->is_leaf) break;
-            else __mm_remove_node_list(mm, parent->left);
-        }
-
-        slab_free(&mm->slabs, parent->left);
-        slab_free(&mm->slabs, parent->right);
-        parent->left = NULL;
-        parent->right = NULL;
-        assert(parent->is_leaf == false);
-        parent->is_leaf = true;
-
-        node = parent;
-        parent = node->parent;
-    }
-
-    __mm_add_node_list(mm, node);
+    // Lastly, destroy the pending capability
+    err = cap_destroy(cap);
+    if (err_is_fail(err)) return err_push(err, MM_ERR_CANNOT_DESTROY_CAP);
 
     return SYS_ERR_OK;
 }

@@ -38,7 +38,7 @@ static inline errval_t initialize_ram_allocator(void)
     };
     err = slot_prealloc_init(&init_slot_alloc, cnode_cap, L2_CNODE_SLOTS, &aos_mm);
     if (err_is_fail(err)) {
-        return err_push(err, MM_ERR_SLOT_ALLOC_INIT);
+        return err_push(err, MM_ERR_SLOT_INIT);
     }
 
     // Initialize aos_mm

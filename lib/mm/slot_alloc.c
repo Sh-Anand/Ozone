@@ -45,7 +45,7 @@ errval_t slot_prealloc_refill(void *this)
     err = mm_alloc(sa->mm, OBJSIZE_L2CNODE, &ram_cap);
     if (err_is_fail(err)) {
         is_refilling = false;
-        err = err_push(err, MM_ERR_SLOT_MM_ALLOC);
+        err = err_push(err, MM_ERR_SLOT_REFILL);
         goto out;
     }
 
@@ -90,22 +90,18 @@ errval_t slot_alloc_prealloc(void *inst, uint64_t nslots, struct capref *ret)
 
     // We always need at least two capabilities left: One for allocating a cnode and one for allocating nodes in the mm if required.
     // CARE IF USING WITH paging, as it might require additonal nodes
-    if (this->meta[this->current].free - nslots <= 4) {
+    if (this->meta[this->current].free - nslots <= 40) {
         slot_prealloc_refill(inst);
     }
 
     /* Check if enough space */
     if (this->meta[this->current].free < nslots) {
-        /*
-        debug_printf("slot_prealloc: switching cnodes %d->%d\n",
-                this->current, !this->current);
-        */
         // Allocate from next cnode
         this->current = !this->current;
     }
 
     if (this->meta[this->current].free < nslots) {
-        return MM_ERR_SLOT_NOSLOTS;
+        return MM_ERR_SLOT_EMPTY;
     }
 
     /* Return next slot and update */
