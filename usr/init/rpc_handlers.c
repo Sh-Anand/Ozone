@@ -30,7 +30,7 @@ struct ump_chan *urpc_client[MAX_COREID];
 #define CAST_IN_MSG(var, type)                                                           \
     if (in_size < sizeof(type)) {                                                        \
         DEBUG_PRINTF("%s: invalid payload size %lu < sizeof(%s) = %lu\n", __func__,      \
-                     in_size, #type, sizeof(type));                                     \
+                     in_size, #type, sizeof(type));                                      \
         return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
     }                                                                                    \
     type *var = in_payload
@@ -45,21 +45,64 @@ struct ump_chan *urpc_client[MAX_COREID];
 
 #define MALLOC_OUT_MSG(var, type) MALLOC_OUT_MSG_WITH_SIZE(var, type, sizeof(*var))
 
+static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
+                                void **out_payload, size_t *out_size)
+{
+    // XXX: trick to retrieve the rpc identifier
+    errval_t err = ring_producer_send(&urpc_client[core]->send,
+                                      ((uint8_t *)in_payload) - 1, in_size + 1);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    uint8_t *ret_payload = NULL;
+    size_t ret_size = 0;
+    err = ring_consumer_recv(&urpc_client[core]->recv, (void **)&ret_payload, &ret_size);
+    if (err_is_fail(err)) {
+        goto RET;
+    }
+
+    if (*((rpc_identifier_t *)ret_payload) == RPC_ACK_MSG) {
+        if (ret_payload != NULL) {
+            MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
+            memcpy(reply, ret_payload, ret_size - sizeof(rpc_identifier_t));
+        }
+        err = SYS_ERR_OK;
+        goto RET;
+    } else {
+        assert(ret_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
+        err = *((errval_t *)(ret_payload + sizeof(rpc_identifier_t)));
+        goto RET;
+    }
+
+RET:
+    free(ret_payload);
+    return err;
+}
+
 HANDLER(num_msg_handler)
 {
-    CAST_IN_MSG(num, uintptr_t);
-    grading_rpc_handle_number(*num);
-    DEBUG_PRINTF("Received number %lu in init\n", *num);
-    return SYS_ERR_OK;
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG(num, uintptr_t);
+        grading_rpc_handle_number(*num);
+        DEBUG_PRINTF("Received number %lu\n", *num);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
 }
 
 HANDLER(str_msg_handler)
 {
-    // TODO: should check against in_size against malicious calls
-    CAST_IN_MSG(str, char);
-    grading_rpc_handler_string(str);
-    DEBUG_PRINTF("Received string in init: \"%s\"\n", str);
-    return SYS_ERR_OK;
+    if (disp_get_current_core_id() == 0) {
+        // TODO: should check against in_size against malicious calls
+        CAST_IN_MSG(str, char);
+        grading_rpc_handler_string(str);
+        DEBUG_PRINTF("Received string: \"%s\"\n", str);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
 }
 
 HANDLER(ram_request_msg_handler)
@@ -88,34 +131,7 @@ HANDLER(spawn_msg_handler)
         *reply = pid;
         return SYS_ERR_OK;
     } else {
-
-        // XXX: trick to retrieve the rpc identifier
-        errval_t err = ring_producer_send(&urpc_client[msg->core]->send,
-                                          ((uint8_t *)in_payload) - 1, in_size + 1);
-        if (err_is_fail(err)) {
-            return err;
-        }
-
-        uint8_t *ret_payload = NULL;
-        size_t ret_size;
-        err = ring_consumer_recv(&urpc_client[msg->core]->recv, (void **)&ret_payload, &ret_size);
-        if (err_is_fail(err)) {
-            goto RET;
-        }
-
-        if (*((rpc_identifier_t *)ret_payload) == RPC_ACK_MSG) {
-            MALLOC_OUT_MSG(reply, domainid_t);
-            *reply = *((domainid_t *)(ret_payload + sizeof(rpc_identifier_t)));
-            err = SYS_ERR_OK;
-            goto RET;
-        } else {
-            err = *((errval_t *)(ret_payload + sizeof(rpc_identifier_t)));
-            goto RET;
-        }
-
-    RET:
-        free(ret_payload);
-        return err;
+        return forward_to_core(msg->core, in_payload, in_size, out_payload, out_size);
     }
 }
 

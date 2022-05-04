@@ -119,12 +119,7 @@ static void rpc_recv_handler(void *arg)
     err = lmp_chan_recv(lc, &msg, &cap);
     if (err_is_fail(err)) {
         if (lmp_err_is_transient(err)) {
-            // Re-register
-            err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                         MKCLOSURE(rpc_recv_handler, arg));
-            if (err_is_ok(err))
-                return;  // otherwise, fall through
-            // FIXME: what?
+            goto RE_REGISTER;
         }
         DEBUG_ERR(err, "rpc_recv_handler: unhandled error from lmp_chan_recv");
         // XXX: maybe kill the caller here
@@ -132,15 +127,15 @@ static void rpc_recv_handler(void *arg)
 
     // Refill the cap slot if the recv slot is used (received a cap)
     if (!capref_is_null(cap)) {
-        struct capref new_slot = NULL_CAP;
+//        struct capref new_slot = NULL_CAP;
         err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
             goto RE_REGISTER;
         }
-        assert(!capref_is_null(new_slot));
-        lmp_chan_set_recv_slot(lc, new_slot);
+//        assert(!capref_is_null(new_slot));
+//        lmp_chan_set_recv_slot(lc, new_slot);
     }
 
     uint8_t *buf = (uint8_t *)msg.words;
@@ -157,13 +152,22 @@ static void rpc_recv_handler(void *arg)
     // TODO: now cap is only for frame-based message, which prevent us from receving cap
     if (!capref_is_null(cap)) {
         DEBUG_PRINTF("Trying to map received frame in local space\n");
+
+        struct frame_identity frame_id;
+        err = frame_identify(cap, &frame_id);
+        if (err_is_fail(err)) {
+            rpc_nack(lc, err_push(err, LIB_ERR_FRAME_IDENTIFY));
+            goto RE_REGISTER;
+        }
+
+        // Replace buf and size
         err = paging_map_frame(get_current_paging_state(), (void **)&buf,
-                               ROUND_UP(size, BASE_PAGE_SIZE), cap);
+                               frame_id.bytes, cap);
         if (err_is_fail(err)) {
             rpc_nack(lc, err_push(err, LIB_ERR_PAGING_MAP));
             goto RE_REGISTER;
         }
-        size = BASE_PAGE_SIZE;
+        size = frame_id.bytes;
     }
 
     void *reply_payload = NULL;
@@ -193,7 +197,6 @@ RE_REGISTER:
 
 static void urpc_handler(void *arg)
 {
-    HERE;
     struct ump_chan *uc = arg;
 
     uint8_t *recv_payload = NULL;
@@ -256,7 +259,7 @@ FREE_RECV_PAYLOAD:
     free(recv_payload);
 RE_REGISTER:
     err = ump_chan_register_recv(uc, get_default_waitset(),
-                                 MKCLOSURE(rpc_recv_handler, arg));
+                                 MKCLOSURE(urpc_handler, arg));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "urpc_handler: error re-registering handler");
         // XXX: maybe kill the caller here
