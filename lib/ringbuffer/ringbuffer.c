@@ -131,54 +131,22 @@ static errval_t ring_consume(void *rb, void *payload)
  * @param payload exactly ENTRY_DATA_CAPACITY bytes of space to write the data (on our machine this is 56 bytes)
  * @return An error code indicating a failure, LIB_ERR_RING_NO_MSG if buffer is empty, or SYS_ERR_OK. 
  */
-static errval_t ring_consume_non_blocking(void *rb, void *payload) __attribute__((unused));
-static errval_t ring_consume_non_blocking(void *rb, void *payload)
+errval_t ring_consumer_recv_non_blocking(struct ring_consumer *rc, void **payload, size_t *size)
 {
-	// check for null-pointer
-	if (rb == NULL) {
-		DEBUG_PRINTF("Cannot consume from ringbuffer: buffer is null pointer.\n");
-		return ERR_INVALID_ARGS;
-	}
-	
-	struct ringbuffer *rbuf = rb;
-	int tail = INDEX(rbuf->tail);
-	
-	// wait for the data to be ready
-	if (! rbuf->entries[tail].ready) return LIB_ERR_RING_NO_MSG;
-	dmb();
-	
-	// read value from buffer
-	memcpy(payload, &(rbuf->entries[tail]), ENTRY_DATA_CAPACITY);
-	INCR(rbuf->tail); // increment the tail pointer
-	
-	dmb();
-	rbuf->entries[tail].ready = 0;
-	
-	// TODO: does the writebuffer need flushing?
-	
-	return SYS_ERR_OK;
+    if (!ring_consumer_can_recv(rc)) return LIB_ERR_RING_NO_MSG;
+	return ring_consumer_recv(rc, payload, size);
 }
 
-/**
- * @brief Tests whether the buffer currently holds data ready to be read.
- * @param rb A non null ringbuffer
- * @param empty is written to 1 if buffer is empty, 0 otherwise
- * @return ERR_INVALID_ARGS if rb is null, SYS_ERR_OK otherwise.
- * 
- */
-static errval_t ring_is_empty(void *rb, uint8_t *empty) __attribute__((unused));
-static errval_t ring_is_empty(void *rb, uint8_t *empty)
+bool ring_consumer_can_recv(struct ring_consumer *rc)
 {
-	if (rb == NULL) {
-		DEBUG_PRINTF("Cannot check if buffer is empty for null buffer!\n");
+	if (rc == NULL) {
+		DEBUG_PRINTF("Cannot check if ringbuffer consumer can receive: consumer is null-ptr!\n");
 		return ERR_INVALID_ARGS;
 	}
 	
-	struct ringbuffer *rbuf = rb;
+	struct ringbuffer *rbuf = rc->ringbuffer;
 	int tail = INDEX(rbuf->tail);
-	*empty = !rbuf->entries[tail].ready;
-	
-	return SYS_ERR_OK;
+	return rbuf->entries[tail].ready;
 }
 
 errval_t ring_producer_init(struct ring_producer *rp, void *ring_buffer)
@@ -200,7 +168,7 @@ errval_t ring_producer_init(struct ring_producer *rp, void *ring_buffer)
 }
 
 
-errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, size_t size)
+errval_t ring_producer_send(struct ring_producer *rp, const void *payload, size_t size)
 {
 	errval_t err;
 	
@@ -243,7 +211,7 @@ errval_t ring_consumer_init(struct ring_consumer *rc, void *ring_buffer)
 {
 		// check for null-pointer
 	if (rc == NULL) {
-		DEBUG_PRINTF("Cannot initialize ringbuffer consumer: consumer is null-ptr.\n");
+		DEBUG_PRINTF("Cannot initialize ringbuffer consumer: c.\n");
 		return ERR_INVALID_ARGS;
 	}
 	if (ring_buffer == NULL) {

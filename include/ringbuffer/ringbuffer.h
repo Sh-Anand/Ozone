@@ -7,6 +7,9 @@
 
 #include <errors/errno.h>
 #include <strings.h>
+#include <machine/param.h>
+
+#define RING_BUFFER_SIZE PAGE_SIZE
 
 /**
  * @brief Initializes a ringbuffer of size 63, which each element being equal to a single cacheline.
@@ -22,7 +25,7 @@ struct ring_producer {
 };
 
 errval_t ring_producer_init(struct ring_producer *rp, void *ring_buffer);
-errval_t ring_producer_transmit(struct ring_producer *rp, const void *payload, size_t size);
+errval_t ring_producer_send(struct ring_producer *rp, const void *payload, size_t size);
 
 struct ring_consumer {
 	void *ringbuffer;
@@ -31,6 +34,7 @@ struct ring_consumer {
 
 errval_t ring_consumer_init(struct ring_consumer *rc, void *ring_buffer);
 errval_t ring_consumer_recv(struct ring_consumer *rc, void **payload, size_t *size);
+bool ring_consumer_can_recv(struct ring_consumer *rc);
 errval_t ring_consumer_recv_non_blocking(struct ring_consumer *rc, void **payload, size_t *size);
 
 #endif  // AOS_RINGBUFFER_H

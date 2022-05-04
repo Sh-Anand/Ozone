@@ -17,8 +17,6 @@
 
 #include <sys/cdefs.h>
 
-#define URPC_FRAME_SIZE (BASE_PAGE_SIZE * 2)
-
 __BEGIN_DECLS
 
 /**

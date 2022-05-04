@@ -21,6 +21,7 @@
 #include <aos/aos.h>
 #include <aos/waitset.h>
 #include <aos/waitset_chan.h>
+#include <aos/ump_chan.h>
 #include <aos/threads.h>
 #include <aos/dispatch.h>
 #include "threads_priv.h"
@@ -217,8 +218,12 @@ void poll_channels_disabled(dispatcher_handle_t handle) {
         bool chan_ready = false;
         switch (chan->chantype) {
             case CHANTYPE_UMP_IN:
-                // TODO: To add UMP channel support to waitsets,
+                // DONE: To add UMP channel support to waitsets,
                 // set chan_ready to true here if channel has a message ready
+                {
+                    struct ump_chan *uc = (struct ump_chan *) chan;
+                    chan_ready = ring_consumer_can_recv(&uc->recv);
+                }
                 break;
             default:
                 assert_disabled(!ws_chantype_is_polled(chan->chantype));

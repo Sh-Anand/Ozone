@@ -38,6 +38,7 @@
                              "inthandler.c",
                              "lmp_chan.c",
                              "lmp_endpoints.c",
+                             "ump_chan.c",
                              "morecore.c",
                              "notificator.c",
                              "nameservice.c",

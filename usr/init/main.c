@@ -21,6 +21,7 @@
 #include <aos/paging.h>
 #include <aos/waitset.h>
 #include <aos/aos_rpc.h>
+#include <aos/ump_chan.h>
 #include <aos/kernel_cap_invocations.h>
 #include <mm/mm.h>
 #include <grading.h>
@@ -37,11 +38,9 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 struct platform_info platform_info;
 
-struct ring_producer *urpc_send[MAX_COREID] = { NULL };  // currently only for core 0 and 1+
-struct ring_consumer *urpc_recv[MAX_COREID] = { NULL };  // currently only for core 0 and 1+
-struct thread *urpc_recv_thread = NULL;  // currently only for core 1+
-
-
+#define URPC_FRAME_SIZE (UMP_CHAN_SHARED_FRAME_SIZE * 2)
+struct ump_chan *urpc_server[MAX_COREID] = { NULL };
+struct ump_chan *urpc_client[MAX_COREID] = { NULL };
 
 /**
  * @brief TODO: make use of this function
@@ -105,142 +104,6 @@ static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size)
 static void rpc_nack(void *rpc, errval_t err)
 {
     rpc_send(rpc, RPC_ERR_MSG, NULL_CAP, &err, sizeof(errval_t));
-}
-
-static errval_t boot_core(coreid_t mpid)
-{
-    errval_t err;
-
-    struct capref urpc_frame;
-    err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE,
-                      NULL);  // TODO: REPLACE WITH A FIXED UMP FRAME SIZE LATER!
-
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    struct frame_identity urpc_frame_id;
-    err = frame_identify(urpc_frame, &urpc_frame_id);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    uint8_t *urpc_buffer;
-    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer, URPC_FRAME_SIZE,
-                           urpc_frame);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Init ring buffer
-    err = ring_init(urpc_buffer);
-    if (err_is_fail(err))
-        return err;
-    err = ring_init(urpc_buffer + BASE_PAGE_SIZE);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Init URPC producer
-    urpc_send[mpid] = malloc(sizeof(struct ring_producer));
-    if (urpc_send[mpid] == NULL) {
-        return LIB_ERR_MALLOC_FAIL;
-    }
-    err = ring_producer_init(urpc_send[mpid], urpc_buffer);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Init UPRC consumer
-    urpc_recv[mpid] = malloc(sizeof(struct ring_consumer));
-    if (urpc_recv[mpid] == NULL) {
-        return LIB_ERR_MALLOC_FAIL;
-    }
-    err = ring_consumer_init(urpc_recv[mpid], urpc_buffer + BASE_PAGE_SIZE);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Choose the right bootloader and cpu driver image
-
-    err = invoke_kernel_get_platform_info(cap_kernel, &platform_info);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "failed to obtain the platform info from the kernel\n");
-    }
-
-    char *bootloader_image;
-    switch (platform_info.arch) {
-    case PI_ARCH_ARMV8A:
-        bootloader_image = "boot_armv8_generic";
-        break;
-    default:
-        USER_PANIC("unsupported arch %d\n", platform_info.arch);
-    }
-
-    char *cpu_driver_image;
-    switch (platform_info.platform) {
-    case PI_PLATFORM_QEMU:
-        cpu_driver_image = "cpu_a57_qemu";
-        break;
-    case PI_PLATFORM_IMX8X:
-        cpu_driver_image = "cpu_imx8x";
-        break;
-    default:
-        USER_PANIC("unknown platform %d\n", platform_info.platform);
-    }
-
-    err = coreboot(mpid, bootloader_image, cpu_driver_image, "init", urpc_frame_id);
-
-    if (err_is_fail(err))
-        return err;
-
-    DEBUG_PRINTF("CORE %d SUCCESSFULLY BOOTED\n", mpid);
-
-    // generate a new bootinfo for the child core
-    // first allocate some memory for the child
-    struct capref core_ram;
-    err = ram_alloc(&core_ram, RAM_PER_CORE);
-    if (err_is_fail(err))
-        return err;
-
-    struct capability c;
-    err = cap_direct_identify(core_ram, &c);
-    if (err_is_fail(err))
-        return err;
-    struct mem_region region;
-    region.mr_base = c.u.ram.base;
-    region.mr_bytes = c.u.ram.bytes;
-    region.mr_consumed = false;
-    region.mr_type = RegionType_Empty;
-
-    size_t size_buf = sizeof(struct bootinfo)
-                      + (bi->regions_length + 1) * sizeof(struct mem_region);
-    struct bootinfo *bi_core = malloc(size_buf);
-    bi_core->host_msg = bi->host_msg;
-    bi_core->host_msg_bits = bi->host_msg_bits;
-    bi_core->mem_spawn_core = bi->mem_spawn_core;
-    bi_core->regions_length = bi->regions_length + 1;
-
-    memcpy(bi_core->regions, bi->regions, sizeof(struct mem_region) * bi->regions_length);
-
-    bi_core->regions[bi->regions_length] = region;
-
-    // send bootinfo across
-    err = ring_producer_transmit(urpc_send[mpid], bi_core, size_buf);
-    if(err_is_fail(err))
-        return err;
-
-    // send mm_strings cap across
-    struct frame_identity mm_strings_id;
-    err = frame_identify(cap_mmstrings, &mm_strings_id);
-    if(err_is_fail(err))
-        return err;
-
-    err = ring_producer_transmit(urpc_send[mpid], &mm_strings_id, sizeof(struct frame_identity));
-    if(err_is_fail(err))
-        return err;
-
-    return SYS_ERR_OK;
 }
 
 // Register this function after spawning a process to register a receive handler to that
@@ -320,13 +183,223 @@ static void rpc_recv_handler(void *arg)
 
 
 RE_REGISTER:
-    // Re-register
     err = lmp_chan_register_recv(lc, get_default_waitset(),
                                  MKCLOSURE(rpc_recv_handler, arg));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "rpc_recv_handler: error re-registering handler");
         // XXX: maybe kill the caller here
     }
+}
+
+static void urpc_handler(void *arg)
+{
+    HERE;
+    struct ump_chan *uc = arg;
+
+    uint8_t *recv_payload = NULL;
+    size_t recv_size = 0;
+
+    errval_t err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
+    if (err == LIB_ERR_RING_NO_MSG) {
+        goto RE_REGISTER;
+    }
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "ring_consumer_recv failed\n");
+        goto RE_REGISTER;
+    }
+
+    uint8_t type = recv_payload[0];
+    if (type >= RPC_MSG_COUNT) {
+        DEBUG_PRINTF("Invalid URPC msg %u\n", type);
+        goto FREE_RECV_PAYLOAD;
+    }
+
+    void *reply_payload = NULL;
+    size_t reply_size = 0;
+    struct capref reply_cap = NULL_CAP;
+    err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size,
+                             &reply_cap);
+
+    uint8_t *reply_buf = NULL;
+
+    if (err_is_fail(err)) {
+        reply_buf = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
+        if (reply_buf == NULL) {
+            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+            goto FREE_REPLY_PAYLOAD;
+        }
+        *((rpc_identifier_t *)reply_buf) = RPC_ERR_MSG;
+
+    } else {
+        reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
+        if (reply_buf == NULL) {
+            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+            goto FREE_REPLY_PAYLOAD;
+        }
+        *((rpc_identifier_t *)reply_buf) = RPC_ACK_MSG;
+        if (reply_size != 0) {
+            memcpy(reply_buf + sizeof(rpc_identifier_t), reply_payload, reply_size);
+        }
+    }
+
+    err = ump_chan_send(uc, reply_buf, sizeof(rpc_identifier_t) + reply_size);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Fail to reply URPC\n");
+        goto FREE_REPLY_BUF;
+    }
+
+FREE_REPLY_BUF:
+    free(reply_buf);
+FREE_REPLY_PAYLOAD:
+    free(reply_payload);
+FREE_RECV_PAYLOAD:
+    free(recv_payload);
+RE_REGISTER:
+    err = ump_chan_register_recv(uc, get_default_waitset(),
+                                 MKCLOSURE(rpc_recv_handler, arg));
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "urpc_handler: error re-registering handler");
+        // XXX: maybe kill the caller here
+    }
+}
+
+static errval_t boot_core(coreid_t mpid)
+{
+    errval_t err;
+
+    struct capref urpc_frame;
+    err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE, NULL);
+
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    struct frame_identity urpc_frame_id;
+    err = frame_identify(urpc_frame, &urpc_frame_id);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    uint8_t *urpc_buffer;
+    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
+                           URPC_FRAME_SIZE, urpc_frame);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // BSP core is responsible for zeroing the URPC frame
+    memset(urpc_buffer, 0, URPC_FRAME_SIZE);
+
+    // Init URPC server
+    urpc_server[mpid] = malloc(sizeof(**urpc_server));
+    if (urpc_server[mpid] == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+    err = ump_chan_init_from_buf(urpc_server[mpid], urpc_buffer, false);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Init UPRC client
+    urpc_client[mpid] = malloc(sizeof(**urpc_client));
+    if (urpc_client[mpid] == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+    err = ump_chan_init_from_buf(urpc_client[mpid],
+                                 urpc_buffer + UMP_CHAN_SHARED_FRAME_SIZE, true);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Choose the right bootloader and cpu driver image
+
+    err = invoke_kernel_get_platform_info(cap_kernel, &platform_info);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "failed to obtain the platform info from the kernel\n");
+    }
+
+    char *bootloader_image;
+    switch (platform_info.arch) {
+    case PI_ARCH_ARMV8A:
+        bootloader_image = "boot_armv8_generic";
+        break;
+    default:
+        USER_PANIC("unsupported arch %d\n", platform_info.arch);
+    }
+
+    char *cpu_driver_image;
+    switch (platform_info.platform) {
+    case PI_PLATFORM_QEMU:
+        cpu_driver_image = "cpu_a57_qemu";
+        break;
+    case PI_PLATFORM_IMX8X:
+        cpu_driver_image = "cpu_imx8x";
+        break;
+    default:
+        USER_PANIC("unknown platform %d\n", platform_info.platform);
+    }
+
+    err = coreboot(mpid, bootloader_image, cpu_driver_image, "init", urpc_frame_id);
+
+    if (err_is_fail(err))
+        return err;
+
+    DEBUG_PRINTF("CORE %d SUCCESSFULLY BOOTED\n", mpid);
+
+    // generate a new bootinfo for the child core
+    // first allocate some memory for the child
+    struct capref core_ram;
+    err = ram_alloc(&core_ram, RAM_PER_CORE);
+    if (err_is_fail(err))
+        return err;
+
+    struct capability c;
+    err = cap_direct_identify(core_ram, &c);
+    if (err_is_fail(err))
+        return err;
+    struct mem_region region;
+    region.mr_base = c.u.ram.base;
+    region.mr_bytes = c.u.ram.bytes;
+    region.mr_consumed = false;
+    region.mr_type = RegionType_Empty;
+
+    size_t size_buf = sizeof(struct bootinfo)
+                      + (bi->regions_length + 1) * sizeof(struct mem_region);
+    struct bootinfo *bi_core = malloc(size_buf);
+    bi_core->host_msg = bi->host_msg;
+    bi_core->host_msg_bits = bi->host_msg_bits;
+    bi_core->mem_spawn_core = bi->mem_spawn_core;
+    bi_core->regions_length = bi->regions_length + 1;
+
+    memcpy(bi_core->regions, bi->regions, sizeof(struct mem_region) * bi->regions_length);
+
+    bi_core->regions[bi->regions_length] = region;
+
+    // send bootinfo across
+    err = ring_producer_send(&urpc_server[mpid]->send, bi_core, size_buf);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // send mm_strings cap across
+    struct frame_identity mm_strings_id;
+    err = frame_identify(cap_mmstrings, &mm_strings_id);
+    if (err_is_fail(err))
+        return err;
+
+    err = ring_producer_send(&urpc_server[mpid]->send, &mm_strings_id,
+                             sizeof(struct frame_identity));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Start handling URPCs from the newly booted core
+    err = ump_chan_register_recv(urpc_server[mpid], get_default_waitset(), MKCLOSURE(urpc_handler, urpc_server[mpid]));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    return SYS_ERR_OK;
 }
 
 static int bsp_main(int argc, char *argv[])
@@ -355,10 +428,11 @@ static int bsp_main(int argc, char *argv[])
     // TODO: Spawn system processes, boot second core etc. here
 
     // Booting second core
-    for(int i = 1;i< 4;i++) {
+    for (int i = 1; i < 4; i++) {
         err = boot_core(i);
-        if (err_is_fail(err))
-            DEBUG_ERR(err, "failed to boot second core");
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to boot core");
+        }
     }
 
     // Grading
@@ -368,7 +442,7 @@ static int bsp_main(int argc, char *argv[])
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;
-    // err = ring_producer_transmit(urpc_send, &payload, sizeof(uint8_t));
+    // err = ring_producer_send(urpc_send, &payload, sizeof(uint8_t));
     // err = psci_cpu_on(1, cpu_driver_entry_point, 0);
     // Hang around
     struct waitset *default_ws = get_default_waitset();
@@ -411,27 +485,27 @@ static errval_t forge_ram(struct bootinfo *bootinfo)
 }
 
 // // Forge caps to all the modules in the memregs structure
-static errval_t forge_modules(struct bootinfo *bootinfo) {
+static errval_t forge_modules(struct bootinfo *bootinfo)
+{
     errval_t err;
 
-    //create an L2 node into the ROOTCN_SLOT_MODULECN
+    // create an L2 node into the ROOTCN_SLOT_MODULECN
     struct cnoderef modulecn_ref;
     err = cnode_create_foreign_l2(cap_root, ROOTCN_SLOT_MODULECN, &modulecn_ref);
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "Failed to create L2 node for cnode_module");
         return err;
     }
     assert(cnodecmp(modulecn_ref, cnode_module));
 
-    for(int i=0; i < bootinfo->regions_length; i++) {
-        if(bootinfo->regions[i].mr_type == RegionType_Module) {
-            struct capref module = {
-                .cnode = cnode_module,
-                .slot = bootinfo->regions[i].mrmod_slot
-            };
+    for (int i = 0; i < bootinfo->regions_length; i++) {
+        if (bootinfo->regions[i].mr_type == RegionType_Module) {
+            struct capref module = { .cnode = cnode_module,
+                                     .slot = bootinfo->regions[i].mrmod_slot };
             DEBUG_PRINTF("slot = %u\n", bootinfo->regions[i].mrmod_slot);
-            err = frame_forge(module, bootinfo->regions[i].mr_base, bootinfo->regions[i].mr_bytes, disp_get_core_id());
-            if(err_is_fail(err)) {
+            err = frame_forge(module, bootinfo->regions[i].mr_base,
+                              bootinfo->regions[i].mr_bytes, disp_get_core_id());
+            if (err_is_fail(err)) {
                 DEBUG_ERR(err, "Failed to forge frame for module in region %d", i);
                 return err;
             }
@@ -439,71 +513,6 @@ static errval_t forge_modules(struct bootinfo *bootinfo) {
     }
 
     return SYS_ERR_OK;
-}
-
-static int urpc_server_worker(void *params)
-{
-    (void)params;
-    uint8_t *recv_payload;
-    size_t recv_size;
-    while (true) {
-        recv_payload = NULL;
-
-        errval_t err = ring_consumer_recv(urpc_recv[0], (void **)&recv_payload, &recv_size);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "ring_consumer_recv failed\n");
-            return EXIT_FAILURE;
-        }
-
-        uint8_t type = recv_payload[0];
-        if (type >= RPC_MSG_COUNT) {
-            DEBUG_PRINTF("Invalid URPC msg %u\n", type);
-            goto FREE_RECV_PAYLOAD;
-        }
-
-        void *reply_payload = NULL;
-        size_t reply_size = 0;
-        struct capref reply_cap = NULL_CAP;
-        err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size, &reply_cap);
-
-        uint8_t *reply_buf = NULL;
-
-        if (err_is_fail(err)) {
-            reply_buf = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
-            if (reply_buf == NULL) {
-                DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
-                goto FREE_REPLY_PAYLOAD;
-            }
-            *((rpc_identifier_t *)reply_buf) = RPC_ERR_MSG;
-
-        } else {
-            reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
-            if (reply_buf == NULL) {
-                DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
-                goto FREE_REPLY_PAYLOAD;
-            }
-            *((rpc_identifier_t *)reply_buf) = RPC_ACK_MSG;
-            if (reply_size != 0) {
-                memcpy(reply_buf + sizeof(rpc_identifier_t), reply_payload, reply_size);
-            }
-        }
-
-        err = ring_producer_transmit(urpc_send[0], reply_buf, sizeof(rpc_identifier_t) + reply_size);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "Fail to reply URPC\n");
-            goto FREE_REPLY_BUF;
-        }
-
-    FREE_REPLY_BUF:
-        free(reply_buf);
-    FREE_REPLY_PAYLOAD:
-        free(reply_payload);
-    FREE_RECV_PAYLOAD:
-        free(recv_payload);
-
-    }
-
-    return EXIT_SUCCESS;
 }
 
 
@@ -519,39 +528,43 @@ static int app_main(int argc, char *argv[])
 
     // map URPC frame to our addr
     uint8_t *urpc_addr;
-    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_addr, URPC_FRAME_SIZE,
-                           cap_urpc);
+    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_addr,
+                           URPC_FRAME_SIZE, cap_urpc);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in app_main mapping URPC frame");
         abort();
     }
 
-    // init ring buffer consumer
-    urpc_recv[0] = malloc(sizeof(struct ring_consumer));
-    if (urpc_recv[0] == NULL) {
-        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc ring_consumer");
+    // BSP core was responsible for zeroing the URPC frame
+
+    // Init URPC Client
+    urpc_client[0] = malloc(sizeof(**urpc_client));
+    if (urpc_client[0] == NULL) {
+        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc urpc_client[0]");
         abort();
     }
-    err = ring_consumer_init(urpc_recv[0], urpc_addr);
+    err = ump_chan_init_from_buf(urpc_client[0], urpc_addr, true);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "in app_main init URPC receiver");
+        DEBUG_ERR(err, "failed to init urpc_client[0]");
         abort();
     }
 
-    urpc_send[0] = malloc(sizeof(struct ring_producer));
-    if (urpc_send[0] == NULL) {
-        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc ring_producer");
+    // Init URPC Server
+    urpc_server[0] = malloc(sizeof(**urpc_server));
+    if (urpc_server[0] == NULL) {
+        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc urpc_server[0]");
         abort();
     }
-    err = ring_producer_init(urpc_send[0], urpc_addr + BASE_PAGE_SIZE);
+    err = ump_chan_init_from_buf(urpc_server[0], urpc_addr + UMP_CHAN_SHARED_FRAME_SIZE,
+                                 false);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "in app_main init URPC sender");
+        DEBUG_ERR(err, "in app_main init urpc_server[0]");
         abort();
     }
 
     // create bootinfo
     size_t bi_size;
-    err = ring_consumer_recv(urpc_recv[0], (void **)&bi, &bi_size);
+    err = ring_consumer_recv(&urpc_client[0]->recv, (void **)&bi, &bi_size);
 
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to get bootinfo from BSP core");
@@ -577,7 +590,7 @@ static int app_main(int argc, char *argv[])
 
     // forge modules and set the MODULECN cnode
     err = forge_modules(bi);
-    if(err_is_fail(err)) {
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to forge modules");
         abort();
     }
@@ -585,13 +598,15 @@ static int app_main(int argc, char *argv[])
     // get cap_mmstrings
     struct frame_identity *mm_strings_id;
     size_t frameid_size;
-    err = ring_consumer_recv(urpc_recv[0], (void **)&mm_strings_id, &frameid_size);
-    if(err_is_fail(err)) {
+    err = ring_consumer_recv(&urpc_client[0]->recv, (void **)&mm_strings_id,
+                             &frameid_size);
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to get mmstrings cap");
         abort();
     }
-    err = frame_forge(cap_mmstrings, mm_strings_id->base, mm_strings_id->bytes, disp_get_current_core_id());
-    if(err_is_fail(err)) {
+    err = frame_forge(cap_mmstrings, mm_strings_id->base, mm_strings_id->bytes,
+                      disp_get_current_core_id());
+    if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to forge cap_mmstrings");
         abort();
     }
@@ -602,9 +617,10 @@ static int app_main(int argc, char *argv[])
 
     grading_test_late();
 
-    urpc_recv_thread = thread_create(urpc_server_worker, NULL);
-    if (urpc_recv_thread == NULL) {
-        DEBUG_ERR(err, "failed to create urpc_recv_thread");
+    // Start handling URPCs from core 0
+    err = ump_chan_register_recv(urpc_server[0], get_default_waitset(), MKCLOSURE(urpc_handler, urpc_server[0]));
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "ump_chan_register_recv failed");
         abort();
     }
 

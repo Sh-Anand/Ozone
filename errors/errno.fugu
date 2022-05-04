@@ -383,6 +383,8 @@ errors libaos LIB_ERR_ {
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",
 
+    failure UMP_INVALID_FRAME_SIZE  "The shared frame is not of size UMP_CHAN_SHARED_FRAME_SIZE",
+
     // Ring buffer
     failure RING_INIT           "Failure in ring_init()",
     failure RING_PRODUCER_INIT  "Failure in ring_producer_init()",
