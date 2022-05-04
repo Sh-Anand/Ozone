@@ -170,28 +170,24 @@ HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
-HANDLER(terminal_handler)
+HANDLER(terminal_getchar_handler)
 {
-    // FIXME: split to two messages of putchar and getchar
-    CAST_IN_MSG(info, char);  // FIXME: should check for size 2 rather than 1
-
-    errval_t err;
-    if (info[0] == 0) {  // putchar
-        grading_rpc_handler_serial_putchar(info[1]);
-        return sys_print(info + 1, 1);  // print a single char
-    } else if (info[0] == 1) {          // getchar
-        char c;
-        grading_rpc_handler_serial_getchar();
-        err = sys_getchar(&c);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        MALLOC_OUT_MSG_WITH_SIZE(reply, char, 2);
-        reply[0] = 1;
-        reply[1] = c;
-        return SYS_ERR_OK;
+    char c;
+    grading_rpc_handler_serial_getchar();
+    errval_t err = sys_getchar(&c);
+    if (err_is_fail(err)) {
+        return err;
     }
-    return ERR_INVALID_ARGS;
+    MALLOC_OUT_MSG(reply, char);
+    *reply = c;
+    return SYS_ERR_OK;
+}
+
+HANDLER(terminal_putchar_handler)
+{
+    CAST_IN_MSG(c, char);
+    grading_rpc_handler_serial_putchar(*c);
+    return sys_print(c, 1);  // print a single char
 }
 
 rpc_handler_t const rpc_handlers[RPC_MSG_COUNT] = {
@@ -201,5 +197,6 @@ rpc_handler_t const rpc_handlers[RPC_MSG_COUNT] = {
     [RPC_PROCESS_SPAWN] = spawn_msg_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
-    [RPC_TERMINAL] = terminal_handler,
+    [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
+    [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
 };

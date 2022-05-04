@@ -120,12 +120,14 @@ static errval_t refill_reserved_slot_thread_safe(void)
  * @param size
  * @param ret_cap
  * @param ret_buf     Should be freed outside.
- * @param ret_size
+ * @param ret_size    The size of ret_buf, CAN be larger than the payload actually sent.
+ *                    Should only be used to assert safe access, rather than expecting
+ *                    the exact size of the return message.
  * @return
  * @note For M3, only sending ONE LMP message is supported. That is, size should be at
  *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
  */
-static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type identifier,
+static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type identifier,
                                      struct capref cap, void *buf, size_t size,
                                      struct capref *ret_cap, void **ret_buf,
                                      size_t *ret_size)
@@ -171,7 +173,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type iden
     }
 
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "aos_rpc_send_general: failed to send\n");
+        DEBUG_ERR(err, "aos_rpc_call_general: failed to send\n");
         return err;
     }
 
@@ -195,7 +197,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type iden
         if (ret_cap) {
             *ret_cap = recv_cap;
         } else {
-            DEBUG_PRINTF("aos_rpc_send_general received a cap but is given up!\n");
+            DEBUG_PRINTF("aos_rpc_call_general received a cap but is given up!\n");
         }
 
         // This can happen when the current call results from slot_alloc
@@ -235,7 +237,7 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type iden
     }
 
     if (ret_size) {
-        *ret_size = msg.buf.msglen;
+        *ret_size = msg.buf.msglen * sizeof(uintptr_t);
     }
 
     return SYS_ERR_OK;
@@ -243,20 +245,22 @@ static errval_t aos_rpc_send_general(struct aos_rpc *rpc, enum rpc_msg_type iden
 
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 {
-    errval_t err = aos_rpc_send_general(rpc, RPC_NUM, NULL_CAP, &num, sizeof(num), NULL,
+    errval_t err = aos_rpc_call_general(rpc, RPC_NUM, NULL_CAP, &num, sizeof(num), NULL,
                                         NULL, NULL);
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RPC_SEND_NUM);
+    }
 
     return SYS_ERR_OK;
 }
 
 errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 {
-    errval_t err = aos_rpc_send_general(rpc, RPC_STR, NULL_CAP, (void *)string,
+    errval_t err = aos_rpc_call_general(rpc, RPC_STR, NULL_CAP, (void *)string,
                                         strlen(string), NULL, NULL, NULL);
-    if (err_is_fail(err))
+    if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RPC_SEND_STR);
+    }
 
     return SYS_ERR_OK;
 }
@@ -277,7 +281,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 
 
     struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
-    errval_t err = aos_rpc_send_general(rpc, RPC_RAM_REQUEST, NULL_CAP, &msg, sizeof(msg),
+    errval_t err = aos_rpc_call_general(rpc, RPC_RAM_REQUEST, NULL_CAP, &msg, sizeof(msg),
                                         ret_cap, NULL, NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to receive RAM\n");
@@ -297,7 +301,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
         *ret_bytes = c.u.ram.bytes;
     }
 
-    // aos_rpc_send_general(RAM_IDENTIFIER)
+    // aos_rpc_call_general(RAM_IDENTIFIER)
 
     return SYS_ERR_OK;
 }
@@ -305,40 +309,27 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 
 errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 {
-    // TODO implement functionality to request a character from
-    // the serial driver.
     errval_t err;
-
-    // TODO: this is no good, do better
-    // a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
-    char info[2] = { 1, 0 };
-    char *ret_info;
-    size_t rsize;
-    err = aos_rpc_send_general(rpc, RPC_TERMINAL, NULL_CAP, info, 2, NULL,
-                               (void **)&ret_info, &rsize);
-    assert(rsize >= 2);
-
-    *retc = ret_info[1];  // pass the returned character along
-                          // printf("retc: %c (err: %d)\n", *retc, err);
-
+    char *ret_char = NULL;
+    size_t ret_size = 0;
+    err = aos_rpc_call_general(rpc, RPC_TERMINAL_GETCHAR, NULL_CAP, NULL, 0, NULL,
+                               (void **)&ret_char, &ret_size);
+    if (err_is_ok(err)) {
+        assert(ret_size >= sizeof(char));
+        *retc = *ret_char;
+        // printf("retc: %c (err: %d)\n", *retc, err);
+    }
     return err;
 }
 
 
 errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
 {
-    // TODO implement functionality to send a character to the
-    // serial port.
-
-    // TODO: this is no good, do better
-    // a bit of packaged info: 0 in the first place is a putchar, 1 is a getchar
-    char data[2] = { 0, c };
-
     // we don't care about return values or capabilities, just send this single char
     // (again, do better)
     // sys_print("aos_rpc_serial_putchar called!\n", 32);
-    errval_t err = aos_rpc_send_general(rpc, RPC_TERMINAL, NULL_CAP, data, 2, NULL, NULL,
-                                        NULL);
+    errval_t err = aos_rpc_call_general(rpc, RPC_TERMINAL_PUTCHAR, NULL_CAP, &c,
+                                        sizeof(char), NULL, NULL, NULL);
 
     return err;
 }
@@ -352,7 +343,7 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
     strcpy(call_msg->cmdline, cmdline);
 
     domainid_t *return_pid = NULL;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_SPAWN, NULL_CAP, call_msg,
+    errval_t err = aos_rpc_call_general(rpc, RPC_PROCESS_SPAWN, NULL_CAP, call_msg,
                                         call_msg_size, NULL, (void **)&return_pid, NULL);
     if (err_is_ok(err)) {
         *newpid = *return_pid;
@@ -367,7 +358,7 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core
 errval_t aos_rpc_process_get_name(struct aos_rpc *rpc, domainid_t pid, char **name)
 {
     char *return_msg = NULL;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_NAME, NULL_CAP, &pid,
+    errval_t err = aos_rpc_call_general(rpc, RPC_PROCESS_GET_NAME, NULL_CAP, &pid,
                                         sizeof(domainid_t), NULL, (void **)&return_msg,
                                         NULL);
     if (err_is_fail(err)) {
@@ -384,7 +375,7 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
 {
     struct rpc_process_get_all_pids_return_msg *return_msg = NULL;
     size_t return_size = 0;
-    errval_t err = aos_rpc_send_general(rpc, RPC_PROCESS_GET_ALL_PIDS, NULL_CAP, NULL, 0,
+    errval_t err = aos_rpc_call_general(rpc, RPC_PROCESS_GET_ALL_PIDS, NULL_CAP, NULL, 0,
                                         NULL, (void **)&return_msg, &return_size);
     if (err_is_ok(err)) {
         *pid_count = return_msg->count;

@@ -151,7 +151,7 @@ static void rpc_recv_handler(void *arg)
     // we have a frame cap, map into our space and set buf to mapped address
     // TODO: now cap is only for frame-based message, which prevent us from receving cap
     if (!capref_is_null(cap)) {
-        DEBUG_PRINTF("Trying to map received frame in local space\n");
+        // DEBUG_PRINTF("Trying to map received frame in local space\n");
 
         struct frame_identity frame_id;
         err = frame_identify(cap, &frame_id);
@@ -230,7 +230,6 @@ static void urpc_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    DEBUG_PRINTF("type = %u, handler = %p\n", type, rpc_handlers[type]);
     err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size,
                              &reply_cap);
 
@@ -517,7 +516,6 @@ static errval_t forge_modules(struct bootinfo *bootinfo)
         if (bootinfo->regions[i].mr_type == RegionType_Module) {
             struct capref module = { .cnode = cnode_module,
                                      .slot = bootinfo->regions[i].mrmod_slot };
-            DEBUG_PRINTF("slot = %u\n", bootinfo->regions[i].mrmod_slot);
             err = frame_forge(module, bootinfo->regions[i].mr_base,
                               bootinfo->regions[i].mr_bytes, disp_get_core_id());
             if (err_is_fail(err)) {
