@@ -62,7 +62,7 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
         goto RET;
     }
 
-    if (*((rpc_identifier_t *)ret_payload) == RPC_ACK_MSG) {
+    if (*((rpc_identifier_t *)ret_payload) == RPC_ACK) {
         if (ret_payload != NULL) {
             MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
             memcpy(reply, ret_payload, ret_size - sizeof(rpc_identifier_t));

@@ -98,12 +98,12 @@ static void rpc_send(void *rpc, uint8_t identifier, struct capref cap, void *buf
 
 static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size)
 {
-    rpc_send(rpc, RPC_ACK_MSG, cap, buf, size);
+    rpc_send(rpc, RPC_ACK, cap, buf, size);
 }
 
 static void rpc_nack(void *rpc, errval_t err)
 {
-    rpc_send(rpc, RPC_ERR_MSG, NULL_CAP, &err, sizeof(errval_t));
+    rpc_send(rpc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
 }
 
 // Register this function after spawning a process to register a receive handler to that
@@ -111,12 +111,12 @@ static void rpc_nack(void *rpc, errval_t err)
 static void rpc_recv_handler(void *arg)
 {
     struct lmp_chan *lc = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
+    struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
+    struct capref recv_cap;
     errval_t err;
 
     // Try to receive a message
-    err = lmp_chan_recv(lc, &msg, &cap);
+    err = lmp_chan_recv(lc, &recv_msg, &recv_cap);
     if (err_is_fail(err)) {
         if (lmp_err_is_transient(err)) {
             goto RE_REGISTER;
@@ -125,58 +125,66 @@ static void rpc_recv_handler(void *arg)
         // XXX: maybe kill the caller here
     }
 
-    // Refill the cap slot if the recv slot is used (received a cap)
-    if (!capref_is_null(cap)) {
-//        struct capref new_slot = NULL_CAP;
+    // Refill the recv_cap slot if the recv slot is used (received a recv_cap)
+    if (!capref_is_null(recv_cap)) {
+        //        struct capref new_slot = NULL_CAP;
         err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
             goto RE_REGISTER;
         }
-//        assert(!capref_is_null(new_slot));
-//        lmp_chan_set_recv_slot(lc, new_slot);
+        //        assert(!capref_is_null(new_slot));
+        //        lmp_chan_set_recv_slot(lc, new_slot);
     }
 
-    uint8_t *buf = (uint8_t *)msg.words;
-    uint8_t type = buf[0];
-    if (type >= RPC_MSG_COUNT || type <= RPC_ERR_MSG) {
-        DEBUG_PRINTF("Invalid RPC msg %u\n", type);
+    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_msg.words);
+
+    uint8_t *recv_buf;
+    size_t recv_size;
+
+    uint8_t *frame_payload = NULL;
+
+    if (recv_type >= RPC_MSG_COUNT || recv_type <= RPC_ERR) {
+        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
         rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
-    }
-    buf += 1;
-    size_t size = msg.buf.msglen * (sizeof(uintptr_t)) - 1;
 
-    // we have a frame cap, map into our space and set buf to mapped address
-    // TODO: now cap is only for frame-based message, which prevent us from receving cap
-    if (!capref_is_null(cap)) {
-        // DEBUG_PRINTF("Trying to map received frame in local space\n");
+    } else if (recv_type == RPC_MSG_IN_FRAME) {
+        assert(!capref_is_null(recv_cap));
+
+        DEBUG_PRINTF("rpc_recv_handler: trying to map received frame in local space\n");
 
         struct frame_identity frame_id;
-        err = frame_identify(cap, &frame_id);
+        err = frame_identify(recv_cap, &frame_id);
         if (err_is_fail(err)) {
             rpc_nack(lc, err_push(err, LIB_ERR_FRAME_IDENTIFY));
             goto RE_REGISTER;
         }
 
-        // Replace buf and size
-        uint8_t *payload;
-        err = paging_map_frame(get_current_paging_state(), (void **)&payload,
-                               frame_id.bytes, cap);
+        err = paging_map_frame(get_current_paging_state(), (void **)&frame_payload,
+                               frame_id.bytes, recv_cap);
         if (err_is_fail(err)) {
             rpc_nack(lc, err_push(err, LIB_ERR_PAGING_MAP));
             goto RE_REGISTER;
         }
-        size = *((size_t *) payload);
-        assert(*(payload + sizeof(size_t)) == type);
-        buf = payload + sizeof(size_t) + sizeof(rpc_identifier_t);
+
+        recv_size = *((size_t *)frame_payload);
+        recv_type = *((rpc_identifier_t *)(frame_payload + sizeof(size_t)));
+        recv_buf = frame_payload + sizeof(size_t) + sizeof(rpc_identifier_t);
+
+    } else {
+        recv_buf = ((uint8_t *)recv_msg.words) + sizeof(rpc_identifier_t);
+        recv_size = recv_msg.buf.msglen * (sizeof(uintptr_t)) - sizeof(rpc_identifier_t);
     }
+
+    //    DEBUG_PRINTF("rpc_recv_handler: handling %u\n", recv_type);
 
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[type](buf, size, &reply_payload, &reply_size, &reply_cap);
+    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size,
+                                  &reply_cap);
     if (err_is_ok(err)) {
         rpc_reply(lc, reply_cap, reply_payload, reply_size);
     } else {
@@ -188,8 +196,8 @@ static void rpc_recv_handler(void *arg)
         free(reply_payload);
     }
 
-    if (!capref_is_null(cap)) {
-        err = paging_unmap(get_current_paging_state(), buf - sizeof(size_t) - sizeof(rpc_identifier_t));
+    if (frame_payload != NULL) {
+        err = paging_unmap(get_current_paging_state(), frame_payload);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: failed to unmap");
         }
@@ -241,7 +249,7 @@ static void urpc_handler(void *arg)
             DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
             goto FREE_REPLY_PAYLOAD;
         }
-        *((rpc_identifier_t *)reply_buf) = RPC_ERR_MSG;
+        *((rpc_identifier_t *)reply_buf) = RPC_ERR;
         *((errval_t *)(reply_buf + sizeof(rpc_identifier_t))) = err;
         reply_size = sizeof(errval_t);
     } else {
@@ -250,7 +258,7 @@ static void urpc_handler(void *arg)
             DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
             goto FREE_REPLY_PAYLOAD;
         }
-        *((rpc_identifier_t *)reply_buf) = RPC_ACK_MSG;
+        *((rpc_identifier_t *)reply_buf) = RPC_ACK;
         if (reply_size != 0) {
             memcpy(reply_buf + sizeof(rpc_identifier_t), reply_payload, reply_size);
         }
@@ -269,8 +277,7 @@ FREE_REPLY_PAYLOAD:
 FREE_RECV_PAYLOAD:
     free(recv_payload);
 RE_REGISTER:
-    err = ump_chan_register_recv(uc, get_default_waitset(),
-                                 MKCLOSURE(urpc_handler, arg));
+    err = ump_chan_register_recv(uc, get_default_waitset(), MKCLOSURE(urpc_handler, arg));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "urpc_handler: error re-registering handler");
         // XXX: maybe kill the caller here
@@ -408,7 +415,8 @@ static errval_t boot_core(coreid_t mpid)
     }
 
     // Start handling URPCs from the newly booted core
-    err = ump_chan_register_recv(urpc_server[mpid], get_default_waitset(), MKCLOSURE(urpc_handler, urpc_server[mpid]));
+    err = ump_chan_register_recv(urpc_server[mpid], get_default_waitset(),
+                                 MKCLOSURE(urpc_handler, urpc_server[mpid]));
     if (err_is_fail(err)) {
         return err;
     }
@@ -631,7 +639,8 @@ static int app_main(int argc, char *argv[])
     grading_test_late();
 
     // Start handling URPCs from core 0
-    err = ump_chan_register_recv(urpc_server[0], get_default_waitset(), MKCLOSURE(urpc_handler, urpc_server[0]));
+    err = ump_chan_register_recv(urpc_server[0], get_default_waitset(),
+                                 MKCLOSURE(urpc_handler, urpc_server[0]));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "ump_chan_register_recv failed");
         abort();

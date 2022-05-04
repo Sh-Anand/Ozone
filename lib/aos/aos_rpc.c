@@ -25,34 +25,26 @@ static struct thread_mutex reserved_slot_mutex;  // protect rpc_reserved_recv_sl
 
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
-errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t size,
-                      uintptr_t *words, struct capref *ret_cap)
+errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap, void *buf,
+                      size_t size, uintptr_t *words, struct capref *ret_cap)
 {
     errval_t err;
 
-    uint8_t *buffer = (uint8_t *)words;
-    buffer[0] = identifier;
-    buffer++;
-
-    *ret_cap = cap;
-
-    if (buf == NULL) {
-        if (size == 0) {
-            return SYS_ERR_OK;
-        } else {
-            return ERR_INVALID_ARGS;
-        }
+    if (buf == NULL && size != 0) {
+        return ERR_INVALID_ARGS;
     }
 
+    size_t remaining_space = LMP_MSG_LENGTH * sizeof(uintptr_t) - sizeof(rpc_identifier_t);
 
-    size_t remaining_space = LMP_MSG_LENGTH * 8 - 1;
     if (size <= remaining_space) {
         // Buffer fits in the remaining space
-        memcpy(buffer, buf, size);
+        *((rpc_identifier_t *)words) = identifier;
+        memcpy(((uint8_t *)words) + sizeof(rpc_identifier_t), buf, size);
+        *ret_cap = cap;
 
     } else {
         // Buffer doesn't fit, make and map frame cap
-#if 0
+#if 1
         DEBUG_PRINTF("rpc_marshall: alloc frame\n");
 #endif
 
@@ -80,6 +72,8 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap, void *buf, size_t s
         // Put identifier before actual payload, consistent with single message
         *((rpc_identifier_t *)(addr + sizeof(size_t))) = identifier;
         memcpy(addr + sizeof(size_t) + sizeof(rpc_identifier_t), buf, size);
+
+        *((rpc_identifier_t *)words) = RPC_MSG_IN_FRAME;  // replace the identifier
         *ret_cap = frame_cap;
     }
 
@@ -115,22 +109,22 @@ static errval_t refill_reserved_slot_thread_safe(void)
  * Unified interface of sending a message.
  * @param rpc
  * @param identifier
- * @param cap
- * @param buf
- * @param size
+ * @param call_cap
+ * @param call_buf
+ * @param call_size
  * @param ret_cap
  * @param ret_buf     Should be freed outside.
- * @param ret_size    The size of ret_buf, CAN be larger than the payload actually sent.
- *                    Should only be used to assert safe access, rather than expecting
- *                    the exact size of the return message.
+ * @param ret_size    The call_size of ret_buf, CAN be larger than the payload actually
+ * sent. Should only be used to assert safe access, rather than expecting the exact
+ * call_size of the return message.
  * @return
- * @note For M3, only sending ONE LMP message is supported. That is, size should be at
- *       most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
+ * @note For M3, only sending ONE LMP message is supported. That is, call_size should be
+ * at most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
  */
-static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type identifier,
-                                     struct capref cap, void *buf, size_t size,
-                                     struct capref *ret_cap, void **ret_buf,
-                                     size_t *ret_size)
+static errval_t aos_rpc_call_general(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                                     struct capref call_cap, void *call_buf,
+                                     size_t call_size, struct capref *ret_cap,
+                                     void **ret_buf, size_t *ret_size)
 {
     errval_t err;
 
@@ -146,11 +140,11 @@ static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type iden
     }
 
 
-    uintptr_t words[LMP_MSG_LENGTH];
+    uintptr_t send_words[LMP_MSG_LENGTH];
     struct capref send_cap;
 
     // marshall arguments into buffer/frame
-    err = rpc_marshall(identifier, cap, buf, size, words, &send_cap);
+    err = rpc_marshall(identifier, call_cap, call_buf, call_size, send_words, &send_cap);
 
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_MARSHALL_FAIL);
@@ -158,8 +152,8 @@ static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type iden
 
     // send or die
     while (true) {
-        err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, send_cap, words[0],
-                             words[1], words[2], words[3]);
+        err = lmp_chan_send4(rpc->chan, LMP_SEND_FLAGS_DEFAULT, send_cap, send_words[0],
+                             send_words[1], send_words[2], send_words[3]);
 
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
@@ -178,10 +172,10 @@ static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type iden
     }
 
     // receive acknowledgement/return message
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
     struct capref recv_cap;
     while (true) {
-        err = lmp_chan_recv(rpc->chan, &msg, &recv_cap);
+        err = lmp_chan_recv(rpc->chan, &recv_msg, &recv_cap);
         if (err_is_fail(err)) {
             if (err == LIB_ERR_NO_LMP_MSG) {
                 thread_yield();
@@ -194,18 +188,12 @@ static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type iden
     }
 
     if (!capref_is_null(recv_cap)) {
-        if (ret_cap) {
-            *ret_cap = recv_cap;
-        } else {
-            DEBUG_PRINTF("aos_rpc_call_general received a cap but is given up!\n");
-        }
-
         // This can happen when the current call results from slot_alloc
         if (!reserved_slot_is_null_thread_safe()) {
             THREAD_MUTEX_ENTER(&reserved_slot_mutex)
             {
                 // Use the reserved slot first, since slot_alloc can trigger a refill
-                // which calls rpc ram alloc, and then we have no slot to receive the cap
+                // which calls rpc ram alloc, and then we have no slot to receive the call_cap
                 lmp_chan_set_recv_slot(rpc->chan, rpc_reserved_recv_slot);
                 rpc_reserved_recv_slot = NULL_CAP;
             }
@@ -230,17 +218,74 @@ static errval_t aos_rpc_call_general(struct aos_rpc *rpc, enum rpc_msg_type iden
         }
     }
 
-    if (ret_buf) {
-        void *res_buf = malloc((msg.buf.msglen * sizeof(uintptr_t)) - 1);
-        memcpy(res_buf, ((char *)msg.words + 1), msg.buf.msglen * sizeof(uintptr_t));
-        *ret_buf = res_buf;
+    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_msg.words);
+
+    uint8_t *recv_buf;
+    size_t recv_size;
+
+    uint8_t *frame_payload = NULL;
+
+    if (recv_type == RPC_MSG_IN_FRAME) {
+        assert(!capref_is_null(recv_cap));
+
+        struct frame_identity frame_id;
+        err = frame_identify(recv_cap, &frame_id);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_FRAME_IDENTIFY);
+        }
+
+        err = paging_map_frame(get_current_paging_state(), (void **)&frame_payload,
+                               frame_id.bytes, recv_cap);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_PAGING_MAP);
+        }
+
+        recv_size = *((size_t *)frame_payload);
+        recv_type = *((rpc_identifier_t *)(frame_payload + sizeof(size_t)));
+        recv_buf = frame_payload + sizeof(size_t) + sizeof(rpc_identifier_t);
+
+    } else {
+        recv_buf = ((uint8_t *)recv_msg.words) + sizeof(rpc_identifier_t);
+        recv_size = recv_msg.buf.msglen * (sizeof(uintptr_t)) - sizeof(rpc_identifier_t);
     }
 
-    if (ret_size) {
-        *ret_size = msg.buf.msglen * sizeof(uintptr_t);
+    if (recv_type == RPC_ACK) {
+        if (ret_buf) {
+            *ret_buf = malloc(recv_size);
+            memcpy(*ret_buf, recv_buf, recv_size);
+        }
+
+        if (ret_size) {
+            *ret_size = recv_size;
+        }
+
+        if (!capref_is_null(recv_cap)) {
+            if (ret_cap) {
+                *ret_cap = recv_cap;
+            } else {
+                DEBUG_PRINTF("aos_rpc_call_general received a cap but is given up!\n");
+            }
+        }
+        err = SYS_ERR_OK;
+
+    } else if (recv_type == RPC_ERR) {
+        err = *((errval_t *)recv_buf);
+
+    } else {
+        DEBUG_PRINTF("aos_rpc_call_general: unknown recv_type %u\n", recv_type);
+        err = LIB_ERR_RPC_INVALID_MSG;
     }
 
-    return SYS_ERR_OK;
+
+    // Unmap frame if needed
+    if (frame_payload != NULL) {
+        errval_t err2 = paging_unmap(get_current_paging_state(), frame_payload);
+        if (err_is_fail(err2)) {
+            DEBUG_ERR(err2, "aos_rpc_call_general: failed to unmap");
+        }
+    }
+
+    return err;
 }
 
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
@@ -319,6 +364,7 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
         *retc = *ret_char;
         // printf("retc: %c (err: %d)\n", *retc, err);
     }
+    free(ret_char);
     return err;
 }
 
