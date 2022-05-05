@@ -145,7 +145,7 @@ static void rpc_recv_handler(void *arg)
 
     uint8_t *frame_payload = NULL;
 
-    if (recv_type >= RPC_MSG_COUNT || recv_type <= RPC_ERR) {
+    if (rpc_handlers[recv_type] == NULL) {
         DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
         rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
@@ -225,13 +225,13 @@ static void urpc_handler(void *arg)
         goto RE_REGISTER;
     }
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "ring_consumer_recv failed\n");
+        DEBUG_ERR(err, "urpc_handler: ring_consumer_recv failed\n");
         goto RE_REGISTER;
     }
 
     uint8_t type = recv_payload[0];
-    if (type >= RPC_MSG_COUNT) {
-        DEBUG_PRINTF("Invalid URPC msg %u\n", type);
+    if (rpc_handlers[type] == NULL) {
+        DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", type);
         goto FREE_RECV_PAYLOAD;
     }
 
@@ -246,7 +246,7 @@ static void urpc_handler(void *arg)
     if (err_is_fail(err)) {
         reply_buf = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
         if (reply_buf == NULL) {
-            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "urpc_handler: failed to malloc reply_buf");
             goto FREE_REPLY_PAYLOAD;
         }
         *((rpc_identifier_t *)reply_buf) = RPC_ERR;
@@ -255,7 +255,7 @@ static void urpc_handler(void *arg)
     } else {
         reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
         if (reply_buf == NULL) {
-            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "failed to malloc reply_buf");
+            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "urpc_handler: failed to malloc reply_buf");
             goto FREE_REPLY_PAYLOAD;
         }
         *((rpc_identifier_t *)reply_buf) = RPC_ACK;
@@ -266,7 +266,7 @@ static void urpc_handler(void *arg)
 
     err = ump_chan_send(uc, reply_buf, sizeof(rpc_identifier_t) + reply_size);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "Fail to reply URPC\n");
+        DEBUG_ERR(err, "urpc_handler: failed to reply URPC\n");
         goto FREE_REPLY_BUF;
     }
 
@@ -383,6 +383,7 @@ static errval_t boot_core(coreid_t mpid)
     region.mr_bytes = c.u.ram.bytes;
     region.mr_consumed = false;
     region.mr_type = RegionType_Empty;
+    DEBUG_PRINTF("!!! Alloc RAM region (%p/%zu)", region.mr_base, region.mr_bytes);
 
     size_t size_buf = sizeof(struct bootinfo)
                       + (bi->regions_length + 1) * sizeof(struct mem_region);
@@ -450,7 +451,7 @@ static int bsp_main(int argc, char *argv[])
     // TODO: Spawn system processes, boot second core etc. here
 
     // Booting second core
-    for (int i = 1; i < 4; i++) {
+    for (int i = 1; i < 2; i++) {
         err = boot_core(i);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to boot core");

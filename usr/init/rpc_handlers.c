@@ -4,6 +4,8 @@
 
 #include "rpc_handlers.h"
 #include "mem_alloc.h"
+#include "mm/mm.h"
+#include <aos/kernel_cap_invocations.h>
 #include <spawn/spawn.h>
 #include <grading.h>
 #include <aos/ump_chan.h>
@@ -109,7 +111,102 @@ HANDLER(ram_request_msg_handler)
 {
     CAST_IN_MSG(ram_msg, struct aos_rpc_msg_ram);
     grading_rpc_handler_ram_cap(ram_msg->size, ram_msg->alignment);
-    return aos_ram_alloc_aligned(out_cap, ram_msg->size, ram_msg->alignment);
+
+    // Try to get frame
+    errval_t err = aos_ram_alloc_aligned(out_cap, ram_msg->size, ram_msg->alignment);
+    if (err == MM_ERR_NO_MEMORY) {
+        // Request RAM from core 0
+        DEBUG_PRINTF("no enough memory locally, request core 0\n");
+
+        // XXX: trick to rewrite identifier
+        *(((uint8_t *)in_payload) - 1) = INTERNAL_RPC_REMOTE_RAM_REQUEST;
+
+        // Request for twice size
+        size_t original_request_size = ram_msg->size;
+        ram_msg->size *= 2;
+
+        // Request RAM from core 0
+        void *reply_payload = NULL;
+        size_t reply_size = 0;
+        err = forward_to_core(0, in_payload, in_size, &reply_payload, &reply_size);
+        if (err_is_fail(err)) {
+            goto RET;
+        }
+
+        // Decode reply
+        if (reply_size < sizeof(struct RAM)) {
+            DEBUG_PRINTF("%s: invalid payload size %lu < sizeof(%s) = %lu\n", __func__,
+                         reply_size, "struct RAM", sizeof(struct RAM));
+            err = LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;
+            goto RET;
+        }
+        struct RAM *ram = reply_payload;
+
+        // As seen from the init ram alloc function in mem_alloc.c, we place the RAM cap
+        // starting from the second slot of cnode_super
+        static cslot_t forge_ram_slot = 1;
+        struct capref ram_cap = {
+            .cnode = cnode_super,
+            .slot = forge_ram_slot++
+        };
+
+        // Forge ram
+        err = ram_forge(ram_cap, ram->base, ram->bytes, disp_get_current_core_id());
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "ram_request_msg_handler: failed to forge RAM");
+            goto RET;
+        }
+
+        err = mm_add(&aos_mm, ram_cap);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "ram_request_msg_handler: mm_add failed");
+            goto RET;
+        }
+
+        DEBUG_PRINTF("add RAM of size 0x%lx/0x%lx from core 0\n", ram->base, ram->bytes);
+
+        err = aos_ram_alloc_aligned(out_cap, original_request_size, ram_msg->alignment);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "ram_request_msg_handler: aos_ram_alloc_aligned still failed");
+            goto RET;
+        }
+
+        err = SYS_ERR_OK;
+    RET:
+        free(reply_payload);
+        return err;
+
+    } else {
+        return err;
+    }
+}
+
+HANDLER(remote_ram_request_msg_handler)
+{
+    CAST_IN_MSG(ram_msg, struct aos_rpc_msg_ram);
+    errval_t err;
+
+    // Allocate RAM locally
+    struct capref cap;
+    err = aos_ram_alloc_aligned(&cap, ram_msg->size, ram_msg->alignment);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // out_cap will be discarded by UMP, must serialize
+    struct capability c;
+    err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_IDENTIFY);
+    }
+    assert(c.type == ObjType_RAM);
+
+    MALLOC_OUT_MSG(reply, struct RAM);
+    reply->base = c.u.ram.base;
+    reply->bytes = c.u.ram.bytes;
+    reply->pasid = c.u.ram.pasid;
+
+    return SYS_ERR_OK;
 }
 
 HANDLER(spawn_msg_handler)
@@ -190,7 +287,7 @@ HANDLER(terminal_putchar_handler)
     return sys_print(c, 1);  // print a single char
 }
 
-rpc_handler_t const rpc_handlers[RPC_MSG_COUNT] = {
+rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,
     [RPC_RAM_REQUEST] = ram_request_msg_handler,
@@ -199,4 +296,5 @@ rpc_handler_t const rpc_handlers[RPC_MSG_COUNT] = {
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
+    [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_msg_handler,
 };

@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 {
     errval_t err;
 
-    printf("Hello, world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
+    printf("Hello world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
     }
@@ -182,7 +182,10 @@ int main(int argc, char *argv[])
                     struct capref ram;
                     err = ram_alloc(&ram, size);
                     print_err_if_any(err);
-                    printf("Successfully get the frame\n");
+                    if (err_is_fail(err)) {
+                        break;  // prompt for the next command
+                    }
+                    printf("Successfully get the ram\n");
 
                     struct capref frame;
                     err = slot_alloc(&frame);
