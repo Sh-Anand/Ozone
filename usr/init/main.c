@@ -178,7 +178,7 @@ static void rpc_recv_handler(void *arg)
         recv_size = recv_msg.buf.msglen * (sizeof(uintptr_t)) - sizeof(rpc_identifier_t);
     }
 
-    //    DEBUG_PRINTF("rpc_recv_handler: handling %u\n", recv_type);
+    // DEBUG_PRINTF("rpc_recv_handler: handling %u\n", recv_type);
 
     void *reply_payload = NULL;
     size_t reply_size = 0;
@@ -234,6 +234,8 @@ static void urpc_handler(void *arg)
         DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", type);
         goto FREE_RECV_PAYLOAD;
     }
+
+    // DEBUG_PRINTF("urpc_handler: handling %u\n", type);
 
     void *reply_payload = NULL;
     size_t reply_size = 0;
@@ -383,7 +385,6 @@ static errval_t boot_core(coreid_t mpid)
     region.mr_bytes = c.u.ram.bytes;
     region.mr_consumed = false;
     region.mr_type = RegionType_Empty;
-    DEBUG_PRINTF("!!! Alloc RAM region (%p/%zu)", region.mr_base, region.mr_bytes);
 
     size_t size_buf = sizeof(struct bootinfo)
                       + (bi->regions_length + 1) * sizeof(struct mem_region);

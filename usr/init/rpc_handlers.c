@@ -64,10 +64,11 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
         goto RET;
     }
 
+
     if (*((rpc_identifier_t *)ret_payload) == RPC_ACK) {
         if (ret_payload != NULL) {
             MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
-            memcpy(reply, ret_payload, ret_size - sizeof(rpc_identifier_t));
+            memcpy(reply, ret_payload + sizeof(rpc_identifier_t), ret_size - sizeof(rpc_identifier_t));
         }
         err = SYS_ERR_OK;
         goto RET;
@@ -145,10 +146,7 @@ HANDLER(ram_request_msg_handler)
         // As seen from the init ram alloc function in mem_alloc.c, we place the RAM cap
         // starting from the second slot of cnode_super
         static cslot_t forge_ram_slot = 1;
-        struct capref ram_cap = {
-            .cnode = cnode_super,
-            .slot = forge_ram_slot++
-        };
+        struct capref ram_cap = { .cnode = cnode_super, .slot = forge_ram_slot++ };
 
         // Forge ram
         err = ram_forge(ram_cap, ram->base, ram->bytes, disp_get_current_core_id());
@@ -234,57 +232,77 @@ HANDLER(spawn_msg_handler)
 
 HANDLER(process_get_name_handler)
 {
-    CAST_IN_MSG(pid, domainid_t);
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG(pid, domainid_t);
 
-    char *name = NULL;
-    errval_t err = spawn_get_name(*pid, &name);
-    if (err_is_fail(err)) {
-        return err;
+        char *name = NULL;
+        errval_t err = spawn_get_name(*pid, &name);
+        if (err_is_fail(err)) {
+            return err;
+        }
+
+        *out_payload = name;  // will be freed outside
+        *out_size = strlen(name) + 1;
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
-
-    *out_payload = name;  // will be freed outside
-    *out_size = strlen(name) + 1;
-    return SYS_ERR_OK;
 }
 
 HANDLER(process_get_all_pids_handler)
 {
-    grading_rpc_handler_process_get_all_pids();
+    if (disp_get_current_core_id() == 0) {
+        grading_rpc_handler_process_get_all_pids();
 
-    size_t count;
-    domainid_t *pids;
-    errval_t err = spawn_get_all_pids(&pids, &count);
-    if (err_is_fail(err)) {
-        return err;
+        size_t count;
+        domainid_t *pids;
+        errval_t err = spawn_get_all_pids(&pids, &count);
+        if (err_is_fail(err)) {
+            return err;
+        }
+
+        MALLOC_OUT_MSG_WITH_SIZE(reply, struct rpc_process_get_all_pids_return_msg,
+                                 sizeof(struct rpc_process_get_all_pids_return_msg)
+                                     + count * sizeof(domainid_t));
+        reply->count = count;
+        memcpy(reply->pids, pids, count * sizeof(domainid_t));
+        free(pids);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
-
-    MALLOC_OUT_MSG_WITH_SIZE(reply, struct rpc_process_get_all_pids_return_msg,
-                             sizeof(struct rpc_process_get_all_pids_return_msg)
-                                 + count * sizeof(domainid_t));
-    reply->count = count;
-    memcpy(reply->pids, pids, count * sizeof(domainid_t));
-    free(pids);
-    return SYS_ERR_OK;
 }
 
 HANDLER(terminal_getchar_handler)
 {
-    char c;
-    grading_rpc_handler_serial_getchar();
-    errval_t err = sys_getchar(&c);
-    if (err_is_fail(err)) {
-        return err;
+    if (disp_get_current_core_id() == 0) {
+        char c;
+        grading_rpc_handler_serial_getchar();
+        dispatcher_handle_t handle = disp_disable();
+        errval_t err = sys_getchar(&c);
+        disp_enable(handle);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        MALLOC_OUT_MSG(reply, char);
+        *reply = c;
+        return SYS_ERR_OK;
+    } else {
+        forward_to_core(0, in_payload, in_size, out_payload, out_size);
+
+        return SYS_ERR_OK;
     }
-    MALLOC_OUT_MSG(reply, char);
-    *reply = c;
-    return SYS_ERR_OK;
 }
 
 HANDLER(terminal_putchar_handler)
 {
-    CAST_IN_MSG(c, char);
-    grading_rpc_handler_serial_putchar(*c);
-    return sys_print(c, 1);  // print a single char
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG(c, char);
+        grading_rpc_handler_serial_putchar(*c);
+        return sys_print(c, 1);  // print a single char
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
 }
 
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
