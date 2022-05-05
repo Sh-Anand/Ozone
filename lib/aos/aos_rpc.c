@@ -302,7 +302,7 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 {
     errval_t err = aos_rpc_call_general(rpc, RPC_STR, NULL_CAP, (void *)string,
-                                        strlen(string), NULL, NULL, NULL);
+                                        strlen(string) + 1, NULL, NULL, NULL);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RPC_SEND_STR);
     }

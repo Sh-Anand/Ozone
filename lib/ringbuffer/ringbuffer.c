@@ -6,23 +6,25 @@
 #include <aos/debug.h>
 #include <arch/aarch64/aos/cache.h>
 
-#define RINGBUFFER_CAPACITY ((4096 / CACHE_LINE_SIZE) - 1)
+#define RINGBUFFER_CAPACITY ((RING_BUFFER_SIZE / CACHE_LINE_SIZE) - 1)
 #define ENTRY_DATA_CAPACITY (CACHE_LINE_SIZE - sizeof(size_t))
 
-#define INDEX(x) (x % RINGBUFFER_CAPACITY)
-#define INCR(x) x = (x+1) % RINGBUFFER_CAPACITY;
+#define INDEX(x) (x)
+#define INCR(x) do { x = (x + 1) % RINGBUFFER_CAPACITY; } while(0)
 
 struct ringbuffer_entry { // one cacheline (on our machine 64 bytes)
 	uint8_t data[CACHE_LINE_SIZE - sizeof(size_t)]; // the data contained in this block
-	size_t ready: 1; // whether this block is ready to be read
+	volatile size_t ready: 1; // whether this block is ready to be read
 };
+STATIC_ASSERT(sizeof(struct ringbuffer_entry) == CACHE_LINE_SIZE, "sizeof(struct ringbuffer_entry)");
 
 struct ringbuffer { // head, tail, size, list of cachelines
 	struct ringbuffer_entry entries[RINGBUFFER_CAPACITY]; // make sure that the cachelines are pagealigned
-	size_t head: 6;
-	size_t tail: 6;
+	size_t head;
+	size_t tail;
+    uint8_t padding[RING_BUFFER_SIZE - RINGBUFFER_CAPACITY * CACHE_LINE_SIZE - 2 * sizeof(size_t)];
 };
-
+STATIC_ASSERT(sizeof(struct ringbuffer) == RING_BUFFER_SIZE, "sizeof(struct ringbuffer)");
 
 errval_t ring_init(void *buffer)
 {
@@ -113,10 +115,10 @@ static errval_t ring_consume(void *rb, void *payload)
 	// read value from buffer
 	memcpy(payload, &(rbuf->entries[tail]), ENTRY_DATA_CAPACITY);
 	INCR(rbuf->tail); // increment the tail pointer
-	
+
 	dmb();
 	rbuf->entries[tail].ready = 0;
-	
+
 	// TODO: does the writebuffer need flushing?
 	
 	return SYS_ERR_OK;
