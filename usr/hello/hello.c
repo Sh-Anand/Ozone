@@ -574,7 +574,6 @@ int main(int argc, char *argv[])
                     for (int i = 0; i < 16; i++) {
                         thread_join(threads[i], NULL);
                     }
-				} else if (strcmp(buf, "")) {
                 } else {
                     char *cmdline = buf;
 
