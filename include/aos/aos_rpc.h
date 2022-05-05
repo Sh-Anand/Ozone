@@ -28,15 +28,17 @@ enum rpc_type {
 };
 
 enum rpc_msg_type {
-    RPC_ACK_MSG,
-    RPC_ERR_MSG,
+    RPC_ACK,
+    RPC_ERR,
+    RPC_MSG_IN_FRAME,
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,
     RPC_PROCESS_SPAWN,
     RPC_PROCESS_GET_NAME,
     RPC_PROCESS_GET_ALL_PIDS,
-    RPC_TERMINAL,
+    RPC_TERMINAL_GETCHAR,
+    RPC_TERMINAL_PUTCHAR,
     RPC_SHUTDOWN,
 	RPC_STRESS,
     RPC_MSG_COUNT
@@ -77,7 +79,7 @@ struct rpc_process_get_all_pids_return_msg {
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-errval_t rpc_marshall(uint8_t identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
+errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
 
 
 /**

@@ -364,7 +364,7 @@ int main(int argc, char *argv[])
 {
     errval_t err;
 
-    printf("Hello, world! from userspace, on core %u, and through RPC, presented by AOS team 1\n", disp_get_core_id());
+    printf("Hello world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
         printf("arg[%d]: %s\n", i, argv[i]);
     }
@@ -392,6 +392,7 @@ int main(int argc, char *argv[])
                            "  send_str\n"
                            "  send_large_str\n"
                            "  get_ram\n"
+                           "  get_large_ram\n"
                            "  get_pids\n"
                            "Paging:\n"
                            "  fault_read\n"
@@ -481,14 +482,20 @@ int main(int argc, char *argv[])
                     print_err_if_any(err);
                     printf("Stress tested ringbuffer.\n");
 
-                } else if (strcmp(buf, "get_ram") == 0) {
+                } else if (strcmp(buf, "get_ram") == 0 || strcmp(buf, "get_large_ram") == 0 ) {
                     size_t size = 16384;
+                    if (strcmp(buf, "get_large_ram") == 0) {
+                        size = 256 * 1024 * 1024;
+                    }
 
                     printf("Trying to get a frame of size %lu...\n", size);
                     struct capref ram;
                     err = ram_alloc(&ram, size);
                     print_err_if_any(err);
-                    printf("Successfully get the frame\n");
+                    if (err_is_fail(err)) {
+                        break;  // prompt for the next command
+                    }
+                    printf("Successfully get the ram\n");
 
                     struct capref frame;
                     err = slot_alloc(&frame);
