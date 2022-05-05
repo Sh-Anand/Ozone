@@ -126,7 +126,7 @@
 #define CPTR_MODULECN_BASE      ROOTCN_SLOT_ADDR(ROOTCN_SLOT_MODULECN)
 #define CPTR_PAGECN_BASE        ROOTCN_SLOT_ADDR(ROOTCN_SLOT_PAGECN)
 
-#define RAM_PER_CORE (1 << 28) // 512 MiB of memory per core for now
+#define RAM_PER_CORE (1 << 28) // 256 MiB of memory per core for now
 
 /**
  * Memory region types.

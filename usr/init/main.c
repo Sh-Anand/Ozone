@@ -145,12 +145,7 @@ static void rpc_recv_handler(void *arg)
 
     uint8_t *frame_payload = NULL;
 
-    if (rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
-        rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
-        goto RE_REGISTER;
-
-    } else if (recv_type == RPC_MSG_IN_FRAME) {
+    if (recv_type == RPC_MSG_IN_FRAME) {
         assert(!capref_is_null(recv_cap));
 
         DEBUG_PRINTF("rpc_recv_handler: trying to map received frame in local space\n");
@@ -172,6 +167,11 @@ static void rpc_recv_handler(void *arg)
         recv_size = *((size_t *)frame_payload);
         recv_type = *((rpc_identifier_t *)(frame_payload + sizeof(size_t)));
         recv_buf = frame_payload + sizeof(size_t) + sizeof(rpc_identifier_t);
+
+    } else if (rpc_handlers[recv_type] == NULL) {
+        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
+        rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
+        goto RE_REGISTER;
 
     } else {
         recv_buf = ((uint8_t *)recv_msg.words) + sizeof(rpc_identifier_t);
@@ -452,7 +452,7 @@ static int bsp_main(int argc, char *argv[])
     // TODO: Spawn system processes, boot second core etc. here
 
     // Booting second core
-    for (int i = 1; i < 2; i++) {
+    for (int i = 1; i < 4; i++) {
         err = boot_core(i);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to boot core");
