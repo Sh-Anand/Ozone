@@ -80,6 +80,23 @@ RET:
     return err;
 }
 
+HANDLER(stress_test_handler)
+{
+	if (disp_get_current_core_id() == 0) {
+		CAST_IN_MSG(vals, uint8_t);
+		size_t len = in_size;
+		for (uint8_t i = 0; len < in_size; i++, len++) {
+			if (vals[len] != i) goto error;
+		}
+		return SYS_ERR_OK;
+		error:
+		DEBUG_PRINTF("STRESS TEST RECEIVED CORRUPTED DATA!\n");
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
+}
+
 HANDLER(num_msg_handler)
 {
     if (disp_get_current_core_id() == 0) {
@@ -98,7 +115,8 @@ HANDLER(str_msg_handler)
         // TODO: should check against in_size against malicious calls
         CAST_IN_MSG(str, char);
         grading_rpc_handler_string(str);
-        DEBUG_PRINTF("Received string: \"%s\"\n", str);
+        int len = printf("Received string: \"%s\"\n", str);
+		printf("Printed %d characters\n", len);
         return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -202,4 +220,5 @@ rpc_handler_t const rpc_handlers[RPC_MSG_COUNT] = {
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
     [RPC_TERMINAL] = terminal_handler,
+	[RPC_STRESS] = stress_test_handler
 };

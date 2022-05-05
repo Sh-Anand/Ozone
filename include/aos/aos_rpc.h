@@ -38,6 +38,7 @@ enum rpc_msg_type {
     RPC_PROCESS_GET_ALL_PIDS,
     RPC_TERMINAL,
     RPC_SHUTDOWN,
+	RPC_STRESS,
     RPC_MSG_COUNT
 };
 
@@ -83,6 +84,11 @@ errval_t rpc_marshall(uint8_t identifier, struct capref cap_ref, void *buf, size
  * \brief Send a number.
  */
 errval_t aos_rpc_send_number(struct aos_rpc *chan, uintptr_t val);
+
+/**
+ * \brief Send a number.
+ */
+errval_t aos_rpc_stress_test(struct aos_rpc *chan, uint8_t *val, size_t len);
 
 /**
  * \brief Send a string.

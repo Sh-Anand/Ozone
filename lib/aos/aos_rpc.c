@@ -261,6 +261,15 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
     return SYS_ERR_OK;
 }
 
+errval_t aos_rpc_stress_test(struct aos_rpc *chan, uint8_t *val, size_t len)
+{
+	errval_t err = aos_rpc_send_general(chan, RPC_STRESS, NULL_CAP, (void *)val,
+                                        len, NULL, NULL, NULL);
+    if (err_is_fail(err))
+        return err_push(err, LIB_ERR_RPC_SEND_STR);
+
+    return SYS_ERR_OK;
+}
 
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                              struct capref *ret_cap, size_t *ret_bytes)
