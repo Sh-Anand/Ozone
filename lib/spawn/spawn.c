@@ -274,7 +274,7 @@ static void binding_handler(void *arg)
 
     // Start receiving on the channel
     err = lmp_chan_register_recv(si->lc, get_default_waitset(),
-                                MKCLOSURE(rpc_handler, si->lc));
+                                MKCLOSURE(rpc_handler, si->chan));
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "binding_handler: fail to register channel recv");
     }
@@ -631,6 +631,7 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
         return SPAWN_ERR_FIND_MODULE;
     }
 
+    // Create new process node
     errval_t err;
     struct proc_node *node;
     err = proc_list_alloc(&pl, &node);
@@ -639,10 +640,14 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     }
     strncpy(node->name, si->binary_name, DISP_NAME_LEN - 1);
     node->name[DISP_NAME_LEN - 1] = '\0';
-    si->pid = node->pid;
+    node->chan.type = AOS_CHAN_TYPE_LMP;
+    lmp_chan_init(&node->chan.lc);
+
+                          si->pid = node->pid;
     *pid = si->pid;
-    assert(node->lc.connstate == LMP_DISCONNECTED);
-    si->lc = &node->lc;  // will be filled by setup_endpoint()
+    assert(node->chan.lc.connstate == LMP_DISCONNECTED);
+    si->chan = &node->chan;  // will be filled by setup_endpoint()
+    si->lc = &si->chan->lc;
 
     // Setup CSpace
     err = setup_cspace(si);
@@ -674,7 +679,8 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);  // XXX: not this one
     }
-    assert(node->lc.connstate == LMP_BIND_WAIT);
+    assert(node->chan.type == AOS_CHAN_TYPE_LMP);
+    assert(node->chan.lc.connstate == LMP_BIND_WAIT);
 
     // Setup arguments
     err = setup_arguments(si, argc, argv);

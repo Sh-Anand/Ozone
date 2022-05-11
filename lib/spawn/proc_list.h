@@ -6,14 +6,14 @@
 #define AOS_PROC_LIST_H
 
 #include <aos/capabilities.h>
-#include <aos/lmp_chan.h>
+#include <aos/aos_rpc.h>
 #include <sys/queue.h>
 
 struct proc_node {
     domainid_t pid;
     struct capref dispatcher;
     char name[DISP_NAME_LEN];
-    struct lmp_chan lc;
+    struct aos_chan chan;
     LIST_ENTRY(proc_node) link;
 };
 
@@ -27,9 +27,8 @@ struct proc_list {
 errval_t proc_list_init(struct proc_list *ps);
 
 /**
- * Allocate a new process node. PID is filled. lc is initialized. dispatcher and name are
- * uninitialized. The node is inserted into the running
- * list before return.
+ * Allocate a new process node. PID is filled. lc, dispatcher and name are NOT
+ * initialized. The node is inserted into the running list before return.
  * @param ps
  * @param ret
  * @return

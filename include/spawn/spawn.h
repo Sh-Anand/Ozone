@@ -44,7 +44,8 @@ struct spawninfo {
     struct capref dispatcher_cap_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
 
-    struct lmp_chan *lc;
+    struct aos_chan *chan;  // should be AOS_CHAN_TYPE_LMP
+    struct lmp_chan *lc;    // &chan.lc, helper when added when doing the refactor
 };
 
 void spawn_set_rpc_handler(void (*handler)(void *));

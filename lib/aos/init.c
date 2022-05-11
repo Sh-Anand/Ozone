@@ -237,19 +237,22 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     if (!init_domain) {
 
         /* allocate lmp channel structure */
-        struct lmp_chan *init_chan = malloc(sizeof(*init_chan));
-        if (init_chan == NULL) {
+        struct aos_rpc *init_rpc = malloc(sizeof(*init_rpc));
+        if (init_rpc == NULL) {
             return err_push(err, LIB_ERR_MALLOC_FAIL);
         }
-        lmp_chan_init(init_chan);
+        init_rpc->chan.type = AOS_CHAN_TYPE_LMP;
+
+        struct lmp_chan *init_lc = &init_rpc->chan.lc;
+        lmp_chan_init(init_lc);
 
         /* set remote endpoint to init's endpoint */
         assert(!capref_is_null(cap_initep) && "init ep not available");
-        err = lmp_chan_accept(init_chan, LOCAL_ENDPOINT_BUF_SIZE, cap_initep);
+        err = lmp_chan_accept(init_lc, LOCAL_ENDPOINT_BUF_SIZE, cap_initep);
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_ACCEPT);
         }
-        init_chan->connstate = LMP_BIND_WAIT;
+        init_lc->connstate = LMP_BIND_WAIT;
 
         /* set receive handler */
         struct capref new_init_ep_slot;
@@ -257,23 +260,23 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
         }
-        lmp_chan_set_recv_slot(init_chan, new_init_ep_slot);
-        err = lmp_chan_register_recv(init_chan, get_default_waitset(),
-                                     MKCLOSURE(init_ack_handler, init_chan));
+        lmp_chan_set_recv_slot(init_lc, new_init_ep_slot);
+        err = lmp_chan_register_recv(init_lc, get_default_waitset(),
+                                     MKCLOSURE(init_ack_handler, init_lc));
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
         }
 
         /* send local ep to init */
         // TODO: change to special format since we are reusing
-        err = lmp_chan_send1(init_chan, LMP_SEND_FLAGS_DEFAULT, init_chan->local_cap,
+        err = lmp_chan_send1(init_lc, LMP_SEND_FLAGS_DEFAULT, init_lc->local_cap,
                              get_dispatcher_generic(curdispatcher())->domain_id);
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_SEND_EP);
         }
 
         /* wait for init to acknowledge receiving the endpoint */
-        while (init_chan->connstate != LMP_CONNECTED) {
+        while (init_lc->connstate != LMP_CONNECTED) {
             err = event_dispatch(get_default_waitset());
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "error in init event_dispatch loop");
@@ -282,15 +285,9 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
 
         // XXX: For now, lmp chan can be directly cast to aos_chan
-        set_init_chan((struct aos_chan *) init_chan);
+        set_init_chan(&init_rpc->chan);
 
         /* initialize init RPC client with lmp channel */
-        struct aos_rpc *init_rpc = malloc(sizeof(*init_rpc));
-        if (init_rpc == NULL) {
-            return err_push(err, LIB_ERR_MALLOC_FAIL);
-        }
-        init_rpc->type = TYPE_LMP;
-        init_rpc->chan = init_chan;
         aos_rpc_init(init_rpc);
 
         ram_alloc_set(NULL); // Use Ram allocation over RPC

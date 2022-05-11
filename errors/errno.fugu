@@ -217,6 +217,7 @@ errors libaos LIB_ERR_ {
 
     //paging
     failure PAGING_MAP          "failed to create a page mapping",
+    failure PAGING_UNMAP          "failed to ummap",
     failure PAGING_INVALID_REGION  "Tried to fixed map into an invalid region",
     failure PAGING_REGION_NODE_NOT_FOUND  "Failed to find the region node",
     failure PAGING_NO_MEMORY  "Paging ran out of memory",
@@ -378,7 +379,9 @@ errors libaos LIB_ERR_ {
     failure LMP_NOT_CONNECTED   "Channel is disconnected",
     failure MSGBUF_OVERFLOW     "Attempted to demarshall beyond bounds of message buffer",
     failure MSGBUF_CANNOT_GROW  "Failed to grow message buffer while marshalling",
-    failure MARSHALL_FAIL       "Failed to marshall arguments into buffer",
+    failure LMP_SERIALIZE       "Failed to serialize LMP message",
+    failure LMP_DESERIALIZE     "Failed to deserialize LMP message",
+    failure LMP_CLEANUP     "Failed to perform LMP cleanup",
     failure RPC_HANDLE          "Failed to handle RPC message",
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",

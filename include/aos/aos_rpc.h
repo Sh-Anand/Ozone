@@ -17,14 +17,18 @@
 
 #include <aos/aos.h>
 
-// For now, lmp chan can be directly cast to aos_chan
-struct aos_chan {
-    struct lmp_chan lc;
+enum aos_chan_type {
+    AOS_CHAN_TYPE_LMP,
+    AOS_CHAN_TYPE_UMP,
 };
 
-enum rpc_type {
-    TYPE_LMP,
-    TYPE_UMP,
+// For now, lmp chan can be directly cast to aos_chan
+struct aos_chan {
+    union {
+        struct lmp_chan lc;
+        struct ump_chan uc;
+    };
+    enum aos_chan_type type;
 };
 
 enum rpc_msg_type {
@@ -39,48 +43,98 @@ enum rpc_msg_type {
     RPC_PROCESS_GET_ALL_PIDS,
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
-    RPC_SHUTDOWN,
-	RPC_STRESS,
+    RPC_STRESS_TEST,
+    RPC_USER,
     RPC_MSG_COUNT
 };
 
 typedef uint8_t rpc_identifier_t;
-
-struct aos_rpc_msg {
-    size_t size;
-    enum rpc_msg_type type;
-    void *buff;
-};
 
 struct aos_rpc_msg_ram {
     size_t size;
     size_t alignment;
 };
 
-/* An RPC binding, which may be transported over LMP or UMP. */
 struct aos_rpc {
-    // TODO(M3): Add state
-    struct lmp_chan *chan;
-    enum rpc_type type;
+    struct aos_chan chan;
+    struct thread_mutex ongoing_call_mutex;  // not used for now
 };
 
 struct rpc_process_spawn_call_msg {
     coreid_t core;
     char cmdline[0];
-} __attribute__ ((packed));
+} __attribute__((packed));
 
 struct rpc_process_get_all_pids_return_msg {
     uint32_t count;
     domainid_t pids[0];
-} __attribute__ ((packed));
+} __attribute__((packed));
+
+struct lmp_helper {
+    struct capref payload_frame;
+    void *mapped_frame;
+};
+
+errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf,
+                       size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
+                       struct capref *ret_cap, struct lmp_helper *helper);
+
+errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref recv_cap,
+                         rpc_identifier_t *ret_type, uint8_t **ret_buf, size_t *ret_size,
+                         struct lmp_helper *helper);
+
+errval_t lmp_cleanup(struct lmp_helper *helper);
 
 /**
  * \brief Initialize an aos_rpc struct.
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
+/**
+ * Unified interface to make an RPC call.
+ * @param chan
+ * @param identifier
+ * @param call_cap
+ * @param call_buf
+ * @param call_size
+ * @param ret_cap
+ * @param ret_buf     Should be freed outside.
+ * @param ret_size    The call_size of ret_buf, CAN be larger than the payload actually
+ * sent. Should only be used to assert safe access, rather than expecting the exact
+ * call_size of the return message.
+ * @return
+ */
+errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
+                       struct capref call_cap, void *call_buf, size_t call_size,
+                       struct capref *ret_cap, void **ret_buf, size_t *ret_size);
 
+
+static inline errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                                    struct capref call_cap, void *call_buf,
+                                    size_t call_size, struct capref *ret_cap,
+                                    void **ret_buf, size_t *ret_size)
+{
+    return aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
+                         ret_buf, ret_size);
+}
+
+/**
+ * Reply a successful RPC call.
+ * @param chan
+ * @param cap
+ * @param buf
+ * @param size
+ * @return
+ */
+errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, void *buf, size_t size);
+
+/**
+ * Reply a failed RPC call.
+ * @param chan
+ * @param err
+ * @return
+ */
+errval_t aos_chan_nack(struct aos_chan *chan, errval_t err);
 
 /**
  * \brief Send a number.
@@ -102,9 +156,8 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string);
  * \brief Request a RAM capability with >= request_bits of size over the given
  * channel.
  */
-errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t bytes,
-                             size_t alignment, struct capref *retcap,
-                             size_t *ret_bytes);
+errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t bytes, size_t alignment,
+                             struct capref *retcap, size_t *ret_bytes);
 
 
 /**
@@ -124,8 +177,8 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c);
  *           path prefix) and optionally any arguments to pass to it
  * \arg newpid the process id of the newly-spawned process
  */
-errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *cmdline,
-                               coreid_t core, domainid_t *newpid);
+errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *cmdline, coreid_t core,
+                               domainid_t *newpid);
 
 
 /**
@@ -135,8 +188,7 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *cmdline,
  * that is allocated by the rpc implementation. Freeing is the caller's
  * responsibility.
  */
-errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
-                                  char **name);
+errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid, char **name);
 
 
 /**
@@ -146,8 +198,8 @@ errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
  * caller's  responsibility.
  * \arg pid_count The number of entries in `pids' if the call was successful
  */
-errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
-                                      domainid_t **pids, size_t *pid_count);
+errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan, domainid_t **pids,
+                                      size_t *pid_count);
 
 
 /**
@@ -170,4 +222,4 @@ struct aos_rpc *aos_rpc_get_process_channel(void);
  */
 struct aos_rpc *aos_rpc_get_serial_channel(void);
 
-#endif // _LIB_BARRELFISH_AOS_MESSAGES_H
+#endif  // _LIB_BARRELFISH_AOS_MESSAGES_H

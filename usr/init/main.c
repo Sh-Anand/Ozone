@@ -62,55 +62,14 @@ __attribute__((__unused__)) static errval_t handle_terminal_print(const char *st
     return SYS_ERR_OK;
 }
 
-
-static void rpc_send(void *rpc, uint8_t identifier, struct capref cap, void *buf,
-                     size_t size)
-{
-    struct lmp_chan *lc = rpc;
-    errval_t err;
-    uintptr_t words[LMP_MSG_LENGTH];
-
-    struct capref send_cap;
-    err = rpc_marshall(identifier, cap, buf, size, words, &send_cap);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err_push(err, LIB_ERR_MARSHALL_FAIL), "rpc_reply: marshall failed");
-        // XXX: maybe kill the caller here
-        return;
-    }
-
-    // Send or die
-    while (true) {
-        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1],
-                             words[2], words[3]);
-        if (err_is_fail(err)) {
-            if (lmp_err_is_transient(err)) {
-                thread_yield();
-            } else {
-                DEBUG_ERR(err, "rpc_reply: send failed");
-                // XXX: maybe kill the caller here
-                return;
-            }
-        } else {
-            break;
-        }
-    }
-}
-
-static void rpc_reply(void *rpc, struct capref cap, void *buf, size_t size)
-{
-    rpc_send(rpc, RPC_ACK, cap, buf, size);
-}
-
-static void rpc_nack(void *rpc, errval_t err)
-{
-    rpc_send(rpc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
-}
-
 // Register this function after spawning a process to register a receive handler to that
 // child process
 static void rpc_recv_handler(void *arg)
 {
-    struct lmp_chan *lc = arg;
+    struct aos_chan *chan = arg;
+    assert(chan->type == AOS_CHAN_TYPE_LMP);
+    struct lmp_chan *lc = &chan->lc;
+
     struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
     struct capref recv_cap;
     errval_t err;
@@ -127,68 +86,44 @@ static void rpc_recv_handler(void *arg)
 
     // Refill the recv_cap slot if the recv slot is used (received a recv_cap)
     if (!capref_is_null(recv_cap)) {
-        //        struct capref new_slot = NULL_CAP;
         err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
             goto RE_REGISTER;
         }
-        //        assert(!capref_is_null(new_slot));
-        //        lmp_chan_set_recv_slot(lc, new_slot);
     }
 
-    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_msg.words);
-
+    // Deserialize
+    rpc_identifier_t recv_type;
     uint8_t *recv_buf;
     size_t recv_size;
-
-    uint8_t *frame_payload = NULL;
-
-    if (recv_type == RPC_MSG_IN_FRAME) {
-        assert(!capref_is_null(recv_cap));
-
-        DEBUG_PRINTF("rpc_recv_handler: trying to map received frame in local space\n");
-
-        struct frame_identity frame_id;
-        err = frame_identify(recv_cap, &frame_id);
-        if (err_is_fail(err)) {
-            rpc_nack(lc, err_push(err, LIB_ERR_FRAME_IDENTIFY));
-            goto RE_REGISTER;
-        }
-
-        err = paging_map_frame(get_current_paging_state(), (void **)&frame_payload,
-                               frame_id.bytes, recv_cap);
-        if (err_is_fail(err)) {
-            rpc_nack(lc, err_push(err, LIB_ERR_PAGING_MAP));
-            goto RE_REGISTER;
-        }
-
-        recv_size = *((size_t *)frame_payload);
-        recv_type = *((rpc_identifier_t *)(frame_payload + sizeof(size_t)));
-        recv_buf = frame_payload + sizeof(size_t) + sizeof(rpc_identifier_t);
-
-    } else if (rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
-        rpc_nack(lc, LIB_ERR_RPC_INVALID_MSG);
+    struct lmp_helper helper;
+    err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size, &helper);
+    if (err_is_fail(err)) {
+        aos_chan_nack(chan, err_push(err, LIB_ERR_LMP_SERIALIZE));
         goto RE_REGISTER;
+    }
 
-    } else {
-        recv_buf = ((uint8_t *)recv_msg.words) + sizeof(rpc_identifier_t);
-        recv_size = recv_msg.buf.msglen * (sizeof(uintptr_t)) - sizeof(rpc_identifier_t);
+
+    // Sanity check
+    if (rpc_handlers[recv_type] == NULL) {
+        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
+        aos_chan_nack(chan, LIB_ERR_RPC_INVALID_MSG);
+        goto RE_REGISTER;
     }
 
     // DEBUG_PRINTF("rpc_recv_handler: handling %u\n", recv_type);
 
+    // Call the handler
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size,
-                                  &reply_cap);
+    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size, &reply_cap);
     if (err_is_ok(err)) {
-        rpc_reply(lc, reply_cap, reply_payload, reply_size);
+        aos_chan_ack(chan, reply_cap, reply_payload, reply_size);
     } else {
-        rpc_nack(lc, err);  // reply error
+        aos_chan_nack(chan, err);  // reply error
     }
 
     // Clean up, regardless of err is ok or fail
@@ -196,13 +131,11 @@ static void rpc_recv_handler(void *arg)
         free(reply_payload);
     }
 
-    if (frame_payload != NULL) {
-        err = paging_unmap(get_current_paging_state(), frame_payload);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "rpc_recv_handler: failed to unmap");
-        }
+    // Deserialization cleanup
+    err = lmp_cleanup(&helper);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "rpc_recv_handler: failed to clean up");
     }
-
 
 RE_REGISTER:
     err = lmp_chan_register_recv(lc, get_default_waitset(),

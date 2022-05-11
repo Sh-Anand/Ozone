@@ -35,7 +35,6 @@ errval_t proc_list_alloc(struct proc_list *ps, struct proc_node **ret)
         // Reuse node->pid
     }
     assert(node != NULL);
-    lmp_chan_init(&node->lc);
 
     LIST_INSERT_HEAD(&ps->running, node, link);
     ps->running_count++;
