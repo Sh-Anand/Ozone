@@ -333,6 +333,11 @@ HANDLER(terminal_putchar_handler)
     }
 }
 
+#undef HANDLER
+#undef CAST_IN_MSG
+#undef MALLOC_OUT_MSG_WITH_SIZE
+#undef MALLOC_OUT_MSG
+
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,

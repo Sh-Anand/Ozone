@@ -62,9 +62,7 @@ __attribute__((__unused__)) static errval_t handle_terminal_print(const char *st
     return SYS_ERR_OK;
 }
 
-// Register this function after spawning a process to register a receive handler to that
-// child process
-static void rpc_recv_handler(void *arg)
+static void rpc_lmp_recv_handler(void *arg)
 {
     struct aos_chan *chan = arg;
     assert(chan->type == AOS_CHAN_TYPE_LMP);
@@ -80,7 +78,7 @@ static void rpc_recv_handler(void *arg)
         if (lmp_err_is_transient(err)) {
             goto RE_REGISTER;
         }
-        DEBUG_ERR(err, "rpc_recv_handler: unhandled error from lmp_chan_recv");
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: unhandled error from lmp_chan_recv");
         // XXX: maybe kill the caller here
     }
 
@@ -88,7 +86,7 @@ static void rpc_recv_handler(void *arg)
     if (!capref_is_null(recv_cap)) {
         err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "rpc_recv_handler: fail to alloc new slot");
+            DEBUG_ERR(err, "rpc_lmp_recv_handler: fail to alloc new slot");
             // XXX: maybe kill the caller here
             goto RE_REGISTER;
         }
@@ -108,12 +106,12 @@ static void rpc_recv_handler(void *arg)
 
     // Sanity check
     if (rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("rpc_recv_handler: invalid recv_type %u\n", recv_type);
+        DEBUG_PRINTF("rpc_lmp_recv_handler: invalid recv_type %u\n", recv_type);
         aos_chan_nack(chan, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
     }
 
-    // DEBUG_PRINTF("rpc_recv_handler: handling %u\n", recv_type);
+    // DEBUG_PRINTF("rpc_lmp_recv_handler: handling %u\n", recv_type);
 
     // Call the handler
     void *reply_payload = NULL;
@@ -134,14 +132,14 @@ static void rpc_recv_handler(void *arg)
     // Deserialization cleanup
     err = lmp_cleanup(&helper);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_recv_handler: failed to clean up");
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: failed to clean up");
     }
 
 RE_REGISTER:
     err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(rpc_recv_handler, arg));
+                                 MKCLOSURE(rpc_lmp_recv_handler, arg));
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_recv_handler: error re-registering handler");
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: error re-registering handler");
         // XXX: maybe kill the caller here
     }
 }
@@ -375,7 +373,7 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "initialize_ram_alloc");
     }
 
-    spawn_set_rpc_handler(rpc_recv_handler);
+    spawn_set_rpc_handler(rpc_lmp_recv_handler);
 
     // TODO: initialize mem allocator, vspace management here
 
@@ -567,7 +565,7 @@ static int app_main(int argc, char *argv[])
         abort();
     }
 
-    spawn_set_rpc_handler(rpc_recv_handler);
+    spawn_set_rpc_handler(rpc_lmp_recv_handler);
 
     grading_test_early();
 
