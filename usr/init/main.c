@@ -33,6 +33,9 @@
 #include <spawn/spawn.h>
 #include "rpc_handlers.h"
 
+#include <maps/imx8x_map.h>
+#include <maps/qemu_map.h>
+
 struct bootinfo *bi;
 
 coreid_t my_core_id;
@@ -41,6 +44,9 @@ struct platform_info platform_info;
 #define URPC_FRAME_SIZE (UMP_CHAN_SHARED_FRAME_SIZE * 2)
 struct ump_chan *urpc_server[MAX_COREID] = { NULL };
 struct ump_chan *urpc_client[MAX_COREID] = { NULL };
+
+struct capref dev_cap_sdhc2;
+struct capref dev_cap_enet;
 
 /**
  * @brief TODO: make use of this function
@@ -450,6 +456,30 @@ static int bsp_main(int argc, char *argv[])
     grading_test_early();
 
     // TODO: Spawn system processes, boot second core etc. here
+	
+	// TODO: TEMPORARY: create device capabilities for non shell projects
+	struct capref dev_cap_full = {
+		.cnode = { .croot = CPTR_ROOTCN, .cnode = CPTR_TASKCN_BASE, .level = CNODE_TYPE_OTHER },
+		.slot = TASKCN_SLOT_DEV
+	};
+	struct capability dev_cap;
+	cap_direct_identify(dev_cap_full, &dev_cap);
+	struct capref nullref = { .slot = 0, .cnode = { .cnode = 0, .croot = 0, .level = 0 } };
+	char buf[1024];
+	
+	switch (platform_info.platform) {
+	case PI_PLATFORM_IMX8X:
+		slot_alloc(&dev_cap_sdhc2);
+		cap_retype(dev_cap_sdhc2, dev_cap_full, IMX8X_SDHC2_BASE - dev_cap.u.devframe.base, ObjType_DevFrame, IMX8X_SDHC_SIZE, 1);
+		
+		debug_print_cap_at_capref(buf, 1023, dev_cap_sdhc2);
+		DEBUG_PRINTF("SDHC2 capability: %s\n", buf);
+		break;
+	default:
+		dev_cap_sdhc2 = nullref;
+		dev_cap_enet = nullref;
+		break;
+	}
 
     // Booting second core
     for (int i = 1; i < 4; i++) {
