@@ -68,7 +68,8 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
     if (*((rpc_identifier_t *)ret_payload) == RPC_ACK) {
         if (ret_payload != NULL) {
             MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
-            memcpy(reply, ret_payload + sizeof(rpc_identifier_t), ret_size - sizeof(rpc_identifier_t));
+            memcpy(reply, ret_payload + sizeof(rpc_identifier_t),
+                   ret_size - sizeof(rpc_identifier_t));
         }
         err = SYS_ERR_OK;
         goto RET;
@@ -118,10 +119,13 @@ HANDLER(str_msg_handler)
         // TODO: should check against in_size against malicious calls
         CAST_IN_MSG(str, char);
         grading_rpc_handler_string(str);
+        // DEBUG_PRINTF("in_size = %lu\n", in_size);
+        DEBUG_PRINTF("Received string: \"%s\"\n", str);
         int len = printf("Received string: \"%s\"\n", str);
 		printf("Printed %d characters\n", len);
         return SYS_ERR_OK;
     } else {
+        // DEBUG_PRINTF("in_size = %lu\n", in_size);
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
 }
@@ -135,14 +139,14 @@ HANDLER(ram_request_msg_handler)
     errval_t err = aos_ram_alloc_aligned(out_cap, ram_msg->size, ram_msg->alignment);
     if (err == MM_ERR_NO_MEMORY) {
         // Request RAM from core 0
-        DEBUG_PRINTF("no enough memory locally, request core 0\n");
+        DEBUG_PRINTF("no enough memory locally, requesting core 0...\n");
 
         // XXX: trick to rewrite identifier
         *(((uint8_t *)in_payload) - 1) = INTERNAL_RPC_REMOTE_RAM_REQUEST;
 
         // Request for twice size
         size_t original_request_size = ram_msg->size;
-        ram_msg->size *= 2;
+        // ram_msg->size *= 2;
 
         // Request RAM from core 0
         void *reply_payload = NULL;
@@ -202,6 +206,9 @@ HANDLER(remote_ram_request_msg_handler)
     CAST_IN_MSG(ram_msg, struct aos_rpc_msg_ram);
     errval_t err;
 
+    DEBUG_PRINTF("received remote RAM request, size = 0x%lx, alignment = 0x%lx\n",
+                 ram_msg->size, ram_msg->alignment);
+
     // Allocate RAM locally
     struct capref cap;
     err = aos_ram_alloc_aligned(&cap, ram_msg->size, ram_msg->alignment);
@@ -216,6 +223,9 @@ HANDLER(remote_ram_request_msg_handler)
         return err_push(err, LIB_ERR_CAP_IDENTIFY);
     }
     assert(c.type == ObjType_RAM);
+
+    DEBUG_PRINTF("giving out RAM 0x%lx/0x%lx\n",
+                 c.u.ram.base, c.u.ram.bytes);
 
     MALLOC_OUT_MSG(reply, struct RAM);
     reply->base = c.u.ram.base;

@@ -391,9 +391,11 @@ int main(int argc, char *argv[])
                            "  send_num\n"
                            "  send_str\n"
                            "  send_large_str\n"
+                           "  send_very_large_str\n"
                            "  get_ram\n"
                            "  get_large_ram\n"
                            "  get_pids\n"
+                           "  rpc_stress_test\n"
                            "Paging:\n"
                            "  fault_read\n"
                            "  fault_write\n"
@@ -485,7 +487,7 @@ int main(int argc, char *argv[])
                 } else if (strcmp(buf, "get_ram") == 0 || strcmp(buf, "get_large_ram") == 0 ) {
                     size_t size = 16384;
                     if (strcmp(buf, "get_large_ram") == 0) {
-                        size = 256 * 1024 * 1024;
+                        size = 64 * 1024 * 1024;
                     }
 
                     printf("Trying to get a frame of size %lu...\n", size);
