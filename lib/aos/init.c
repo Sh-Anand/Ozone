@@ -265,7 +265,6 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
 
         /* send local ep to init */
-        // TODO: change to special format since we are reusing
         err = lmp_chan_send1(init_chan, LMP_SEND_FLAGS_DEFAULT, init_chan->local_cap,
                              get_dispatcher_generic(curdispatcher())->domain_id);
         if (err_is_fail(err)) {

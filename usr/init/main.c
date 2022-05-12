@@ -28,6 +28,9 @@
 #include <aos/capabilities.h>
 #include <ringbuffer/ringbuffer.h>
 
+#include <maps/imx8x_map.h>
+#include <maps/qemu_map.h>
+
 #include "mem_alloc.h"
 #include <barrelfish_kpi/platform.h>
 #include <spawn/spawn.h>
@@ -41,6 +44,8 @@ struct platform_info platform_info;
 #define URPC_FRAME_SIZE (UMP_CHAN_SHARED_FRAME_SIZE * 2)
 struct ump_chan *urpc_server[MAX_COREID] = { NULL };
 struct ump_chan *urpc_client[MAX_COREID] = { NULL };
+
+extern struct aos_rpc *terminal_server_channel;
 
 /**
  * @brief TODO: make use of this function
@@ -426,6 +431,74 @@ static errval_t boot_core(coreid_t mpid)
     return SYS_ERR_OK;
 }
 
+static errval_t setup_uart3_frame(struct capref dev_cap, genpaddr_t base, gensize_t bytes)
+{
+	errval_t err;
+	
+	struct capref uart_frame_cap;
+	
+	// spawn terminal server
+	struct spawninfo si;
+	domainid_t pid;
+	DEBUG_PRINTF("Spawning Terminal Process...\n");
+	err = spawn_load_cmdline("terminal", &si, &pid);
+	DEBUG_PRINTF("Terminal Process Spawned (err: %s).\n", err_getstring(err));
+	
+	// allocate slot for capability
+	err = slot_alloc(&uart_frame_cap);
+	if (err_is_fail(err)) {
+		DEBUG_PRINTF("Slot allocation for uart failed.\n");
+		return err;
+	}
+	
+	// retype relevant region of device capability for the uart
+	DEBUG_PRINTF("Retyping device frame capability...\n");
+	err = cap_retype(uart_frame_cap, dev_cap, base, ObjType_DevFrame, bytes, 1);
+	if (err_is_fail(err)) {
+		USER_PANIC_ERR(err, "cap_retype for uart failed (offset: %p, size: %p)!\n", base, bytes);
+		return err;
+	}
+	
+	// TODO: pass capability to the terminal server for mapping
+	DEBUG_PRINTF("Initializing LMP channel...\n");
+	struct lmp_chan *chan = (struct lmp_chan*)malloc(sizeof(struct aos_rpc));
+	lmp_chan_init(chan);
+	
+	DEBUG_PRINTF("Sending local endpoint cap to terminal...(si.lc: %p)\n", si.lc);
+	err = lmp_chan_send0(si.lc, LMP_SEND_FLAGS_DEFAULT, chan->local_cap);
+	
+	struct capref rcap;
+	err = slot_alloc(&rcap);
+	if (err_is_fail(err)) {
+		return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
+	}
+	struct lmp_recv_msg *rmsg = (struct lmp_recv_msg*)malloc(sizeof(struct lmp_recv_msg));
+	
+	lmp_chan_alloc_recv_slot(chan);
+	
+	DEBUG_PRINTF("Receiving remote endpoint cap from terminal...\n");
+	while (!lmp_chan_can_recv(chan)) {
+		err = event_dispatch(get_default_waitset());
+	}
+	err = lmp_chan_recv(chan, rmsg, &rcap);
+	
+	DEBUG_PRINTF("Accepting channel...\n");
+	err = lmp_chan_accept(chan, 256, rcap);
+	
+	struct aos_rpc *rpc_terminal = (struct aos_rpc*)malloc(sizeof(struct aos_rpc));
+	terminal_server_channel = rpc_terminal;
+	
+	DEBUG_PRINTF("INIT accepted UART channel\n");
+	
+	return SYS_ERR_OK;
+}
+/*
+static errval_t setup_sdhc2_frame(struct capref dev_cap, genpaddr_t base, gensize_t bytes)
+{
+	
+	return SYS_ERR_OK;
+}*/
+
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -448,8 +521,38 @@ static int bsp_main(int argc, char *argv[])
 
     // Grading
     grading_test_early();
-
+	
+	// get and retype capability for uart
+	DEBUG_PRINTF("###############################################################################################################################\n"); // make this line well visible in the output
+	struct capref dev_cnode = {
+		.cnode = {
+			.croot = CPTR_ROOTCN,
+			.cnode = ROOTCN_SLOT_ADDR(ROOTCN_SLOT_TASKCN),
+			.level = 1
+		},
+		.slot = TASKCN_SLOT_DEV
+	};
+	struct capability cap;
+	cap_direct_identify(dev_cnode, &cap);
+	
+	assert (cap.type == ObjType_DevFrame);
+	
     // TODO: Spawn system processes, boot second core etc. here
+	// setup capabilities and start device drivers
+	switch (platform_info.platform) {
+		case PI_PLATFORM_IMX8X:
+			err = setup_uart3_frame(dev_cnode, IMX8X_UART3_BASE - cap.u.devframe.base, IMX8X_UART_SIZE);
+			// TODO: handle error if uart capability setup fails
+			break;
+		case PI_PLATFORM_QEMU:
+			
+			break;
+		default: // this *should*(tm) never happen
+			DEBUG_PRINTF("FATAL ERROR: unknown platform: %d!\n", platform_info.platform);
+			exit(-1);
+	}
+	
+	DEBUG_PRINTF("Type: %d, Base: %p\n", cap.type, cap.u.devframe.base);
 
     // Booting second core
     for (int i = 1; i < 4; i++) {

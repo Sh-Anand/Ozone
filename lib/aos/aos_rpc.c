@@ -23,6 +23,8 @@ static bool recv_slot_not_refilled = false;
 
 static struct thread_mutex reserved_slot_mutex;  // protect rpc_reserved_recv_slot
 
+struct aos_rpc *terminal_server_channel;
+
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
 errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap, void *buf,
@@ -478,7 +480,7 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
     // TODO: Return channel to talk to serial driver/terminal process (whoever
     // implements print/read functionality)
     // debug_printf("aos_rpc_get_serial_channel NYI\n");
-    return aos_rpc_get_init_channel();  // XXX: For now return the init channel, since the
+    return terminal_server_channel;  // XXX: For now return the init channel, since the
                                         // current serial driver is handled in init
 }
 

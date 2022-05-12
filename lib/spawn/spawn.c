@@ -313,6 +313,7 @@ static errval_t setup_endpoint(struct spawninfo *si)
     if (rpc_handler == NULL) {
         return SPAWN_ERR_RPC_HANDLER_NOT_SET;
     }
+	DEBUG_PRINTF("Setting up endpoint...\n");
 
     errval_t err;
 
@@ -340,6 +341,7 @@ static errval_t setup_endpoint(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);  // XXX: not this one
     }
+	DEBUG_PRINTF("Endpoint setup done.\n");
 
     return SYS_ERR_OK;
 }
@@ -668,7 +670,8 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
         return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);
     }
     node->dispatcher = si->dispatcher_cap_in_parent;
-
+	
+	DEBUG_PRINTF("testing path...\n");
     // Setup endpoint
     err = setup_endpoint(si);
     if (err_is_fail(err)) {
