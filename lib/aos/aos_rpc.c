@@ -158,88 +158,96 @@ errval_t lmp_cleanup(struct lmp_helper *helper)
     return SYS_ERR_OK;
 }
 
-static bool reserved_slot_is_null_thread_safe(void)
+static bool reserved_slot_is_null_thread_safe(struct aos_chan *chan)
 {
     bool reserved_slot_is_null;
-    THREAD_MUTEX_ENTER(&reserved_slot_mutex)
+    THREAD_MUTEX_ENTER(&chan->reserved_slot_mutex)
     {
-        reserved_slot_is_null = (capref_is_null(rpc_reserved_recv_slot));
+        reserved_slot_is_null = (capref_is_null(chan->reserved_slot));
     }
-    THREAD_MUTEX_EXIT(&reserved_slot_mutex)
+    THREAD_MUTEX_EXIT(&chan->reserved_slot_mutex)
     return reserved_slot_is_null;
 }
 
-static errval_t refill_reserved_slot_thread_safe(void)
+static errval_t refill_reserved_slot_thread_safe(struct aos_chan *chan)
 {
     struct capref slot = NULL_CAP;
     errval_t err = slot_alloc(&slot);
     // Cannot lock on slot_alloc since it may trigger refill, use a local variable instead
 
-    THREAD_MUTEX_ENTER(&reserved_slot_mutex)
+    THREAD_MUTEX_ENTER(&chan->reserved_slot_mutex)
     {
-        rpc_reserved_recv_slot = slot;
+        chan->reserved_slot = slot;
     }
-    THREAD_MUTEX_EXIT(&reserved_slot_mutex)
+    THREAD_MUTEX_EXIT(&chan->reserved_slot_mutex)
 
     return err;
 }
 
-static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t identifier,
-                                     struct capref call_cap, void *call_buf,
-                                     size_t call_size, struct capref *ret_cap,
-                                     void **ret_buf, size_t *ret_size)
+static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier,
+                             struct capref cap, void *buf, size_t size)
 {
     errval_t err;
-
-    if (reserved_slot_is_null_thread_safe()) {
-        // This can happen when the current send is triggered by a slot refill
-        // In this case, slot allocator is willing to give out a slot as its internal
-        // refill flag is set
-        err = refill_reserved_slot_thread_safe();
-        if (err_is_fail(err)) {
-            DEBUG_PRINTF("rpc_lmp_call_general: failed to alloc "
-                         "rpc_reserved_recv_slot\n");
-            return err_push(err, LIB_ERR_SLOT_ALLOC);
-        }
-    }
-
-
-    uintptr_t send_words[LMP_MSG_LENGTH];
+    uintptr_t words[LMP_MSG_LENGTH];
     struct capref send_cap;
-    struct lmp_helper send_helper;
+    struct lmp_helper helper;
 
-    // marshall arguments into buffer/frame
-    err = lmp_serialize(identifier, call_cap, call_buf, call_size, send_words, &send_cap, &send_helper);
-
+    err = lmp_serialize(identifier, cap, buf, size, words, &send_cap, &helper);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_SERIALIZE);
     }
 
-    // send or die
+    // Send or die
     while (true) {
-        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, send_cap, send_words[0],
-                             send_words[1], send_words[2], send_words[3]);
-
+        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1],
+                             words[2], words[3]);
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
                 thread_yield();
             } else {
-                return err;
+                return err_push(err, LIB_ERR_LMP_CHAN_SEND);
             }
         } else {
             break;
         }
     }
 
+    // Clean up
+    err = lmp_cleanup(&helper);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_call_general: failed to send\n");
-        return err;
+        return err_push(err, LIB_ERR_LMP_CLEANUP);
     }
 
-    err = lmp_cleanup(&send_helper);
+    return SYS_ERR_OK;
+}
+
+static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
+                                     struct capref call_cap, void *call_buf,
+                                     size_t call_size, struct capref *ret_cap,
+                                     void **ret_buf, size_t *ret_size)
+{
+    assert(chan->type == AOS_CHAN_TYPE_LMP);
+    struct lmp_chan *lc = &chan->lc;
+
+    errval_t err;
+
+    if (reserved_slot_is_null_thread_safe(chan)) {
+        // This can happen when the current send is triggered by a slot refill
+        // In this case, slot allocator is willing to give out a slot as its internal
+        // refill flag is set
+        err = refill_reserved_slot_thread_safe(chan);
+        if (err_is_fail(err)) {
+            DEBUG_PRINTF("rpc_lmp_call: failed to alloc "
+                         "rpc_reserved_recv_slot\n");
+            return err_push(err, LIB_ERR_SLOT_ALLOC);
+        }
+    }
+
+    // Make the call
+    err = rpc_lmp_send(lc, identifier, call_cap, call_buf, call_size);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_call_general: failed to cleanup send_helper\n");
-        // Continue
+        DEBUG_ERR(err, "rpc_lmp_call: failed to send\n");
+        return err;
     }
 
     // Receive acknowledgement and/or return message
@@ -259,7 +267,7 @@ static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t ident
     }
 
     if (!capref_is_null(recv_cap)) {
-        // This can happen when the current call results from slot_alloc
+        // Reserved slot can be NULL_CAP when the current call results from slot_alloc
         if (!reserved_slot_is_null_thread_safe()) {
             THREAD_MUTEX_ENTER(&reserved_slot_mutex)
             {
@@ -273,11 +281,12 @@ static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t ident
             // Refill rpc_reserved_recv_slot
             err = refill_reserved_slot_thread_safe();
             if (err_is_fail(err)) {
-                DEBUG_PRINTF("rpc_lmp_call_general: failed to alloc "
+                DEBUG_PRINTF("rpc_lmp_call: failed to alloc "
                              "rpc_reserved_recv_slot\n");
                 return err_push(err, LIB_ERR_SLOT_ALLOC);
             }
 
+            // Notice: recv slot, not reserved slot
             if (recv_slot_not_refilled) {
                 err = lmp_chan_alloc_recv_slot(lc);
                 if (err_is_fail(err)) {
@@ -314,7 +323,7 @@ static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t ident
             if (ret_cap) {
                 *ret_cap = recv_cap;
             } else {
-                DEBUG_PRINTF("rpc_lmp_call_general: received a cap but is given up!\n");
+                DEBUG_PRINTF("rpc_lmp_call: received a cap but is given up!\n");
             }
         }
         err = SYS_ERR_OK;
@@ -323,7 +332,7 @@ static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t ident
         err = *((errval_t *)recv_buf);
 
     } else {
-        DEBUG_PRINTF("rpc_lmp_call_general: unknown recv_type %u\n", recv_type);
+        DEBUG_PRINTF("rpc_lmp_call: unknown recv_type %u\n", recv_type);
         err = LIB_ERR_RPC_INVALID_MSG;
     }
 
@@ -331,49 +340,11 @@ static errval_t rpc_lmp_call_general(struct lmp_chan *lc, rpc_identifier_t ident
     // Unmap frame if needed
     errval_t err2 = lmp_cleanup(&recv_helper);
     if (err_is_fail(err2)) {
-        DEBUG_ERR(err2, "rpc_lmp_call_general: failed to clean up\n");
+        DEBUG_ERR(err2, "rpc_lmp_call: failed to clean up\n");
         // Don't touch err
     }
 
     return err;
-}
-
-static errval_t rpc_lmp_respond(struct lmp_chan *lc, uint8_t identifier,
-                                struct capref cap, void *buf, size_t size)
-{
-    errval_t err;
-    uintptr_t words[LMP_MSG_LENGTH];
-    struct lmp_helper serialization_helper;
-
-    struct capref send_cap;
-    err = lmp_serialize(identifier, cap, buf, size, words, &send_cap,
-                        &serialization_helper);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_SERIALIZE);
-    }
-
-    // Send or die
-    while (true) {
-        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1],
-                             words[2], words[3]);
-        if (err_is_fail(err)) {
-            if (lmp_err_is_transient(err)) {
-                thread_yield();
-            } else {
-                return err_push(err, LIB_ERR_LMP_CHAN_SEND);
-            }
-        } else {
-            break;
-        }
-    }
-
-    // Clean up
-    err = lmp_cleanup(&serialization_helper);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_CLEANUP);
-    }
-
-    return SYS_ERR_OK;
 }
 
 errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
@@ -382,8 +353,8 @@ errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_call_general(&chan->lc, identifier, call_cap, call_buf,
-                                    call_size, ret_cap, ret_buf, ret_size);
+        return rpc_lmp_call(&chan->lc, identifier, call_cap, call_buf, call_size, ret_cap,
+                            ret_buf, ret_size);
     case AOS_CHAN_TYPE_UMP:
         return LIB_ERR_NOT_IMPLEMENTED;
     default:
@@ -395,7 +366,7 @@ errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, void *buf, size_
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_respond(&chan->lc, RPC_ACK, cap, buf, size);
+        return rpc_lmp_send(&chan->lc, RPC_ACK, cap, buf, size);
     case AOS_CHAN_TYPE_UMP:
         return LIB_ERR_NOT_IMPLEMENTED;
     default:
@@ -407,7 +378,7 @@ errval_t aos_chan_nack(struct aos_chan *chan, errval_t err)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_respond(&chan->lc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
+        return rpc_lmp_send(&chan->lc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
     case AOS_CHAN_TYPE_UMP:
         return LIB_ERR_NOT_IMPLEMENTED;
     default:

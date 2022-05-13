@@ -18,17 +18,20 @@
 #include <aos/aos.h>
 
 enum aos_chan_type {
+    AOS_CHAN_TYPE_UNKNOWN,
     AOS_CHAN_TYPE_LMP,
     AOS_CHAN_TYPE_UMP,
 };
 
-// For now, lmp chan can be directly cast to aos_chan
 struct aos_chan {
+    enum aos_chan_type type;
     union {
         struct lmp_chan lc;
         struct ump_chan uc;
     };
-    enum aos_chan_type type;
+    struct capref reserved_slot;
+    struct thread_mutex reserved_slot_mutex;
+    bool recv_slot_not_refilled;
 };
 
 enum rpc_msg_type {
@@ -44,6 +47,7 @@ enum rpc_msg_type {
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
     RPC_STRESS_TEST,
+    RPC_BIND_NAMESERVER,
     RPC_USER,
     RPC_MSG_COUNT
 };
