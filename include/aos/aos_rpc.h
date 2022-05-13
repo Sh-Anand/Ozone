@@ -29,9 +29,6 @@ struct aos_chan {
         struct lmp_chan lc;
         struct ump_chan uc;
     };
-    struct capref reserved_slot;
-    struct thread_mutex reserved_slot_mutex;
-    bool recv_slot_not_refilled;
 };
 
 enum rpc_msg_type {
@@ -61,7 +58,6 @@ struct aos_rpc_msg_ram {
 
 struct aos_rpc {
     struct aos_chan chan;
-    struct thread_mutex ongoing_call_mutex;  // not used for now
 };
 
 struct rpc_process_spawn_call_msg {

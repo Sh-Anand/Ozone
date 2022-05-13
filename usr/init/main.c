@@ -78,18 +78,52 @@ static void rpc_lmp_recv_handler(void *arg)
         if (lmp_err_is_transient(err)) {
             goto RE_REGISTER;
         }
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: unhandled error from lmp_chan_recv");
-        // XXX: maybe kill the caller here
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: unhandled error from lmp_chan_recv\n");
+        goto FAILURE;
     }
 
     // Refill the recv_cap slot if the recv slot is used (received a recv_cap)
     if (!capref_is_null(recv_cap)) {
         err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "rpc_lmp_recv_handler: fail to alloc new slot");
-            // XXX: maybe kill the caller here
-            goto RE_REGISTER;
+            DEBUG_ERR(err, "rpc_lmp_recv_handler: fail to alloc new slot\n");
+            goto FAILURE;
         }
+    }
+
+    // If the channel is not setup yet, set it up
+    if (lc->connstate == LMP_BIND_WAIT) {
+        // Check the received endpoint
+        if (capref_is_null(recv_cap)) {
+            DEBUG_PRINTF("rpc_lmp_recv_handler (binding): no cap received\n");
+            goto FAILURE;
+        }
+        struct capability capability;
+        err = cap_direct_identify(recv_cap, &capability);
+        if (capref_is_null(recv_cap)) {
+            DEBUG_ERR(err, "rpc_lmp_recv_handler (binding): cap_direct_identify "
+                           "failed\n");
+            goto FAILURE;
+        }
+        if (capability.type != ObjType_EndPointLMP) {
+            DEBUG_ERR(err, "rpc_lmp_recv_handler (binding): recv cap type %u\n",
+                      capability.type);
+            goto FAILURE;
+        }
+        lc->remote_cap = recv_cap;
+        lc->connstate = LMP_CONNECTED;
+
+        // Protocol: payload is the domain ID
+//        DEBUG_PRINTF("rpc_lmp_recv_handler: bind process %lu\n", recv_msg.words[0]);
+
+        // Ack
+        err = aos_chan_ack(chan, NULL_CAP, NULL, 0);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "aos_chan_ack failed\n");
+            goto FAILURE;
+        }
+        DEBUG_PRINTF("rpc_lmp_recv_handler: bind process %lu\n", recv_msg.words[0]);
+        goto RE_REGISTER;
     }
 
     // Deserialize
@@ -117,7 +151,8 @@ static void rpc_lmp_recv_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size, &reply_cap);
+    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size,
+                                  &reply_cap);
     if (err_is_ok(err)) {
         aos_chan_ack(chan, reply_cap, reply_payload, reply_size);
     } else {
@@ -132,14 +167,16 @@ static void rpc_lmp_recv_handler(void *arg)
     // Deserialization cleanup
     err = lmp_cleanup(&helper);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: failed to clean up");
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: failed to clean up\n");
     }
 
+FAILURE:
+    // XXX: maybe kill the caller here
 RE_REGISTER:
     err = lmp_chan_register_recv(lc, get_default_waitset(),
                                  MKCLOSURE(rpc_lmp_recv_handler, arg));
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: error re-registering handler");
+        DEBUG_ERR(err, "rpc_lmp_recv_handler: error re-registering handler\n");
         // XXX: maybe kill the caller here
     }
 }

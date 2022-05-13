@@ -16,11 +16,6 @@
 #include <aos/aos_rpc.h>
 #include <aos/capabilities.h>
 
-struct capref rpc_reserved_recv_slot;  // all 0 is NULL_CAP
-static bool recv_slot_not_refilled = false;
-
-static struct thread_mutex reserved_slot_mutex;  // protect rpc_reserved_recv_slot
-
 #define LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE                                                  \
     (LMP_MSG_LENGTH * sizeof(uintptr_t) - sizeof(rpc_identifier_t))
 
@@ -158,34 +153,8 @@ errval_t lmp_cleanup(struct lmp_helper *helper)
     return SYS_ERR_OK;
 }
 
-static bool reserved_slot_is_null_thread_safe(struct aos_chan *chan)
-{
-    bool reserved_slot_is_null;
-    THREAD_MUTEX_ENTER(&chan->reserved_slot_mutex)
-    {
-        reserved_slot_is_null = (capref_is_null(chan->reserved_slot));
-    }
-    THREAD_MUTEX_EXIT(&chan->reserved_slot_mutex)
-    return reserved_slot_is_null;
-}
-
-static errval_t refill_reserved_slot_thread_safe(struct aos_chan *chan)
-{
-    struct capref slot = NULL_CAP;
-    errval_t err = slot_alloc(&slot);
-    // Cannot lock on slot_alloc since it may trigger refill, use a local variable instead
-
-    THREAD_MUTEX_ENTER(&chan->reserved_slot_mutex)
-    {
-        chan->reserved_slot = slot;
-    }
-    THREAD_MUTEX_EXIT(&chan->reserved_slot_mutex)
-
-    return err;
-}
-
-static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier,
-                             struct capref cap, void *buf, size_t size)
+static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier, struct capref cap,
+                             void *buf, size_t size)
 {
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
@@ -199,7 +168,7 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier,
 
     // Send or die
     while (true) {
-        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, cap, words[0], words[1],
+        err = lmp_chan_send4(lc, LMP_SEND_FLAGS_DEFAULT, send_cap, words[0], words[1],
                              words[2], words[3]);
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
@@ -222,24 +191,22 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier,
 }
 
 static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                                     struct capref call_cap, void *call_buf,
-                                     size_t call_size, struct capref *ret_cap,
-                                     void **ret_buf, size_t *ret_size)
+                             struct capref call_cap, void *call_buf, size_t call_size,
+                             struct capref *ret_cap, void **ret_buf, size_t *ret_size)
 {
     assert(chan->type == AOS_CHAN_TYPE_LMP);
     struct lmp_chan *lc = &chan->lc;
 
     errval_t err;
 
-    if (reserved_slot_is_null_thread_safe(chan)) {
+    if (capref_is_null(lc->endpoint->recv_slot)) {
         // This can happen when the current send is triggered by a slot refill
         // In this case, slot allocator is willing to give out a slot as its internal
         // refill flag is set
-        err = refill_reserved_slot_thread_safe(chan);
+        err = lmp_chan_alloc_recv_slot(lc);
         if (err_is_fail(err)) {
-            DEBUG_PRINTF("rpc_lmp_call: failed to alloc "
-                         "rpc_reserved_recv_slot\n");
-            return err_push(err, LIB_ERR_SLOT_ALLOC);
+            DEBUG_PRINTF("rpc_lmp_call: lmp_chan_alloc_recv_slot failed (case 2)\n");
+            return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
         }
     }
 
@@ -266,36 +233,13 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
         }
     }
 
+    // Refill recv cap if the slot is consumed
     if (!capref_is_null(recv_cap)) {
-        // Reserved slot can be NULL_CAP when the current call results from slot_alloc
-        if (!reserved_slot_is_null_thread_safe()) {
-            THREAD_MUTEX_ENTER(&reserved_slot_mutex)
-            {
-                // Use the reserved slot first, since slot_alloc can trigger a refill
-                // which calls rpc ram alloc, and then we have no slot to receive the call_cap
-                lmp_chan_set_recv_slot(lc, rpc_reserved_recv_slot);
-                rpc_reserved_recv_slot = NULL_CAP;
-            }
-            THREAD_MUTEX_EXIT(&reserved_slot_mutex)
-
-            // Refill rpc_reserved_recv_slot
-            err = refill_reserved_slot_thread_safe();
-            if (err_is_fail(err)) {
-                DEBUG_PRINTF("rpc_lmp_call: failed to alloc "
-                             "rpc_reserved_recv_slot\n");
-                return err_push(err, LIB_ERR_SLOT_ALLOC);
-            }
-
-            // Notice: recv slot, not reserved slot
-            if (recv_slot_not_refilled) {
-                err = lmp_chan_alloc_recv_slot(lc);
-                if (err_is_fail(err)) {
-                    return err;
-                }
-            }
-
-        } else {
-            recv_slot_not_refilled = true;
+        lc->endpoint->recv_slot = NULL_CAP;  // clear it to trigger the force refill above
+        err = lmp_chan_alloc_recv_slot(lc);  // this may trigger another RPC call
+        if (err_is_fail(err)) {
+            DEBUG_PRINTF("rpc_lmp_call: lmp_chan_alloc_recv_slot failed (case 1)\n");
+            return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
         }
     }
 
@@ -304,7 +248,8 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     size_t recv_size;
     struct lmp_helper recv_helper;
 
-    err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size, &recv_helper);
+    err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size,
+                          &recv_helper);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_DESERIALIZE);
     }
@@ -348,12 +293,12 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
 }
 
 errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                              struct capref call_cap, void *call_buf, size_t call_size,
-                              struct capref *ret_cap, void **ret_buf, size_t *ret_size)
+                       struct capref call_cap, void *call_buf, size_t call_size,
+                       struct capref *ret_cap, void **ret_buf, size_t *ret_size)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_call(&chan->lc, identifier, call_cap, call_buf, call_size, ret_cap,
+        return rpc_lmp_call(chan, identifier, call_cap, call_buf, call_size, ret_cap,
                             ret_buf, ret_size);
     case AOS_CHAN_TYPE_UMP:
         return LIB_ERR_NOT_IMPLEMENTED;
@@ -392,7 +337,7 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
     errval_t err = aos_rpc_call(rpc, RPC_NUM, NULL_CAP, &num, sizeof(num), NULL, NULL,
                                 NULL);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_RPC_SEND_NUM);
+        return err;
     }
 
     return SYS_ERR_OK;
@@ -403,7 +348,7 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
     errval_t err = aos_rpc_call(rpc, RPC_STR, NULL_CAP, (void *)string,
                                 strlen(string) + 1, NULL, NULL, NULL);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_RPC_SEND_STR);
+        return err;
     }
 
     return SYS_ERR_OK;
@@ -414,7 +359,7 @@ errval_t aos_rpc_stress_test(struct aos_rpc *rpc, uint8_t *val, size_t len)
     errval_t err = aos_rpc_call(rpc, RPC_STRESS_TEST, NULL_CAP, (void *)val, len, NULL,
                                 NULL, NULL);
     if (err_is_fail(err))
-        return err_push(err, LIB_ERR_RPC_SEND_STR);
+        return err;
 
     return SYS_ERR_OK;
 }
@@ -422,6 +367,7 @@ errval_t aos_rpc_stress_test(struct aos_rpc *rpc, uint8_t *val, size_t len)
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                              struct capref *ret_cap, size_t *ret_bytes)
 {
+    // DEBUG_PRINTF("aos_rpc_get_ram_cap: start\n");
     struct aos_rpc_msg_ram msg = { .size = bytes, .alignment = alignment };
     errval_t err = aos_rpc_call(rpc, RPC_RAM_REQUEST, NULL_CAP, &msg, sizeof(msg),
                                 ret_cap, NULL, NULL);
@@ -442,9 +388,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
         assert(c.u.ram.bytes >= bytes);
         *ret_bytes = c.u.ram.bytes;
     }
-
-    // aos_rpc_call(RAM_IDENTIFIER)
-
+    // DEBUG_PRINTF("aos_rpc_get_ram_cap: done\n");
     return SYS_ERR_OK;
 }
 
@@ -571,23 +515,6 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
 
 errval_t aos_rpc_init(struct aos_rpc *rpc)
 {
-    assert(rpc->chan.type == AOS_CHAN_TYPE_LMP);
-    errval_t err;
-
-    thread_mutex_init(&reserved_slot_mutex);
-
-    err = lmp_chan_alloc_recv_slot(&rpc->chan.lc);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    err = slot_alloc(&rpc_reserved_recv_slot);  // allocate reserved slot
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-
-    /* set init RPC client in our program state */
-    set_init_rpc(rpc);
-
+    memset(rpc, 0, sizeof(*rpc));
     return SYS_ERR_OK;
 }

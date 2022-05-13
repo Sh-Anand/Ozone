@@ -19,10 +19,6 @@ extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
-static struct capref local_endpoint_cap;
-static struct lmp_endpoint *binding_recv_ep = NULL;
-#define LOCAL_ENDPOINT_BUF_LEN 1024
-
 static void (*rpc_handler)(void *) = NULL;
 
 #define PID_START 1000
@@ -227,87 +223,6 @@ static errval_t setup_dispatcher(struct spawninfo *si)
     return SYS_ERR_OK;
 }
 
-static errval_t refill_ep_recv_slot(void)
-{
-    struct capref ep_recv_slot;
-    errval_t err = slot_alloc(&ep_recv_slot);
-    if (err_is_fail(err)) {
-        return err;
-    }
-    lmp_endpoint_set_recv_slot(binding_recv_ep, ep_recv_slot);
-    return SYS_ERR_OK;
-}
-
-static void binding_handler(void *arg)
-{
-    struct spawninfo *si = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-    errval_t err;
-
-    // Try to receive a message
-    err = lmp_endpoint_recv(binding_recv_ep, &msg.buf, &cap);
-    if (err_is_fail(err)) {
-        if (lmp_err_is_transient(err)) {
-            // Re-register
-            err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
-                                        MKCLOSURE(binding_handler, arg));
-            if (err_is_ok(err))
-                return;  // otherwise, fall through
-        }
-        USER_PANIC_ERR(err_push(err, MON_ERR_IDC_BIND_LOCAL),  // XXX: another error
-                       "unhandled error in binding_handler");
-    }
-
-    // XXX: no checking for now, might be risky if user program exploit this endpoint
-    DEBUG_PRINTF("spawn: receive binding request from process %lu\n", msg.words[0]);
-    err = lmp_chan_accept(si->lc, PROC_ENDPOINT_BUF_LEN, cap);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to accept");
-    }
-
-    // Assign initial slot for incoming cap
-    err = lmp_chan_alloc_recv_slot(si->lc);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to alloc slot");
-    }
-
-    // Start receiving on the channel
-    err = lmp_chan_register_recv(si->lc, get_default_waitset(),
-                                MKCLOSURE(rpc_handler, si->chan));
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to register channel recv");
-    }
-
-
-    // Ack with the new endpoint
-    err = lmp_chan_send0(si->lc, LMP_SEND_FLAGS_DEFAULT, si->lc->local_cap);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to send");
-    }
-    refill_ep_recv_slot();
-    // No need to re-register
-}
-
-static errval_t create_local_lmp_ep_if_not_yet(void) {
-    errval_t err;
-
-    // Create local endpoint if not done yet
-    if (binding_recv_ep == NULL) {
-        err = endpoint_create(LOCAL_ENDPOINT_BUF_LEN, &local_endpoint_cap,
-                              &binding_recv_ep);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        assert(!capref_is_null(local_endpoint_cap));
-        assert(binding_recv_ep != NULL);
-
-        // Setup initial recv slot (recv handler will refill automatically)
-        refill_ep_recv_slot();
-    }
-    return SYS_ERR_OK;
-}
-
 static errval_t setup_endpoint(struct spawninfo *si)
 {
     if (rpc_handler == NULL) {
@@ -316,29 +231,46 @@ static errval_t setup_endpoint(struct spawninfo *si)
 
     errval_t err;
 
-    // Create local endpoint if not done yet
-    err = create_local_lmp_ep_if_not_yet();
-    if (err_is_fail(err)) {
-        return err;
-    }
-    assert(binding_recv_ep != NULL);
-
-    // Set receiver on the endpoint
+    // Create a new endpoint for the program
+    // si->lc should point to proc_list.chan.lc and initialized, but disconnected
     assert(si->lc != NULL);
-    si->lc->connstate = LMP_BIND_WAIT;
-    err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
-                                MKCLOSURE(binding_handler, si));
+    assert(si->lc->connstate == LMP_DISCONNECTED);
+    assert(capref_is_null(si->lc->local_cap));
+
+    err = slot_alloc(&si->lc->local_cap);
     if (err_is_fail(err)) {
-        return err;
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
+
+    err = lmp_endpoint_create_in_slot(PROC_ENDPOINT_BUF_LEN, si->lc->local_cap,
+                                      &si->lc->endpoint);
+    if (err_is_fail(err)) {
+        slot_free(si->lc->local_cap);
+        return err_push(err, LIB_ERR_ENDPOINT_CREATE);
+    }
+
+    // Assign initial slot for incoming cap
+    err = lmp_chan_alloc_recv_slot(si->lc);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    // Start receiving on the channel
+    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->chan));
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
+    }
+
+    // The channel is still waiting for remote_cap
+    si->lc->connstate = LMP_BIND_WAIT;
 
     struct capref child_initep_slot = {
         .cnode = si->taskcn,
         .slot = TASKCN_SLOT_INITEP,
     };
-    err = cap_copy(child_initep_slot, local_endpoint_cap);
+    err = cap_copy(child_initep_slot, si->lc->local_cap);
     if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);  // XXX: not this one
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 
     return SYS_ERR_OK;
@@ -643,8 +575,9 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     node->chan.type = AOS_CHAN_TYPE_LMP;
     lmp_chan_init(&node->chan.lc);
 
-                          si->pid = node->pid;
+    si->pid = node->pid;
     *pid = si->pid;
+
     assert(node->chan.lc.connstate == LMP_DISCONNECTED);
     si->chan = &node->chan;  // will be filled by setup_endpoint()
     si->lc = &si->chan->lc;
