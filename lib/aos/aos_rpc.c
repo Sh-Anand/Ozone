@@ -16,11 +16,21 @@
 #include <aos/aos_rpc.h>
 #include <aos/capabilities.h>
 
+typedef uint8_t lmp_single_msg_size_t;
+
 #define LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE                                                  \
-    (LMP_MSG_LENGTH * sizeof(uintptr_t) - sizeof(rpc_identifier_t))
+    (LMP_MSG_LENGTH * sizeof(uintptr_t) - sizeof(lmp_single_msg_size_t)                  \
+     - sizeof(rpc_identifier_t))
 
+static_assert(LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE
+                  <= (1 << (sizeof(lmp_single_msg_size_t) * 8)),
+              "lmp_single_msg_size_t too small");
 
-errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf,
+#define OFFSET(ptr, offset_in_byte) ((uint8_t *)(ptr) + (offset_in_byte))
+
+#define CAST_DEREF(type, ptr, offset_in_byte) (*((type *)OFFSET(ptr, offset_in_byte)))
+
+errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const void *buf,
                        size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
                        struct capref *ret_cap, struct lmp_helper *helper)
 {
@@ -32,8 +42,12 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf
 
     if (size <= LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE) {
         // Buffer fits in the remaining space
-        *((rpc_identifier_t *)ret_payload) = identifier;
-        memcpy(((uint8_t *)ret_payload) + sizeof(rpc_identifier_t), buf, size);
+        CAST_DEREF(lmp_single_msg_size_t, ret_payload, 0) = (lmp_single_msg_size_t)size;
+        CAST_DEREF(rpc_identifier_t, ret_payload, sizeof(lmp_single_msg_size_t))
+            = identifier;
+        memcpy(
+            OFFSET(ret_payload, sizeof(lmp_single_msg_size_t) + sizeof(rpc_identifier_t)),
+            buf, size);
         *ret_cap = cap;
 
         helper->payload_frame = NULL_CAP;
@@ -65,12 +79,16 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf
             err_push(err, LIB_ERR_PAGING_MAP);
         }
 
-        *((size_t *)addr) = size;
+        CAST_DEREF(size_t, addr, 0) = size;
         // Put identifier before actual payload, consistent with single message
-        *((rpc_identifier_t *)(addr + sizeof(size_t))) = identifier;
-        memcpy(addr + sizeof(size_t) + sizeof(rpc_identifier_t), buf, size);
+        CAST_DEREF(rpc_identifier_t, addr, sizeof(size_t)) = identifier;
+        memcpy(OFFSET(addr, sizeof(size_t) + sizeof(rpc_identifier_t)), buf, size);
 
-        *((rpc_identifier_t *)ret_payload) = RPC_MSG_IN_FRAME;  // replace the identifier
+        // Replace the size and the identifier
+        CAST_DEREF(lmp_single_msg_size_t, ret_payload, 0) = 0;
+        CAST_DEREF(rpc_identifier_t, ret_payload, sizeof(lmp_single_msg_size_t))
+            = RPC_MSG_IN_FRAME;
+
         *ret_cap = frame_cap;
 
         helper->payload_frame = frame_cap;
@@ -80,47 +98,51 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf
     return SYS_ERR_OK;
 }
 
-errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref recv_cap,
+errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap,
                          rpc_identifier_t *ret_type, uint8_t **ret_buf, size_t *ret_size,
                          struct lmp_helper *helper)
 {
     errval_t err;
 
-    rpc_identifier_t type = *((rpc_identifier_t *)recv_msg->words);
+    rpc_identifier_t type = CAST_DEREF(rpc_identifier_t, recv_msg->words,
+                                       sizeof(lmp_single_msg_size_t));
     uint8_t *buf;
     size_t size;
 
     uint8_t *frame_payload = NULL;
 
     if (type == RPC_MSG_IN_FRAME) {
-        assert(!capref_is_null(recv_cap));
+        assert(!capref_is_null(*recv_cap));
 
 #if 1
         DEBUG_PRINTF("lmp_deserialize: trying to map received frame in local space\n");
 #endif
 
         struct frame_identity frame_id;
-        err = frame_identify(recv_cap, &frame_id);
+        err = frame_identify(*recv_cap, &frame_id);
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_FRAME_IDENTIFY);
         }
 
         err = paging_map_frame(get_current_paging_state(), (void **)&frame_payload,
-                               frame_id.bytes, recv_cap);
+                               frame_id.bytes, *recv_cap);
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_PAGING_MAP);
         }
 
-        size = *((size_t *)frame_payload);
-        type = *((rpc_identifier_t *)(frame_payload + sizeof(size_t)));  // replace
-        buf = frame_payload + sizeof(size_t) + sizeof(rpc_identifier_t);
+        size = CAST_DEREF(size_t, frame_payload, 0);
+        type = CAST_DEREF(rpc_identifier_t, frame_payload, sizeof(size_t));  // replace
+        buf = OFFSET(frame_payload, sizeof(size_t) + sizeof(rpc_identifier_t));
 
-        helper->payload_frame = recv_cap;
+        *recv_cap = NULL_CAP;  // no cap is actually received
+        helper->payload_frame = *recv_cap;
         helper->mapped_frame = frame_payload;
 
     } else {
-        buf = ((uint8_t *)recv_msg->words) + sizeof(rpc_identifier_t);
-        size = recv_msg->buf.msglen * (sizeof(uintptr_t)) - sizeof(rpc_identifier_t);
+        size = (size_t)CAST_DEREF(lmp_single_msg_size_t, recv_msg->words, 0);
+        // type is already decoded
+        buf = OFFSET(recv_msg->words,
+                     sizeof(lmp_single_msg_size_t) + sizeof(rpc_identifier_t));
 
         helper->payload_frame = NULL_CAP;
         helper->mapped_frame = NULL;
@@ -153,8 +175,23 @@ errval_t lmp_cleanup(struct lmp_helper *helper)
     return SYS_ERR_OK;
 }
 
+errval_t ump_prefix_identifier(void **buf, size_t *size, rpc_identifier_t identifier) {
+    uint8_t *new_buf = malloc(sizeof(rpc_identifier_t) + *size);
+    if (new_buf == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+    CAST_DEREF(rpc_identifier_t, new_buf, 0) = identifier;
+    if (*size != 0) {
+        memcpy(OFFSET(new_buf, sizeof(rpc_identifier_t)), *buf, *size);
+    }
+    free(*buf);  // OK to be NULL
+    *buf = new_buf;
+    *size += 1;
+    return SYS_ERR_OK;
+}
+
 static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier, struct capref cap,
-                             void *buf, size_t size)
+                             const void *buf, size_t size)
 {
     errval_t err;
     uintptr_t words[LMP_MSG_LENGTH];
@@ -191,8 +228,9 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier, struct cap
 }
 
 static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                             struct capref call_cap, void *call_buf, size_t call_size,
-                             struct capref *ret_cap, void **ret_buf, size_t *ret_size)
+                             struct capref call_cap, const void *call_buf,
+                             size_t call_size, struct capref *ret_cap, void **ret_buf,
+                             size_t *ret_size)
 {
     assert(chan->type == AOS_CHAN_TYPE_LMP);
     struct lmp_chan *lc = &chan->lc;
@@ -248,7 +286,7 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     size_t recv_size;
     struct lmp_helper recv_helper;
 
-    err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size,
+    err = lmp_deserialize(&recv_msg, &recv_cap, &recv_type, &recv_buf, &recv_size,
                           &recv_helper);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_DESERIALIZE);
@@ -292,9 +330,10 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     return err;
 }
 
-errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref call_cap, void *call_buf, size_t call_size,
-                       struct capref *ret_cap, void **ret_buf, size_t *ret_size)
+static errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
+                              struct capref call_cap, const void *call_buf,
+                              size_t call_size, struct capref *ret_cap, void **ret_buf,
+                              size_t *ret_size)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
@@ -307,7 +346,16 @@ errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
     }
 }
 
-errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, void *buf, size_t size)
+errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                      struct capref call_cap, const void *call_buf, size_t call_size,
+                      struct capref *ret_cap, void **ret_buf, size_t *ret_size)
+{
+    return aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
+                         ret_buf, ret_size);
+}
+
+errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
+                      size_t size)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
@@ -382,7 +430,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
         err = cap_direct_identify(*ret_cap, &c);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to get the frame info\n");
-            return err_push(err, MM_ERR_INVALID_CAP);
+            return err_push(err, LIB_ERR_CAP_IDENTIFY);
         }
         assert(c.type == ObjType_RAM);
         assert(c.u.ram.bytes >= bytes);
@@ -516,5 +564,25 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
 errval_t aos_rpc_init(struct aos_rpc *rpc)
 {
     memset(rpc, 0, sizeof(*rpc));
+    assert(rpc->chan.type == AOS_CHAN_TYPE_UNKNOWN);
     return SYS_ERR_OK;
+}
+
+void aos_rpc_destroy(struct aos_rpc *rpc)
+{
+    aos_chan_destroy(&rpc->chan);
+}
+
+void aos_chan_destroy(struct aos_chan *chan)
+{
+    switch (chan->type) {
+    case AOS_CHAN_TYPE_LMP:
+        lmp_chan_destroy(&chan->lc);
+        break;
+    case AOS_CHAN_TYPE_UMP:
+        ump_chan_destroy(&chan->uc);
+        break;
+    default:
+        break;
+    }
 }

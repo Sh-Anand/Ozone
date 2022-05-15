@@ -367,6 +367,7 @@ errors libaos LIB_ERR_ {
     failure CHAN_REGISTER_RECV  "Failure in *_chan_register_recv()",
     failure CHAN_DEREGISTER_RECV "Failure in *_chan_deregister_recv()",
     failure LMP_CHAN_INIT       "Failure in lmp_chan_init()",
+    failure LMP_CHAN_INIT_LOCAL       "Failure in lmp_chan_init_local()",
     failure UMP_CHAN_INIT       "Failure in ump_chan_init()",
     failure LMP_CHAN_RECV       "Failure in lmp_chan_recv()",
     failure UMP_CHAN_RECV       "Failure in ump_chan_recv()",
@@ -424,6 +425,9 @@ errors libaos LIB_ERR_ {
     failure MONITOR_CAP_SEND    "Failed sending capability via monitor",
     failure MONITOR_RPC_BIND    "Error in monitor_rpc_init()",
     failure MONITOR_RPC_NULL    "Monitor RPC client is uninitialized",
+
+    // nameservice
+    failure NAMESERVICE_SET_LISTEN_EP  "Failed to set listening endpoint",
 
     // multihop
     failure BIND_MULTIHOP_REQ   "Failed sending bind_multihop_request to monitor",

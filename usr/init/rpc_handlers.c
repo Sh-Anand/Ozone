@@ -28,10 +28,19 @@ struct ump_chan *urpc_client[MAX_COREID];
     static errval_t name(void *in_payload, size_t in_size, void **out_payload,           \
                          size_t *out_size, struct capref *out_cap)
 
+#define CAST_IN_MSG_NO_CHECK(var, type) type *var = in_payload
 
-#define CAST_IN_MSG(var, type)                                                           \
+#define CAST_IN_MSG_AT_LEAST_SIZE(var, type)                                             \
     if (in_size < sizeof(type)) {                                                        \
-        DEBUG_PRINTF("%s: invalid payload size %lu < sizeof(%s) = %lu\n", __func__,      \
+        DEBUG_PRINTF("%s: invalid payload size %lu < sizeof(%s) (%lu)\n", __func__,      \
+                     in_size, #type, sizeof(type));                                      \
+        return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
+    }                                                                                    \
+    type *var = in_payload
+
+#define CAST_IN_MSG_EXACT_SIZE(var, type)                                                \
+    if (in_size != sizeof(type)) {                                                       \
+        DEBUG_PRINTF("%s: invalid payload size %lu != sizeof(%s) (%lu)\n", __func__,     \
                      in_size, #type, sizeof(type));                                      \
         return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
     }                                                                                    \
@@ -86,25 +95,27 @@ RET:
 
 HANDLER(stress_test_handler)
 {
-	if (disp_get_current_core_id() == 0) {
-		CAST_IN_MSG(vals, uint8_t);
-		size_t len = in_size;
-		for (uint8_t i = 0; len < in_size; i++, len++) {
-			if (vals[len] != i) goto error;
-		}
-		return SYS_ERR_OK;
-		error:
-		DEBUG_PRINTF("STRESS TEST RECEIVED CORRUPTED DATA!\n");
-		return SYS_ERR_OK;
-	} else {
-		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-	}
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_NO_CHECK(vals, uint8_t);
+        size_t len = in_size;
+        for (uint8_t i = 0; len < in_size; i++, len++) {
+            if (vals[len] != i) {
+                goto error;
+            }
+        }
+        return SYS_ERR_OK;
+    error:
+        DEBUG_PRINTF("STRESS TEST RECEIVED CORRUPTED DATA!\n");
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
 }
 
 HANDLER(num_msg_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        CAST_IN_MSG(num, uintptr_t);
+        CAST_IN_MSG_EXACT_SIZE(num, uintptr_t);
         grading_rpc_handle_number(*num);
         DEBUG_PRINTF("Received number %lu\n", *num);
         return SYS_ERR_OK;
@@ -113,16 +124,33 @@ HANDLER(num_msg_handler)
     }
 }
 
+static size_t strlen_s(const char *s, size_t max)
+{
+    size_t i = 0;
+    while (*s != '\0' && i < max) {
+        i++;
+        s++;
+    }
+    return i;
+}
+
 HANDLER(str_msg_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        // TODO: should check against in_size against malicious calls
-        CAST_IN_MSG(str, char);
+        CAST_IN_MSG_NO_CHECK(str, char);
+
+        // Check in_size against wrong or malicious calls with non-terminating str
+        if (strlen_s(str, in_size) >= in_size) {
+            DEBUG_PRINTF("ERROR received non-terminating string (in_size = %lu)\n",
+                         in_size);
+            return ERR_INVALID_ARGS;
+        }
+
         grading_rpc_handler_string(str);
         // DEBUG_PRINTF("in_size = %lu\n", in_size);
         DEBUG_PRINTF("Received string: \"%s\"\n", str);
         int len = printf("Received string: \"%s\"\n", str);
-		printf("Printed %d characters\n", len);
+        printf("Printed %d characters\n", len);
         return SYS_ERR_OK;
     } else {
         // DEBUG_PRINTF("in_size = %lu\n", in_size);
@@ -132,7 +160,7 @@ HANDLER(str_msg_handler)
 
 HANDLER(ram_request_msg_handler)
 {
-    CAST_IN_MSG(ram_msg, struct aos_rpc_msg_ram);
+    CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     grading_rpc_handler_ram_cap(ram_msg->size, ram_msg->alignment);
 
     // Try to get frame
@@ -144,9 +172,9 @@ HANDLER(ram_request_msg_handler)
         // XXX: trick to rewrite identifier
         *(((uint8_t *)in_payload) - 1) = INTERNAL_RPC_REMOTE_RAM_REQUEST;
 
-        // Request for twice size
+        // Request for max(twice size, RAM_PER_CORE)
         size_t original_request_size = ram_msg->size;
-        // ram_msg->size *= 2;
+        ram_msg->size = MAX(ram_msg->size * 2, RAM_PER_CORE);
 
         // Request RAM from core 0
         void *reply_payload = NULL;
@@ -203,7 +231,7 @@ HANDLER(ram_request_msg_handler)
 
 HANDLER(remote_ram_request_msg_handler)
 {
-    CAST_IN_MSG(ram_msg, struct aos_rpc_msg_ram);
+    CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     errval_t err;
 
     DEBUG_PRINTF("received remote RAM request, size = 0x%lx, alignment = 0x%lx\n",
@@ -224,8 +252,7 @@ HANDLER(remote_ram_request_msg_handler)
     }
     assert(c.type == ObjType_RAM);
 
-    DEBUG_PRINTF("giving out RAM 0x%lx/0x%lx\n",
-                 c.u.ram.base, c.u.ram.bytes);
+    DEBUG_PRINTF("giving out RAM 0x%lx/0x%lx\n", c.u.ram.base, c.u.ram.bytes);
 
     MALLOC_OUT_MSG(reply, struct RAM);
     reply->base = c.u.ram.base;
@@ -237,7 +264,7 @@ HANDLER(remote_ram_request_msg_handler)
 
 HANDLER(spawn_msg_handler)
 {
-    CAST_IN_MSG(msg, struct rpc_process_spawn_call_msg);
+    CAST_IN_MSG_AT_LEAST_SIZE(msg, struct rpc_process_spawn_call_msg);
     grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
 
     if (msg->core == disp_get_core_id()) {
@@ -261,7 +288,7 @@ HANDLER(spawn_msg_handler)
 HANDLER(process_get_name_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        CAST_IN_MSG(pid, domainid_t);
+        CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
 
         char *name = NULL;
         errval_t err = spawn_get_name(*pid, &name);
@@ -325,7 +352,7 @@ HANDLER(terminal_getchar_handler)
 HANDLER(terminal_putchar_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        CAST_IN_MSG(c, char);
+        CAST_IN_MSG_EXACT_SIZE(c, char);
         grading_rpc_handler_serial_putchar(*c);
         return sys_print(c, 1);  // print a single char
     } else {
@@ -334,10 +361,13 @@ HANDLER(terminal_putchar_handler)
 }
 
 #undef HANDLER
-#undef CAST_IN_MSG
+#undef CAST_IN_MSG_NO_CHECK
+#undef CAST_IN_MSG_AT_LEAST_SIZE
+#undef CAST_IN_MSG_EXACT_SIZE
 #undef MALLOC_OUT_MSG_WITH_SIZE
 #undef MALLOC_OUT_MSG
 
+// Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,
@@ -345,7 +375,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_PROCESS_SPAWN] = spawn_msg_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
-	[RPC_STRESS_TEST] = stress_test_handler,
+    [RPC_STRESS_TEST] = stress_test_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_msg_handler,

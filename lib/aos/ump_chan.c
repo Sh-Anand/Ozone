@@ -11,16 +11,17 @@
  * \brief Initialise a new UMP channel
  *
  * \param uc  UMP channel
- * \param shared_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE
+ * \param zeroed_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE that is already zeroed
  * \param client  Whether the current program is the client
  */
-errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool client) {
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool client)
+{
     assert(uc != NULL);
 
     errval_t err;
 
     struct frame_identity urpc_frame_id;
-    err = frame_identify(shared_frame, &urpc_frame_id);
+    err = frame_identify(zeroed_frame, &urpc_frame_id);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_FRAME_IDENTIFY);
     }
@@ -29,13 +30,11 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool cli
     }
 
     uint8_t *buf;
-    err = paging_map_frame(get_current_paging_state(), (void **)&buf, UMP_CHAN_SHARED_FRAME_SIZE,
-                           shared_frame);
+    err = paging_map_frame(get_current_paging_state(), (void **)&buf,
+                           UMP_CHAN_SHARED_FRAME_SIZE, zeroed_frame);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
-
-    memset(buf, 0, UMP_CHAN_SHARED_FRAME_SIZE);
 
     return ump_chan_init_from_buf(uc, buf, client);
 }
@@ -47,7 +46,8 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool cli
  * \param zeroed_buf  Mapped memory region of the shared frame, should be memset to 0
  * \param client  Whether the current program is the client
  */
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client) {
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client)
+{
     assert(uc != NULL);
 
     errval_t err;
@@ -74,6 +74,7 @@ errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool clie
  *
  * \param uc  UMP channel
  */
-void ump_chan_destroy(struct ump_chan *uc) {
-    waitset_chanstate_destroy(&uc->recv_waitset);
+void ump_chan_destroy(struct ump_chan *uc)
+{
+    waitset_chanstate_destroy(&uc->recv_waitset);  // will deregister inside
 }

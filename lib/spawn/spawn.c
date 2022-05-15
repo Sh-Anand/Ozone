@@ -232,21 +232,11 @@ static errval_t setup_endpoint(struct spawninfo *si)
     errval_t err;
 
     // Create a new endpoint for the program
-    // si->lc should point to proc_list.chan.lc and initialized, but disconnected
+    // si->lc should point to proc_list.chan.lc and uninitialized
     assert(si->lc != NULL);
-    assert(si->lc->connstate == LMP_DISCONNECTED);
-    assert(capref_is_null(si->lc->local_cap));
-
-    err = slot_alloc(&si->lc->local_cap);
+    err = lmp_chan_init_local(si->lc, PROC_ENDPOINT_BUF_LEN);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-
-    err = lmp_endpoint_create_in_slot(PROC_ENDPOINT_BUF_LEN, si->lc->local_cap,
-                                      &si->lc->endpoint);
-    if (err_is_fail(err)) {
-        slot_free(si->lc->local_cap);
-        return err_push(err, LIB_ERR_ENDPOINT_CREATE);
+        return err_push(err, LIB_ERR_LMP_CHAN_INIT);
     }
 
     // Assign initial slot for incoming cap
@@ -573,12 +563,10 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     strncpy(node->name, si->binary_name, DISP_NAME_LEN - 1);
     node->name[DISP_NAME_LEN - 1] = '\0';
     node->chan.type = AOS_CHAN_TYPE_LMP;
-    lmp_chan_init(&node->chan.lc);
 
     si->pid = node->pid;
     *pid = si->pid;
 
-    assert(node->chan.lc.connstate == LMP_DISCONNECTED);
     si->chan = &node->chan;  // will be filled by setup_endpoint()
     si->lc = &si->chan->lc;
 
@@ -625,15 +613,6 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     err = start_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
-    }
-
-    assert(si->lc->connstate == LMP_BIND_WAIT);
-    while (si->lc->connstate != LMP_CONNECTED) {
-        err = event_dispatch(get_default_waitset());
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "in spawn event_dispatch loop");
-            return err_push(err, LIB_ERR_BIND_LMP_REQ);  // XXX: not this one
-        }
     }
 
     return SYS_ERR_OK;

@@ -22,7 +22,7 @@ struct ump_chan {
     struct ring_producer send;              ///< Ringbuffer sender
 };
 
-errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool client);
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool client);
 errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client);
 void ump_chan_destroy(struct ump_chan *uc);
 

@@ -49,6 +49,7 @@ enum rpc_msg_type {
     RPC_MSG_COUNT
 };
 
+// Identifier can be used for multiple purpose, such as rpc_msg_type or payload size
 typedef uint8_t rpc_identifier_t;
 
 struct aos_rpc_msg_ram {
@@ -75,15 +76,35 @@ struct lmp_helper {
     void *mapped_frame;
 };
 
-errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, void *buf,
+errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const void *buf,
                        size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
                        struct capref *ret_cap, struct lmp_helper *helper);
 
-errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref recv_cap,
+/**
+ * Deserialize an LMP message
+ * @param recv_msg
+ * @param recv_cap_ptr   May get changed by the function (if the cap is a mapped frame).
+ * @param ret_type
+ * @param ret_buf        Points to somewhere in recv_msg or a mapped frame. Do NOT free.
+ * @param ret_size
+ * @param helper
+ * @return
+ */
+errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap_ptr,
                          rpc_identifier_t *ret_type, uint8_t **ret_buf, size_t *ret_size,
                          struct lmp_helper *helper);
 
 errval_t lmp_cleanup(struct lmp_helper *helper);
+
+/**
+ * Prefix an identifier to the buffer
+ * @param buf         The input buffer will be copied and freed (can be NULL if size is
+ *                    also 0). The pointer will be replaced as the output buffer.
+ * @param size        Will increment by sizeof(rpc_identifier_t)
+ * @param identifier
+ * @return
+ */
+errval_t ump_prefix_identifier(void **buf, size_t *size, rpc_identifier_t identifier);
 
 /**
  * \brief Initialize an aos_rpc struct.
@@ -91,8 +112,20 @@ errval_t lmp_cleanup(struct lmp_helper *helper);
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
 /**
+ * \brief Destroy an aos_rpc struct.
+ */
+void aos_rpc_destroy(struct aos_rpc *rpc);
+
+/** There is no aos_chan_init(). Set type directly and use LMP/UMP initializers. */
+
+/**
+ * \brief Destroy an aos_chan struct. Call LMP/UMP destroy function based on type.
+ */
+void aos_chan_destroy(struct aos_chan *chan);
+
+/**
  * Unified interface to make an RPC call.
- * @param chan
+ * @param rpc
  * @param identifier
  * @param call_cap
  * @param call_buf
@@ -104,19 +137,10 @@ errval_t aos_rpc_init(struct aos_rpc *rpc);
  * call_size of the return message.
  * @return
  */
-errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref call_cap, void *call_buf, size_t call_size,
-                       struct capref *ret_cap, void **ret_buf, size_t *ret_size);
-
-
-static inline errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
-                                    struct capref call_cap, void *call_buf,
+errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                                    struct capref call_cap, const void *call_buf,
                                     size_t call_size, struct capref *ret_cap,
-                                    void **ret_buf, size_t *ret_size)
-{
-    return aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
-                         ret_buf, ret_size);
-}
+                                    void **ret_buf, size_t *ret_size);
 
 /**
  * Reply a successful RPC call.
@@ -126,7 +150,7 @@ static inline errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identi
  * @param size
  * @return
  */
-errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, void *buf, size_t size);
+errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf, size_t size);
 
 /**
  * Reply a failed RPC call.

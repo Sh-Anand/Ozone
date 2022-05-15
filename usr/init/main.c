@@ -23,6 +23,7 @@
 #include <aos/aos_rpc.h>
 #include <aos/ump_chan.h>
 #include <aos/kernel_cap_invocations.h>
+#include <aos/lmp_handler_builder.h>
 #include <mm/mm.h>
 #include <grading.h>
 #include <aos/capabilities.h>
@@ -62,90 +63,42 @@ __attribute__((__unused__)) static errval_t handle_terminal_print(const char *st
     return SYS_ERR_OK;
 }
 
-static void rpc_lmp_recv_handler(void *arg)
+static void rpc_lmp_handler(void *arg)
 {
+    errval_t err;
+
     struct aos_chan *chan = arg;
     assert(chan->type == AOS_CHAN_TYPE_LMP);
     struct lmp_chan *lc = &chan->lc;
 
-    struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
-    struct capref recv_cap;
-    errval_t err;
-
-    // Try to receive a message
-    err = lmp_chan_recv(lc, &recv_msg, &recv_cap);
-    if (err_is_fail(err)) {
-        if (lmp_err_is_transient(err)) {
-            goto RE_REGISTER;
-        }
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: unhandled error from lmp_chan_recv\n");
-        goto FAILURE;
-    }
-
-    // Refill the recv_cap slot if the recv slot is used (received a recv_cap)
-    if (!capref_is_null(recv_cap)) {
-        err = lmp_chan_alloc_recv_slot(lc);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "rpc_lmp_recv_handler: fail to alloc new slot\n");
-            goto FAILURE;
-        }
-    }
+    // Receive the message and cap, refill the recv slot, deserialize
+    LMP_HANDLER_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
+                                        recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
 
     // If the channel is not setup yet, set it up
     if (lc->connstate == LMP_BIND_WAIT) {
-        // Check the received endpoint
-        if (capref_is_null(recv_cap)) {
-            DEBUG_PRINTF("rpc_lmp_recv_handler (binding): no cap received\n");
-            goto FAILURE;
-        }
-        struct capability capability;
-        err = cap_direct_identify(recv_cap, &capability);
-        if (capref_is_null(recv_cap)) {
-            DEBUG_ERR(err, "rpc_lmp_recv_handler (binding): cap_direct_identify "
-                           "failed\n");
-            goto FAILURE;
-        }
-        if (capability.type != ObjType_EndPointLMP) {
-            DEBUG_ERR(err, "rpc_lmp_recv_handler (binding): recv cap type %u\n",
-                      capability.type);
-            goto FAILURE;
-        }
-        lc->remote_cap = recv_cap;
-        lc->connstate = LMP_CONNECTED;
-
-        // Protocol: payload is the domain ID
-//        DEBUG_PRINTF("rpc_lmp_recv_handler: bind process %lu\n", recv_msg.words[0]);
+        LMP_HANDLER_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
 
         // Ack
         err = aos_chan_ack(chan, NULL_CAP, NULL, 0);
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "aos_chan_ack failed\n");
+            DEBUG_ERR(err, "rpc_lmp_handler (binding): aos_chan_ack failed\n");
             goto FAILURE;
         }
-        DEBUG_PRINTF("rpc_lmp_recv_handler: bind process %lu\n", recv_msg.words[0]);
+
+        // Protocol: payload is the domain ID
+        DEBUG_PRINTF("rpc_lmp_handler: bind process %lu\n", recv_raw_msg.words[0]);
         goto RE_REGISTER;
     }
-
-    // Deserialize
-    rpc_identifier_t recv_type;
-    uint8_t *recv_buf;
-    size_t recv_size;
-    struct lmp_helper helper;
-    err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size, &helper);
-    if (err_is_fail(err)) {
-        aos_chan_nack(chan, err_push(err, LIB_ERR_LMP_SERIALIZE));
-        goto RE_REGISTER;
-    }
-
 
     // Sanity check
-    if (rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("rpc_lmp_recv_handler: invalid recv_type %u\n", recv_type);
+    if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
+        DEBUG_PRINTF("rpc_lmp_handler: invalid recv_type %u\n", recv_type);
         aos_chan_nack(chan, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
     }
 
-    // DEBUG_PRINTF("rpc_lmp_recv_handler: handling %u\n", recv_type);
+    // DEBUG_PRINTF("rpc_lmp_handler: handling %u\n", recv_type);
 
     // Call the handler
     void *reply_payload = NULL;
@@ -165,18 +118,15 @@ static void rpc_lmp_recv_handler(void *arg)
     }
 
     // Deserialization cleanup
-    err = lmp_cleanup(&helper);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: failed to clean up\n");
-    }
+    LMP_HANDLER_CLEANUP(err, helper)
 
 FAILURE:
     // XXX: maybe kill the caller here
 RE_REGISTER:
     err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(rpc_lmp_recv_handler, arg));
+                                 MKCLOSURE(rpc_lmp_handler, arg));
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_recv_handler: error re-registering handler\n");
+        DEBUG_ERR(err, "rpc_lmp_handler: error re-registering handler\n");
         // XXX: maybe kill the caller here
     }
 }
@@ -197,9 +147,9 @@ static void urpc_handler(void *arg)
         goto RE_REGISTER;
     }
 
-    uint8_t type = recv_payload[0];
-    if (rpc_handlers[type] == NULL) {
-        DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", type);
+    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_payload);
+    if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
+        DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", recv_type);
         goto FREE_RECV_PAYLOAD;
     }
 
@@ -208,40 +158,36 @@ static void urpc_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[type](recv_payload + 1, recv_size - 1, &reply_payload, &reply_size,
-                             &reply_cap);
+    err = rpc_handlers[recv_type](recv_payload + sizeof(rpc_identifier_t),
+                                  recv_size - sizeof(rpc_identifier_t), &reply_payload,
+                                  &reply_size, &reply_cap);
 
-    uint8_t *reply_buf = NULL;
+    assert(capref_is_null(reply_cap));  // cannot send cap for now
 
     if (err_is_fail(err)) {
-        reply_buf = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
-        if (reply_buf == NULL) {
-            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "urpc_handler: failed to malloc reply_buf");
+        free(reply_payload);  // free the original output if any
+
+        reply_payload = malloc(sizeof(rpc_identifier_t) + sizeof(errval_t));
+        if (reply_payload == NULL) {
+            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "urpc_handler: failed to malloc reply_buf\n");
             goto FREE_REPLY_PAYLOAD;
         }
-        *((rpc_identifier_t *)reply_buf) = RPC_ERR;
-        *((errval_t *)(reply_buf + sizeof(rpc_identifier_t))) = err;
-        reply_size = sizeof(errval_t);
+        *((rpc_identifier_t *)reply_payload) = RPC_ERR;
+        *((errval_t *)(reply_payload + sizeof(rpc_identifier_t))) = err;
+        reply_size = sizeof(errval_t) + sizeof(rpc_identifier_t);
     } else {
-        reply_buf = malloc(sizeof(rpc_identifier_t) + reply_size);
-        if (reply_buf == NULL) {
-            DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "urpc_handler: failed to malloc reply_buf");
-            goto FREE_REPLY_PAYLOAD;
-        }
-        *((rpc_identifier_t *)reply_buf) = RPC_ACK;
-        if (reply_size != 0) {
-            memcpy(reply_buf + sizeof(rpc_identifier_t), reply_payload, reply_size);
+        err = ump_prefix_identifier(&reply_payload, &reply_size, RPC_ACK);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "urpc_handler: ump_prefix_identifier failed\n");
+            goto FREE_REPLY_PAYLOAD;  // on failure, reply_payload is not freed inside
         }
     }
 
-    err = ump_chan_send(uc, reply_buf, sizeof(rpc_identifier_t) + reply_size);
+    err = ump_chan_send(uc, reply_payload, reply_size);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "urpc_handler: failed to reply URPC\n");
-        goto FREE_REPLY_BUF;
     }
 
-FREE_REPLY_BUF:
-    free(reply_buf);
 FREE_REPLY_PAYLOAD:
     free(reply_payload);
 FREE_RECV_PAYLOAD:
@@ -410,7 +356,7 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "initialize_ram_alloc");
     }
 
-    spawn_set_rpc_handler(rpc_lmp_recv_handler);
+    spawn_set_rpc_handler(rpc_lmp_handler);
 
     // TODO: initialize mem allocator, vspace management here
 
@@ -602,7 +548,7 @@ static int app_main(int argc, char *argv[])
         abort();
     }
 
-    spawn_set_rpc_handler(rpc_lmp_recv_handler);
+    spawn_set_rpc_handler(rpc_lmp_handler);
 
     grading_test_early();
 

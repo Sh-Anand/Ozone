@@ -47,6 +47,7 @@ void lmp_chan_init(struct lmp_chan *lc);
 void lmp_chan_destroy(struct lmp_chan *lc);
 errval_t lmp_chan_accept(struct lmp_chan *lc, size_t buflen_words,
                          struct capref endpoint);
+errval_t lmp_chan_init_local(struct lmp_chan *lc, size_t buflen_words);
 errval_t lmp_chan_register_send(struct lmp_chan *lc, struct waitset *ws,
                                 struct event_closure closure);
 errval_t lmp_chan_deregister_send(struct lmp_chan *lc);
