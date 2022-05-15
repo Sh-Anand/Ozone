@@ -34,6 +34,8 @@
 #include <arch/arm/syscall_arm.h>
 #include <serial.h>
 
+#include <global.h>
+
 // helper macros  for invocation handler definitions
 #define INVOCATION_HANDLER(func) \
 static struct sysret \
@@ -947,6 +949,20 @@ static struct sysret handle_kcb_identify(struct capability *to,
 
 typedef struct sysret (*invocation_t)(struct capability*,
                                       arch_registers_state_t*, int);
+									  
+
+
+INVOCATION_HANDLER(get_global_phys)
+{
+	//INVOCATION_PRELUDE(0);
+	
+	struct sysret ret = {
+		.error = SYS_ERR_OK,
+		.value = mem_to_local_phys((genvaddr_t)global)
+	};
+	
+	return ret;
+}
 
 static invocation_t invocations[ObjType_Num][CAP_MAX_CMD] = {
     [ObjType_Dispatcher] = {
@@ -1061,6 +1077,7 @@ static invocation_t invocations[ObjType_Num][CAP_MAX_CMD] = {
         [KernelCmd_Set_cap_owner]     = monitor_set_cap_owner,
         /* XXX - why is this commented out? */
         //[KernelCmd_Setup_trace]       = handle_trace_setup,
+		[KernelCmd_GetGlobalPhys]	  = get_global_phys,
         [KernelCmd_Spawn_core]        = monitor_spawn_core,
         [KernelCmd_Unlock_cap]        = monitor_unlock_cap,
         [KernelCmd_Get_platform]        = monitor_get_platform,

@@ -25,6 +25,8 @@
 #include <aos/caddr.h>
 #include <barrelfish_kpi/paging_arch.h>
 
+#include <aos/debug.h>
+
 /**
  * capability invocation syscall wrapper, copied from x86_32 version
  */

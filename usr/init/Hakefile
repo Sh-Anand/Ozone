@@ -18,11 +18,12 @@
                         "distops/invocations.c",
                         "main.c",
                         "mem_alloc.c",
-                        "rpc_handlers.c"
+                        "rpc_handlers.c",
+						"terminal.c"
                       ],
                       addLinkFlags = [ "-e _start_init"], -- this is only needed for init
                       addLibraries = [ "mm", "getopt", "elf", "spawn",
-                        "grading"],
+                        "grading", "gic_dist", "lpuart"],
                       architectures = allArchitectures
                     }
 ]
