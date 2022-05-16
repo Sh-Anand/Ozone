@@ -27,7 +27,7 @@ struct aos_rpc *terminal_server_channel;
 
 // ret_cap returns a pointer to a new frame cap if assigned, otherwise just returns the
 // sent cap back words is an array of LMP_MSG_LENGTH size
-errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap, void *buf,
+errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap, const void *buf,
                       size_t size, uintptr_t *words, struct capref *ret_cap)
 {
     errval_t err;
@@ -124,7 +124,7 @@ static errval_t refill_reserved_slot_thread_safe(void)
  * at most 4 * 8 - 1 = 31 bytes to fit in an LMP message (with the identifier).
  */
 static errval_t aos_rpc_call_general(struct aos_rpc *rpc, rpc_identifier_t identifier,
-                                     struct capref call_cap, void *call_buf,
+                                     struct capref call_cap, const void *call_buf,
                                      size_t call_size, struct capref *ret_cap,
                                      void **ret_buf, size_t *ret_size)
 {
@@ -389,6 +389,22 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
                                         sizeof(char), NULL, NULL, NULL);
 
     return err;
+}
+
+errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, size_t *retlen)
+{
+	errval_t err = aos_rpc_call_general(rpc, RPC_TERMINAL_PUTS, NULL_CAP, buf, len, NULL, (void**)&retlen, NULL);
+	
+	return err;
+}
+
+errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t *retlen)
+{
+	char* tmp_buf;
+	errval_t err = aos_rpc_call_general(rpc, RPC_TERMINAL_GETS, NULL_CAP, &len, sizeof(size_t), NULL, (void**)&tmp_buf, retlen);
+	memcpy(buf, tmp_buf, MIN(len, *retlen));
+	
+	return err;
 }
 
 errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core,

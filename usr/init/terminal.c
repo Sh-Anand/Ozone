@@ -8,10 +8,15 @@
 #include <drivers/gic_dist.h>
 #include <aos/inthandler.h>
 
+#include <grading.h>
+
 
 extern spinlock_t* global_print_lock;
 extern struct capref dev_cap_uart3;
 extern struct capref dev_cap_gic;
+
+extern size_t (*local_terminal_write_function)(const char*, size_t);
+extern size_t (*local_terminal_read_function)(char*, size_t);
 
 struct capref int_cap_uart3;
 
@@ -33,6 +38,8 @@ static uint16_t buffer_head = 0;
 static uint16_t buffer_tail = 0;
 static uint16_t buffer_size = 0;
 
+size_t local_read_function(char* buf, size_t len);
+size_t local_write_function(const char* buf, size_t len);
 
 static void uart3_int_handler(void* arg)
 {
@@ -51,7 +58,7 @@ static void uart3_int_handler(void* arg)
 		buffer_head %= sizeof(char_buffer);
 	}
 	
-	DEBUG_PRINTF("Key Interrupt Handled: %c, size: %d\n", (4096 + buffer_head - 1) % 4096, buffer_size);
+	DEBUG_PRINTF("Key Interrupt Handled: %c, size: %d\n", char_buffer[(4096 + buffer_head - 1) % 4096], buffer_size);
 }
 
 void gic_setup(void)
@@ -107,13 +114,22 @@ void terminal_setup_pl011(void)
 	err = lpuart_enable_interrupt(lp_uart_3);
 	DEBUG_ERR(err, "lpuart_enable_interrupt");
 	
+	local_terminal_read_function = local_read_function;
+	local_terminal_write_function = local_write_function;
+	
 	uart3_avail = true;
 }
 
 void terminal_putchar(char c)
 {
-	if (uart3_avail) // don't do anything if no uart is available
-		lpuart_putchar(lp_uart_3, c); // returns errval_t, but can only be SYS_ERR_OK, so ignore it.
+	if (uart3_avail) {// don't do anything if no uart is available
+		if (c == '\n') {
+			lpuart_putchar(lp_uart_3, '\r'); // some terminals have a crisis if you don't include carriage returns
+			lpuart_putchar(lp_uart_3, '\n');
+		} else {
+			lpuart_putchar(lp_uart_3, c); // returns errval_t, but can only be SYS_ERR_OK, so ignore it.
+		}
+	}
 }
 
 char terminal_getchar(void)
@@ -126,6 +142,26 @@ char terminal_getchar(void)
 	buffer_size--;
 	
 	return c;
+}
+
+size_t local_read_function(char* buf, size_t len)
+{
+	for (size_t i = 0; i < len; i++) {
+		grading_rpc_handler_serial_getchar();
+		buf[i] = terminal_getchar();
+	}
+	return len;
+}
+size_t local_write_function(const char* buf, size_t len)
+{
+	acquire_spinlock(global_print_lock);
+	for (size_t i = 0; i < len; i++) {
+		grading_rpc_handler_serial_putchar(buf[i]);
+		terminal_putchar(buf[i]);
+	}
+	release_spinlock(global_print_lock);
+	
+	return len;
 }
 
 /**

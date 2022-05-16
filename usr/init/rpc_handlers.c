@@ -10,7 +10,13 @@
 #include <grading.h>
 #include <aos/ump_chan.h>
 
+#include "terminal.h"
+
 struct ump_chan *urpc_client[MAX_COREID];
+
+
+extern size_t (*local_terminal_write_function)(const char*, size_t);
+extern size_t (*local_terminal_read_function)(char*, size_t);
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -317,10 +323,49 @@ HANDLER(terminal_putchar_handler)
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG(c, char);
         grading_rpc_handler_serial_putchar(*c);
-        return sys_print(c, 1);  // print a single char
+        //return sys_print(c, 1);  // print a single char
+		terminal_putchar(*c);
+		return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
+}
+
+HANDLER(terminal_gets_handler)
+{
+	if (disp_get_core_id() == 0) {
+		assert(in_size == sizeof(size_t));
+		CAST_IN_MSG(len, size_t);
+		char *buf = (char*)malloc(*len);
+		size_t i = 0;
+		for (; i < *len; i++) {
+			buf[i] = terminal_getchar();
+			if (buf[i] == '\0' || buf[i] == 0x03 || buf[i] == 0x04 || buf[i] == 0x17) break; // terminate if EOF like characters are read
+		}
+		*out_payload = realloc(buf, i); // in case there has been less read than requested
+		if (!*out_payload) *out_payload = buf; // in case realloc failed
+		*out_size = i;
+		
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
+}
+
+HANDLER(terminal_puts_handler)
+{
+	if (disp_get_core_id() == 0) {
+		CAST_IN_MSG(c, char);
+		for (int i = 0; i < in_size; i++) {
+			grading_rpc_handler_serial_putchar(c[i]);
+			terminal_putchar(c[i]);
+		}
+		MALLOC_OUT_MSG_WITH_SIZE(len, size_t, sizeof(size_t));
+		*len = in_size;
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
 }
 
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
@@ -333,5 +378,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
 	[RPC_STRESS] = stress_test_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
+	[RPC_TERMINAL_GETS] = terminal_gets_handler,
+	[RPC_TERMINAL_PUTS] = terminal_puts_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_msg_handler,
 };

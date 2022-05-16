@@ -39,6 +39,8 @@ enum rpc_msg_type {
     RPC_PROCESS_GET_ALL_PIDS,
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
+	RPC_TERMINAL_GETS,
+	RPC_TERMINAL_PUTS,
     RPC_SHUTDOWN,
 	RPC_STRESS,
     RPC_MSG_COUNT
@@ -79,7 +81,7 @@ struct rpc_process_get_all_pids_return_msg {
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
-errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap_ref, void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
+errval_t rpc_marshall(rpc_identifier_t identifier, struct capref cap_ref, const void *buf, size_t size, uintptr_t *words, struct capref *ret_cap);
 
 
 /**
@@ -117,6 +119,16 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc);
  * \brief Send one character to the serial port
  */
 errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c);
+
+/**
+ * @brief Send a string of characters to the serial port.
+ */
+errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, size_t *retlen);
+
+/**
+ * @brief Get a string of characters from the serial port.
+ */
+errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t *retlen);
 
 /**
  * \brief Request that the process manager start a new process

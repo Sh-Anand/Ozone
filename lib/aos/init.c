@@ -27,6 +27,7 @@
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
 #include <aos/aos_rpc.h>
+#include <aos/debug.h>
 
 #include "threads_priv.h"
 #include "init.h"
@@ -40,6 +41,9 @@ extern size_t (*_libc_terminal_read_func)(char *, size_t);
 extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 extern void (*_libc_exit_func)(int);
 extern void (*_libc_assert_func)(const char *, const char *, const char *, int);
+
+size_t (*local_terminal_write_function)(const char*, size_t) = NULL;
+size_t (*local_terminal_read_function)(char*, size_t) = NULL;
 
 void libc_exit(int);
 
@@ -82,13 +86,13 @@ __attribute__((__used__))
 static size_t aos_terminal_write(const char *buf, size_t len)
 {
     //sys_print("aos_terminal_write called\n", 27);
-	size_t sent;
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-	assert(serial_rpc != NULL);
+	//assert (serial_rpc); // TODO: this should not happen when complete
+	if (!serial_rpc) return len; // XXX: because i have no better solution for now: fail silently
 	
-	// TODO: this is probably very inefficient, so maybe do this for whole strings instead
-	for (sent = 0; sent < len;) {
+	// NO LONGER TODO : this is probably very inefficient, so maybe do this for whole strings instead
+	/*or (sent = 0; sent < len;) {
 		err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
 		
 		if (err_is_fail(err)) {
@@ -97,11 +101,20 @@ static size_t aos_terminal_write(const char *buf, size_t len)
 		}
 		
 		sent++;
+	}*/
+	
+	// this is the way
+	size_t ret_len;
+	err = aos_rpc_serial_puts(serial_rpc, buf, len, &ret_len);
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "Failed to print!");
+		return 0;
 	}
 	
-	// return the number of characters sent
-	return sent;
+	// TODO: this should return the amount of characters written
 	
+	// return the number of characters sent
+	return ret_len;
 }
 
 __attribute__((__used__))
@@ -134,6 +147,18 @@ static size_t aos_terminal_read(char *buf, size_t len)
     return read;
 }
 
+static size_t local_terminal_write(const char* buf, size_t len)
+{
+	if (local_terminal_write_function) return local_terminal_write_function(buf, len);
+	return 0;
+}
+
+static size_t local_terminal_read(char* buf, size_t len)
+{
+	if (local_terminal_read_function) return local_terminal_read_function(buf, len);
+	return 0;
+}
+
 /* Set libc function pointers */
 void barrelfish_libc_glue_init(void)
 {
@@ -141,8 +166,8 @@ void barrelfish_libc_glue_init(void)
     // what we need for that
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
-    _libc_terminal_read_func = !init_domain ? aos_terminal_read : dummy_terminal_read;
-    _libc_terminal_write_func = !init_domain ? aos_terminal_write : syscall_terminal_write;
+    _libc_terminal_read_func = !init_domain || !disp_get_current_core_id() ? aos_terminal_read : local_terminal_read;
+    _libc_terminal_write_func = !init_domain || !disp_get_current_core_id() ? aos_terminal_write : local_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */

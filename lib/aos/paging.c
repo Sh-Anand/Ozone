@@ -1422,7 +1422,6 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
                                struct capref frame, size_t bytes, int flags)
 {
     errval_t err;
-
     err = assert_arguments(st, vaddr, &bytes);
     if (err_is_fail(err)) {
         return err;
@@ -1437,7 +1436,7 @@ errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
     }
 
     // Try mapping new
-    return map_fixed(st, vaddr, frame, 0, bytes, flags_to_attr(flags));
+	return map_fixed(st, vaddr, frame, 0, bytes, flags_to_attr(flags));
 }
 
 

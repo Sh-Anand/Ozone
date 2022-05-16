@@ -754,54 +754,12 @@ static int bsp_main(int argc, char *argv[])
     // Grading
     grading_test_early();
 	
-	// get and retype capability for uart
-	DEBUG_PRINTF("###############################################################################################################################\n"); // make this line well visible in the output
-	struct capref dev_cnode = {
-		.cnode = {
-			.croot = CPTR_ROOTCN,
-			.cnode = ROOTCN_SLOT_ADDR(ROOTCN_SLOT_TASKCN),
-			.level = 1
-		},
-		.slot = TASKCN_SLOT_DEV
-	};
-	struct capability cap;
-	cap_direct_identify(dev_cnode, &cap);
-	
-	assert (cap.type == ObjType_DevFrame);
-	
-	genpaddr_t globals = 0;
-	err = invoke_get_global_paddr(cap_kernel, &globals);
-	
-	genpaddr_t global_base = globals - (globals % BASE_PAGE_SIZE);
-	gensize_t global_size = (globals + 2040 /*global size*/ + BASE_PAGE_SIZE - global_base - 1) & ~((uint64_t)0x0000000000000fff);
-	genpaddr_t global_offset_from_page = global_base - globals;
-	genvaddr_t global_base_ptr;
-	
-	err = slot_alloc(&globals_frame);
-	err = frame_forge(globals_frame, global_base, global_size, 0);
-	DEBUG_ERR(err, "global frame forge");
-	
-	err = paging_map_frame(get_current_paging_state(), (void**)&global_base_ptr, global_size, globals_frame);
-	
-	global_print_lock = (spinlock_t*)(global_base_ptr + global_offset_from_page);
-	
-	DEBUG_PRINTF("Global Print Lock: %p (phys: %p)\n", global_print_lock, globals);
-	
     // TODO: Spawn system processes, boot second core etc. here
 	// setup capabilities and start device drivers
 	switch (platform_info.platform) {
 		case PI_PLATFORM_IMX8X:
-			err = slot_alloc(&dev_cap_uart3);
-			err = cap_retype(dev_cap_uart3, dev_cnode, IMX8X_UART3_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_UART_SIZE, 1);
 			
-			err = slot_alloc(&dev_cap_gic);
-			err = cap_retype(dev_cap_gic, dev_cnode, IMX8X_GIC_DIST_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_GIC_DIST_SIZE, 1);
-			gic_setup();
-			terminal_setup_pl011();
-			
-			printf(stupidly_large_str);
-			
-			// TODO: handle error if uart capability setup fails
+			// TODO: initialize devices here
 			break;
 		case PI_PLATFORM_QEMU:
 			
@@ -810,8 +768,6 @@ static int bsp_main(int argc, char *argv[])
 			DEBUG_PRINTF("FATAL ERROR: unknown platform: %d!\n", platform_info.platform);
 			exit(-1);
 	}
-	
-	DEBUG_PRINTF("Type: %d, Base: %p\n", cap.type, cap.u.devframe.base);
 
     // Booting second core
     for (int i = 1; i < 4; i++) {
@@ -820,6 +776,8 @@ static int bsp_main(int argc, char *argv[])
             DEBUG_ERR(err, "failed to boot core");
         }
     }
+			
+	printf(stupidly_large_str);
 
     // Grading
     grading_test_late();
@@ -1041,18 +999,60 @@ int main(int argc, char *argv[])
     if (err_is_fail(err)) {
         USER_PANIC_ERR(err, "failed to obtain the platform info from the kernel\n");
     }
-
+	
+	// setup the terminal here already so that printing can happen
     char *platform;
     switch (platform_info.platform) {
     case PI_PLATFORM_QEMU:
         platform = "QEMU";
+		// TODO: setup Qemu capable terminal
         break;
     case PI_PLATFORM_IMX8X:
         platform = "IMX8X";
+		// Since printing is very important, setup the terminal here already
+		// TODO: before all else: setup rpc terminal channel (for now init rpc channel)
+		struct capref dev_cnode = {
+			.cnode = {
+				.croot = CPTR_ROOTCN,
+				.cnode = ROOTCN_SLOT_ADDR(ROOTCN_SLOT_TASKCN),
+				.level = 1
+			},
+			.slot = TASKCN_SLOT_DEV
+		};
+		struct capability cap;
+		cap_direct_identify(dev_cnode, &cap);
+		
+		assert (cap.type == ObjType_DevFrame);
+		
+		genpaddr_t globals = 0;
+		err = invoke_get_global_paddr(cap_kernel, &globals);
+		
+		genpaddr_t global_base = globals - (globals % BASE_PAGE_SIZE);
+		gensize_t global_size = (globals + 2040 /*global size*/ + BASE_PAGE_SIZE - global_base - 1) & ~((uint64_t)0x0000000000000fff);
+		genpaddr_t global_offset_from_page = global_base - globals;
+		genvaddr_t global_base_ptr;
+		
+		err = slot_alloc(&globals_frame);
+		err = frame_forge(globals_frame, global_base, global_size, 0);
+		DEBUG_ERR(err, "global frame forge");
+		
+		err = paging_map_frame(get_current_paging_state(), (void**)&global_base_ptr, global_size, globals_frame);
+		
+		global_print_lock = (spinlock_t*)(global_base_ptr + global_offset_from_page);
+		
+		DEBUG_PRINTF("Global Print Lock: %p (phys: %p)\n", global_print_lock, globals);
+		err = slot_alloc(&dev_cap_uart3);
+		err = cap_retype(dev_cap_uart3, dev_cnode, IMX8X_UART3_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_UART_SIZE, 1);
+		
+		err = slot_alloc(&dev_cap_gic);
+		err = cap_retype(dev_cap_gic, dev_cnode, IMX8X_GIC_DIST_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_GIC_DIST_SIZE, 1);
+		gic_setup();
+		terminal_setup_pl011();
         break;
     default:
         platform = "UNKNOWN";
     }
+	
 
     debug_printf("init domain starting on core %" PRIuCOREID " (%s), invoked as:",
                  my_core_id, platform);

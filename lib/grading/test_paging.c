@@ -52,7 +52,7 @@ static void test_fixed_mapping_success(struct mm *mm, struct paging_state *st,
     errval_t err;
     err = paging_map_fixed_attr(st, vaddr, frame, size, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "paging_map_fixed_attr failed\n");
+        USER_PANIC_ERR(err, "paging_map_fixed_attr failed (vaddr: %p)\n", vaddr);
     }
 
     memset((void *)vaddr, 0, size);
