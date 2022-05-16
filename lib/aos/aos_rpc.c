@@ -496,7 +496,7 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
     // TODO: Return channel to talk to serial driver/terminal process (whoever
     // implements print/read functionality)
     // debug_printf("aos_rpc_get_serial_channel NYI\n");
-    return terminal_server_channel;  // XXX: For now return the init channel, since the
+    return aos_rpc_get_init_channel();  // XXX: For now return the init channel, since the
                                         // current serial driver is handled in init
 }
 
@@ -508,16 +508,19 @@ errval_t aos_rpc_init(struct aos_rpc *rpc)
 
     err = lmp_chan_alloc_recv_slot(rpc->chan);
     if (err_is_fail(err)) {
+		DEBUG_PRINTF("Error lmp_chan_alloc_recv_slot\n");
         return err;
     }
 
     err = slot_alloc(&rpc_reserved_recv_slot);  // allocate reserved slot
     if (err_is_fail(err)) {
+		DEBUG_PRINTF("slot_alloc\n");
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
 
     /* set init RPC client in our program state */
     set_init_rpc(rpc);
+	DEBUG_PRINTF("Passed here\n");
 
     return SYS_ERR_OK;
 }

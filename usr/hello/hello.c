@@ -363,10 +363,13 @@ size_t thread_count = 0;
 int main(int argc, char *argv[])
 {
     errval_t err;
+	
+	DEBUG_PRINTF("Init RPC channel: %p\n", aos_rpc_get_init_channel());
 
     printf("Hello world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
-        printf("arg[%d]: %s\n", i, argv[i]);
+        printf("arg[%d]: %s\n\0", i, argv[i]);
+		fflush(stdout);
     }
 
     char buf[SHELL_BUF_SIZE];
@@ -379,7 +382,7 @@ int main(int argc, char *argv[])
         offset = 0;
         while (1) {  // character loop
             char c = getchar();
-            if (c == '\n' || c == '\r') {
+			if (c == '\n' || c == '\r') {
                 putchar('\n');
                 buf[offset] = '\0';
                 if (offset == 0) {

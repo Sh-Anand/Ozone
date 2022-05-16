@@ -88,8 +88,8 @@ static size_t aos_terminal_write(const char *buf, size_t len)
     //sys_print("aos_terminal_write called\n", 27);
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-	//assert (serial_rpc); // TODO: this should not happen when complete
-	if (!serial_rpc) return len; // XXX: because i have no better solution for now: fail silently
+	//assert (serial_rpc);
+	if (!serial_rpc) return 0;
 	
 	// NO LONGER TODO : this is probably very inefficient, so maybe do this for whole strings instead
 	/*or (sent = 0; sent < len;) {
@@ -111,8 +111,6 @@ static size_t aos_terminal_write(const char *buf, size_t len)
 		return 0;
 	}
 	
-	// TODO: this should return the amount of characters written
-	
 	// return the number of characters sent
 	return ret_len;
 }
@@ -131,7 +129,8 @@ static size_t aos_terminal_read(char *buf, size_t len)
 	errval_t err;
 	char c;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-	assert(serial_rpc != NULL);
+	
+	assert(serial_rpc);
 	
 	for (; read < len;) {
 		err = aos_rpc_serial_getchar(serial_rpc, &c);
@@ -315,7 +314,8 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
         init_rpc->type = TYPE_LMP;
         init_rpc->chan = init_chan;
-        aos_rpc_init(init_rpc);
+        err = aos_rpc_init(init_rpc);
+		DEBUG_PRINTF("error: %d, set init rpc channel: %p (%p)\n", err, init_rpc, aos_rpc_get_init_channel());
 
         ram_alloc_set(NULL); // Use Ram allocation over RPC
     }

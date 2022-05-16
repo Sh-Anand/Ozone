@@ -18,6 +18,8 @@ struct ump_chan *urpc_client[MAX_COREID];
 extern size_t (*local_terminal_write_function)(const char*, size_t);
 extern size_t (*local_terminal_read_function)(char*, size_t);
 
+extern spinlock_t* global_print_lock;
+
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
  *
@@ -302,12 +304,7 @@ HANDLER(terminal_getchar_handler)
     if (disp_get_current_core_id() == 0) {
         char c;
         grading_rpc_handler_serial_getchar();
-        dispatcher_handle_t handle = disp_disable();
-        errval_t err = sys_getchar(&c);
-        disp_enable(handle);
-        if (err_is_fail(err)) {
-            return err;
-        }
+        c = terminal_getchar();
         MALLOC_OUT_MSG(reply, char);
         *reply = c;
         return SYS_ERR_OK;
@@ -322,9 +319,10 @@ HANDLER(terminal_putchar_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG(c, char);
+		acquire_spinlock(global_print_lock);
         grading_rpc_handler_serial_putchar(*c);
-        //return sys_print(c, 1);  // print a single char
 		terminal_putchar(*c);
+		release_spinlock(global_print_lock);
 		return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -339,6 +337,7 @@ HANDLER(terminal_gets_handler)
 		char *buf = (char*)malloc(*len);
 		size_t i = 0;
 		for (; i < *len; i++) {
+			DEBUG_PRINTF("Reading character...\n");
 			buf[i] = terminal_getchar();
 			if (buf[i] == '\0' || buf[i] == 0x03 || buf[i] == 0x04 || buf[i] == 0x17) break; // terminate if EOF like characters are read
 		}
@@ -356,12 +355,16 @@ HANDLER(terminal_puts_handler)
 {
 	if (disp_get_core_id() == 0) {
 		CAST_IN_MSG(c, char);
-		for (int i = 0; i < in_size; i++) {
+		acquire_spinlock(global_print_lock);
+		size_t i = 0;
+		for (; i < in_size; i++) {
+			if (c[i] == 0) break;
 			grading_rpc_handler_serial_putchar(c[i]);
 			terminal_putchar(c[i]);
 		}
+		release_spinlock(global_print_lock);
 		MALLOC_OUT_MSG_WITH_SIZE(len, size_t, sizeof(size_t));
-		*len = in_size;
+		*len = i;
 		return SYS_ERR_OK;
 	} else {
 		return forward_to_core(0, in_payload, in_size, out_payload, out_size);

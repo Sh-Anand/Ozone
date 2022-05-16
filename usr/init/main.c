@@ -777,12 +777,16 @@ static int bsp_main(int argc, char *argv[])
         }
     }
 			
-	printf(stupidly_large_str);
+	//printf(stupidly_large_str);
 
     // Grading
     grading_test_late();
 
     debug_printf("Message handler loop\n");
+	
+	struct spawninfo hello_si;
+	domainid_t hello_pid;
+	err = spawn_load_by_name("hello", &hello_si, &hello_pid);
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;
@@ -1009,45 +1013,47 @@ int main(int argc, char *argv[])
         break;
     case PI_PLATFORM_IMX8X:
         platform = "IMX8X";
-		// Since printing is very important, setup the terminal here already
+		// Since printing is very important, setup the terminal here already (only for core 0)
 		// TODO: before all else: setup rpc terminal channel (for now init rpc channel)
-		struct capref dev_cnode = {
-			.cnode = {
-				.croot = CPTR_ROOTCN,
-				.cnode = ROOTCN_SLOT_ADDR(ROOTCN_SLOT_TASKCN),
-				.level = 1
-			},
-			.slot = TASKCN_SLOT_DEV
-		};
-		struct capability cap;
-		cap_direct_identify(dev_cnode, &cap);
-		
-		assert (cap.type == ObjType_DevFrame);
-		
-		genpaddr_t globals = 0;
-		err = invoke_get_global_paddr(cap_kernel, &globals);
-		
-		genpaddr_t global_base = globals - (globals % BASE_PAGE_SIZE);
-		gensize_t global_size = (globals + 2040 /*global size*/ + BASE_PAGE_SIZE - global_base - 1) & ~((uint64_t)0x0000000000000fff);
-		genpaddr_t global_offset_from_page = global_base - globals;
-		genvaddr_t global_base_ptr;
-		
-		err = slot_alloc(&globals_frame);
-		err = frame_forge(globals_frame, global_base, global_size, 0);
-		DEBUG_ERR(err, "global frame forge");
-		
-		err = paging_map_frame(get_current_paging_state(), (void**)&global_base_ptr, global_size, globals_frame);
-		
-		global_print_lock = (spinlock_t*)(global_base_ptr + global_offset_from_page);
-		
-		DEBUG_PRINTF("Global Print Lock: %p (phys: %p)\n", global_print_lock, globals);
-		err = slot_alloc(&dev_cap_uart3);
-		err = cap_retype(dev_cap_uart3, dev_cnode, IMX8X_UART3_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_UART_SIZE, 1);
-		
-		err = slot_alloc(&dev_cap_gic);
-		err = cap_retype(dev_cap_gic, dev_cnode, IMX8X_GIC_DIST_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_GIC_DIST_SIZE, 1);
-		gic_setup();
-		terminal_setup_pl011();
+		if (my_core_id == 0) {
+			struct capref dev_cnode = {
+				.cnode = {
+					.croot = CPTR_ROOTCN,
+					.cnode = ROOTCN_SLOT_ADDR(ROOTCN_SLOT_TASKCN),
+					.level = 1
+				},
+				.slot = TASKCN_SLOT_DEV
+			};
+			struct capability cap;
+			cap_direct_identify(dev_cnode, &cap);
+			
+			assert (cap.type == ObjType_DevFrame);
+			
+			genpaddr_t globals = 0;
+			err = invoke_get_global_paddr(cap_kernel, &globals);
+			
+			genpaddr_t global_base = globals - (globals % BASE_PAGE_SIZE);
+			gensize_t global_size = (globals + 2040 /*global size*/ + BASE_PAGE_SIZE - global_base - 1) & ~((uint64_t)0x0000000000000fff);
+			genpaddr_t global_offset_from_page = global_base - globals;
+			genvaddr_t global_base_ptr;
+			
+			err = slot_alloc(&globals_frame);
+			err = frame_forge(globals_frame, global_base, global_size, 0);
+			DEBUG_ERR(err, "global frame forge");
+			
+			err = paging_map_frame(get_current_paging_state(), (void**)&global_base_ptr, global_size, globals_frame);
+			
+			global_print_lock = (spinlock_t*)(global_base_ptr + global_offset_from_page);
+			
+			DEBUG_PRINTF("Global Print Lock: %p (phys: %p)\n", global_print_lock, globals);
+			err = slot_alloc(&dev_cap_uart3);
+			err = cap_retype(dev_cap_uart3, dev_cnode, IMX8X_UART3_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_UART_SIZE, 1);
+			
+			err = slot_alloc(&dev_cap_gic);
+			err = cap_retype(dev_cap_gic, dev_cnode, IMX8X_GIC_DIST_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_GIC_DIST_SIZE, 1);
+			gic_setup();
+			terminal_setup_pl011();
+		}
         break;
     default:
         platform = "UNKNOWN";

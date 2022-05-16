@@ -148,9 +148,9 @@ __attribute__((__unused__)) static void delay(int count)
 
 void grading_test_late(void)
 {
-    struct spawninfo info[21];
+   /* struct spawninfo info[21];
     domainid_t pid = -1;
-    errval_t err;
+    errval_t err;*/
 
 //       DEBUG_PRINTF("Run spawnTester 10...\n");
 //            err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
@@ -183,7 +183,7 @@ void grading_test_late(void)
 //           DEBUG_PRINTF("  %u %s\n", pids[i], name);
 //           free(name);
 //       }
-
+/*
     if (disp_get_core_id() == 0) {
         DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
         err = spawn_load_by_name("hello", &info[0], &pid);
@@ -191,7 +191,7 @@ void grading_test_late(void)
             DEBUG_ERR(err, "spawn_load_by_name failed");
         }
         assert(pid != -1);
-    }
+    }*/
 
     //    DEBUG_PRINTF("Kill the first hello...\n");
     //    err = invoke_dispatcher_stop(info[0].dispatcher_cap_in_parent);

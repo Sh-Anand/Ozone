@@ -43,7 +43,7 @@ size_t local_write_function(const char* buf, size_t len);
 
 static void uart3_int_handler(void* arg)
 {
-	DEBUG_PRINTF("Key Interrupt Received!\n");
+	//DEBUG_PRINTF("Key Interrupt Received!\n");
 	char c;
 	errval_t err = lpuart_getchar(lp_uart_3, &c);
 	while (err == LPUART_ERR_NO_DATA) {
@@ -58,7 +58,7 @@ static void uart3_int_handler(void* arg)
 		buffer_head %= sizeof(char_buffer);
 	}
 	
-	DEBUG_PRINTF("Key Interrupt Handled: %c, size: %d\n", char_buffer[(4096 + buffer_head - 1) % 4096], buffer_size);
+	//DEBUG_PRINTF("Key Interrupt Handled: %c, size: %d\n", char_buffer[(4096 + buffer_head - 1) % 4096], buffer_size);
 }
 
 void gic_setup(void)
