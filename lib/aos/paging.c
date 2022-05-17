@@ -66,7 +66,7 @@ static char exception_stack[EXCEPTION_STACK_SIZE];
 
 /// RB tree implementations for general nodes and wrapper functions
 
-int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1, struct paging_rb_tree_node *e2)
+static int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1, struct paging_rb_tree_node *e2)
 {
     return (e1->addr < e2->addr ? -1 : e1->addr > e2->addr);
 }
