@@ -27,6 +27,7 @@
 #include <grading.h>
 #include <aos/capabilities.h>
 #include <ringbuffer/ringbuffer.h>
+#include <drivers/sdhc.h>
 
 #include "mem_alloc.h"
 #include <barrelfish_kpi/platform.h>
@@ -47,6 +48,8 @@ struct ump_chan *urpc_client[MAX_COREID] = { NULL };
 
 struct capref dev_cap_sdhc2;
 struct capref dev_cap_enet;
+
+struct sdhc_s *sd;
 
 /**
  * @brief TODO: make use of this function
@@ -432,6 +435,29 @@ static errval_t boot_core(coreid_t mpid)
     return SYS_ERR_OK;
 }
 
+// initialize sd card: map sd devframe capability, and initialize the driver
+static errval_t init_sd(void) {
+    errval_t err;
+
+    struct capability sdhc_c;
+    err = cap_direct_identify(dev_cap_sdhc2, &sdhc_c);
+    assert(sdhc_c.type == ObjType_DevFrame);
+    if(err_is_fail(err))
+        return err;
+
+    //map capability to sd card
+    void *sdhc_base;
+    err = paging_map_frame_attr(get_current_paging_state(), &sdhc_base, sdhc_c.u.ram.bytes, dev_cap_sdhc2, VREGION_FLAGS_READ_WRITE_NOCACHE);
+    if(err_is_fail(err))
+        return err;
+    
+    err = sdhc_init(&sd, sdhc_base);
+    if(err_is_fail(err))
+        return err;
+
+    return SYS_ERR_OK;
+}
+
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -480,6 +506,14 @@ static int bsp_main(int argc, char *argv[])
 		dev_cap_enet = nullref;
 		break;
 	}
+
+    //Initialize sd card
+    err = init_sd();
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to initialize SD card\n");
+    }
+
+    debug_printf("Initialized SD card\n");
 
     // Booting second core
     for (int i = 1; i < 4; i++) {
