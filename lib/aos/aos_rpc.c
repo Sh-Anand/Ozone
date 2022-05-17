@@ -555,12 +555,11 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
                                         // current serial driver is handled in init
 }
 
-errval_t aos_rpc_init(struct aos_rpc *rpc)
+void aos_rpc_init(struct aos_rpc *rpc)
 {
     memset(rpc, 0, sizeof(*rpc));
     assert(rpc->chan.type == AOS_CHAN_TYPE_UNKNOWN);
     thread_mutex_init(&rpc->recv_mutex);
-    return SYS_ERR_OK;
 }
 
 void aos_rpc_destroy(struct aos_rpc *rpc)

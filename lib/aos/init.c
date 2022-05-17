@@ -212,10 +212,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         if (init_rpc == NULL) {
             return err_push(err, LIB_ERR_MALLOC_FAIL);
         }
-        err = aos_rpc_init(init_rpc);
-        if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_RPC_INIT);
-        }
+        aos_rpc_init(init_rpc);
 
         /* initialize init RPC client with lmp channel */
         init_rpc->chan.type = AOS_CHAN_TYPE_LMP;

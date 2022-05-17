@@ -22,8 +22,13 @@ struct ump_chan {
     struct ring_producer send;              ///< Ringbuffer sender
 };
 
-errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool client);
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client);
+enum UMP_CHAN_ROLE {
+    UMP_CHAN_SERVER,
+    UMP_CHAN_CLIENT
+};
+
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role);
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role);
 void ump_chan_destroy(struct ump_chan *uc);
 
 /**

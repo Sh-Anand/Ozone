@@ -109,7 +109,7 @@ errval_t ump_prefix_identifier(void **buf, size_t *size, rpc_identifier_t identi
 /**
  * \brief Initialize an aos_rpc struct.
  */
-errval_t aos_rpc_init(struct aos_rpc *rpc);
+void aos_rpc_init(struct aos_rpc *rpc);
 
 /**
  * \brief Destroy an aos_rpc struct.

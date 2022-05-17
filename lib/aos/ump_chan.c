@@ -14,7 +14,7 @@
  * \param zeroed_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE that is already zeroed
  * \param client  Whether the current program is the client
  */
-errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool client)
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role)
 {
     assert(uc != NULL);
 
@@ -36,7 +36,7 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool cli
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
 
-    return ump_chan_init_from_buf(uc, buf, client);
+    return ump_chan_init_from_buf(uc, buf, role);
 }
 
 /**
@@ -46,20 +46,21 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, bool cli
  * \param zeroed_buf  Mapped memory region of the shared frame, should be memset to 0
  * \param client  Whether the current program is the client
  */
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client)
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role)
 {
     assert(uc != NULL);
+    assert(role == UMP_CHAN_SERVER || role == UMP_CHAN_CLIENT);
 
     errval_t err;
 
     uint8_t *b = zeroed_buf;
 
-    err = ring_consumer_init(&uc->recv, client ? b : b + RING_BUFFER_SIZE);
+    err = ring_consumer_init(&uc->recv, role == UMP_CHAN_CLIENT ? b : b + RING_BUFFER_SIZE);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RING_CONSUMER_INIT);
     }
 
-    err = ring_producer_init(&uc->send, client ? b + RING_BUFFER_SIZE : b);
+    err = ring_producer_init(&uc->send, role == UMP_CHAN_CLIENT ? b + RING_BUFFER_SIZE : b);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RING_PRODUCER_INIT);
     }

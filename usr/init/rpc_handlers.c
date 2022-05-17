@@ -10,7 +10,7 @@
 #include <grading.h>
 #include <aos/ump_chan.h>
 
-struct ump_chan *urpc_client[MAX_COREID];
+struct aos_rpc *urpc[MAX_COREID];
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -59,8 +59,9 @@ struct ump_chan *urpc_client[MAX_COREID];
 static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
                                 void **out_payload, size_t *out_size)
 {
-    // XXX: trick to retrieve the rpc identifier
-    errval_t err = ring_producer_send(&urpc_client[core]->send,
+    // XXX: trick to retrieve the rpc identifier by -1
+    // Bypass aos_rpc and aos_chan to put raw buffer
+    errval_t err = ring_producer_send(&urpc[core]->chan.uc.send,
                                       ((uint8_t *)in_payload) - 1, in_size + 1);
     if (err_is_fail(err)) {
         return err;
@@ -68,7 +69,7 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
 
     uint8_t *ret_payload = NULL;
     size_t ret_size = 0;
-    err = ring_consumer_recv(&urpc_client[core]->recv, (void **)&ret_payload, &ret_size);
+    err = ring_consumer_recv(&urpc[core]->chan.uc.recv, (void **)&ret_payload, &ret_size);
     if (err_is_fail(err)) {
         goto RET;
     }
