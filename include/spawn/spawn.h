@@ -48,7 +48,14 @@ struct spawninfo {
     struct lmp_chan *lc;    // &chan.lc, helper when added when doing the refactor
 };
 
-void spawn_set_rpc_handler(void (*handler)(void *));
+static inline coreid_t spawn_get_core(domainid_t pid)
+{
+    STATIC_ASSERT(sizeof(domainid_t) == 4, "sizeof(domainid_t)");
+    STATIC_ASSERT(sizeof(coreid_t) == 1, "sizeof(coreid_t)");
+    return (coreid_t)FIELD(24, 8, pid);
+}
+
+void spawn_init(void (*handler)(void *));
 
 errval_t spawn_kill(domainid_t pid);
 

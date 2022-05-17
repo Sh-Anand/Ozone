@@ -91,8 +91,8 @@ static void rpc_lmp_handler(void *arg)
         goto RE_REGISTER;
     }
 
-    // Sanity check
-    if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
+    // Sanity check, LMP can only accept RPC exposed to the user
+    if (recv_type >= RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
         DEBUG_PRINTF("rpc_lmp_handler: invalid recv_type %u\n", recv_type);
         aos_chan_nack(chan, LIB_ERR_RPC_INVALID_MSG);
         goto RE_REGISTER;
@@ -356,7 +356,7 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "initialize_ram_alloc");
     }
 
-    spawn_set_rpc_handler(rpc_lmp_handler);
+    spawn_init(rpc_lmp_handler);
 
     // TODO: initialize mem allocator, vspace management here
 
@@ -548,7 +548,7 @@ static int app_main(int argc, char *argv[])
         abort();
     }
 
-    spawn_set_rpc_handler(rpc_lmp_handler);
+    spawn_init(rpc_lmp_handler);
 
     grading_test_early();
 

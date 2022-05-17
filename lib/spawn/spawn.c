@@ -13,7 +13,7 @@
 #include <spawn/multiboot.h>
 #include <spawn/argv.h>
 
-#include "proc_list.h"
+#include "proc_mgmt.h"
 
 extern char **environ;
 extern struct bootinfo *bi;
@@ -21,13 +21,7 @@ extern coreid_t my_core_id;
 
 static void (*rpc_handler)(void *) = NULL;
 
-#define PID_START 1000
-static struct proc_list pl = {
-    .running = LIST_HEAD_INITIALIZER(),
-    .free_list = LIST_HEAD_INITIALIZER(),
-    .pid_upper = PID_START,
-    .running_count = 0,
-};
+static struct proc_mgmt mgmt;
 #define PROC_ENDPOINT_BUF_LEN 16
 
 // TODO: these address works?
@@ -232,7 +226,7 @@ static errval_t setup_endpoint(struct spawninfo *si)
     errval_t err;
 
     // Create a new endpoint for the program
-    // si->lc should point to proc_list.chan.lc and uninitialized
+    // si->lc should point to proc_node.chan.lc and uninitialized
     assert(si->lc != NULL);
     err = lmp_chan_init_local(si->lc, PROC_ENDPOINT_BUF_LEN);
     if (err_is_fail(err)) {
@@ -556,7 +550,7 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     // Create new process node
     errval_t err;
     struct proc_node *node;
-    err = proc_list_alloc(&pl, &node);
+    err = proc_mgmt_alloc(&mgmt, &node);
     if (err_is_fail(err)) {
         return err;
     }
@@ -660,14 +654,15 @@ errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_
     return err;
 }
 
-void spawn_set_rpc_handler(void (*handler)(void *)) {
+void spawn_init(void (*handler)(void *)) {
+    proc_mgmt_init(&mgmt);
     rpc_handler = handler;
 }
 
 errval_t spawn_kill(domainid_t pid) {
     errval_t err;
     struct capref dispatcher;
-    err = proc_list_get_dispatcher(&pl, pid, &dispatcher);
+    err = proc_mgmt_get_dispatcher(&mgmt, pid, &dispatcher);
     if (err_is_fail(err)) {
         return err_push(err, PROC_MGMT_ERR_KILL);
     }
@@ -679,9 +674,9 @@ errval_t spawn_kill(domainid_t pid) {
 }
 
 errval_t spawn_get_name(domainid_t pid, char **name) {
-    return proc_list_get_name(&pl, pid, name);
+    return proc_mgmt_get_name(&mgmt, pid, name);
 }
 
 errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count) {
-    return proc_list_get_all_pids(&pl, pids, pid_count);
+    return proc_mgmt_get_all_pids(&mgmt, pids, pid_count);
 }

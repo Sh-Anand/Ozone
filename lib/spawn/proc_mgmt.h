@@ -2,29 +2,32 @@
 // Created by Zikai Liu on 3/23/22.
 //
 
-#ifndef AOS_PROC_LIST_H
-#define AOS_PROC_LIST_H
+#ifndef AOS_PROC_MGMT_H
+#define AOS_PROC_MGMT_H
 
 #include <aos/capabilities.h>
 #include <aos/aos_rpc.h>
-#include <sys/queue.h>
+#include <sys/tree.h>
 
 struct proc_node {
     domainid_t pid;
     struct capref dispatcher;
     char name[DISP_NAME_LEN];
     struct aos_chan chan;
+    RB_ENTRY(proc_node) rb_entry;
     LIST_ENTRY(proc_node) link;
 };
 
-struct proc_list {
-    LIST_HEAD(, proc_node) running;
+;  // tree type declaration
+
+struct proc_mgmt {
+    RB_HEAD(proc_rb_tree, proc_node) running;
     LIST_HEAD(, proc_node) free_list;
     size_t running_count;
     domainid_t pid_upper;
 };
 
-errval_t proc_list_init(struct proc_list *ps);
+errval_t proc_mgmt_init(struct proc_mgmt *ps);
 
 /**
  * Allocate a new process node. PID is filled. lc, dispatcher and name are NOT
@@ -33,7 +36,7 @@ errval_t proc_list_init(struct proc_list *ps);
  * @param ret
  * @return
  */
-errval_t proc_list_alloc(struct proc_list *ps, struct proc_node **ret);
+errval_t proc_mgmt_alloc(struct proc_mgmt *ps, struct proc_node **ret);
 
 /**
  * Delete a process node by PID.
@@ -41,7 +44,7 @@ errval_t proc_list_alloc(struct proc_list *ps, struct proc_node **ret);
  * @param pid
  * @return
  */
-errval_t proc_list_delete(struct proc_list *ps, domainid_t pid);
+errval_t proc_mgmt_delete(struct proc_mgmt *ps, domainid_t pid);
 
 /**
  * Get name of a process by PID.
@@ -50,7 +53,7 @@ errval_t proc_list_delete(struct proc_list *ps, domainid_t pid);
  * @param name  Pointer to a char* which is set as a copy of the name. Should be freed.
  * @return
  */
-errval_t proc_list_get_name(struct proc_list *ps, domainid_t pid, char **name);
+errval_t proc_mgmt_get_name(struct proc_mgmt *ps, domainid_t pid, char **name);
 
 /**
  * Get dispatcher of a process by PID.
@@ -59,7 +62,8 @@ errval_t proc_list_get_name(struct proc_list *ps, domainid_t pid, char **name);
  * @param dispatcher
  * @return
  */
-errval_t proc_list_get_dispatcher(struct proc_list *ps, domainid_t pid, struct capref *dispatcher);
+errval_t proc_mgmt_get_dispatcher(struct proc_mgmt *ps, domainid_t pid,
+                                  struct capref *dispatcher);
 
 /**
  * Get an array of all PIDs.
@@ -68,7 +72,7 @@ errval_t proc_list_get_dispatcher(struct proc_list *ps, domainid_t pid, struct c
  * @param pid_count
  * @return
  */
-errval_t proc_list_get_all_pids(struct proc_list *ps, domainid_t **pids,
+errval_t proc_mgmt_get_all_pids(struct proc_mgmt *ps, domainid_t **pids,
                                 size_t *pid_count);
 
-#endif  // AOS_PROC_LIST_H
+#endif  // AOS_PROC_MGMT_H

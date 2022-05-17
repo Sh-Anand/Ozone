@@ -733,15 +733,6 @@ errors coreboot CORE_BOOT_ERR_ {
     failure INVOKE              "Failed to invoke core",
 };
 
-// errors related to the process list
-errors proc_list PROC_LIST_ERR_ {
-    failure ALLOC                "Failed to alloc proc node",
-    failure NOT_FOUND            "Failed to find proc node with given pid",
-    failure DELETE               "Failed to delete proc node",
-    failure GET_NAME             "Failed to get name of the process",
-    failure OUT_OF_PID           "Ran out of pid",
-};
-
 // errors related to the process manager
 errors proc_mgmt PROC_MGMT_ERR_ {
     failure NOT_MONITOR          "Received monitor-only request from non-monitor domain",
@@ -757,6 +748,10 @@ errors proc_mgmt PROC_MGMT_ERR_ {
     failure DOMAIN_NOT_RUNNING   "Domain is not currently running",
     failure ALREADY_SPANNED      "Domain has already been spanned to the given core",
     failure KILL                 "Failed to kill requested domain",
+
+    failure PID_NOT_FOUND        "Failed to find process with the given pid",
+    failure GET_NAME             "Failed to get name",
+    failure NO_AVAILABLE_PID     "Ran out of pid",
 };
 
 // errors from ELF library
