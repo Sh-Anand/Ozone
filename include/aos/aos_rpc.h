@@ -45,7 +45,6 @@ enum rpc_msg_type {
     RPC_TERMINAL_PUTCHAR,
     RPC_STRESS_TEST,
     RPC_BIND_NAMESERVER,
-    RPC_USER,
     RPC_MSG_COUNT
 };
 
@@ -59,6 +58,7 @@ struct aos_rpc_msg_ram {
 
 struct aos_rpc {
     struct aos_chan chan;
+    struct thread_mutex recv_mutex;
 };
 
 struct rpc_process_spawn_call_msg {

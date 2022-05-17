@@ -22,7 +22,7 @@ typedef uint8_t lmp_single_msg_size_t;
     (LMP_MSG_LENGTH * sizeof(uintptr_t) - sizeof(lmp_single_msg_size_t)                  \
      - sizeof(rpc_identifier_t))
 
-static_assert(LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE
+STATIC_ASSERT(LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE
                   <= (1 << (sizeof(lmp_single_msg_size_t) * 8)),
               "lmp_single_msg_size_t too small");
 
@@ -35,6 +35,8 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const voi
                        struct capref *ret_cap, struct lmp_helper *helper)
 {
     errval_t err;
+    helper->payload_frame = NULL_CAP;
+    helper->mapped_frame = NULL;
 
     if (buf == NULL && size != 0) {
         return ERR_INVALID_ARGS;
@@ -49,9 +51,6 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const voi
             OFFSET(ret_payload, sizeof(lmp_single_msg_size_t) + sizeof(rpc_identifier_t)),
             buf, size);
         *ret_cap = cap;
-
-        helper->payload_frame = NULL_CAP;
-        helper->mapped_frame = NULL;
 
     } else {
         // Buffer doesn't fit, make and map frame cap
@@ -103,6 +102,8 @@ errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap,
                          struct lmp_helper *helper)
 {
     errval_t err;
+    helper->payload_frame = NULL_CAP;
+    helper->mapped_frame = NULL;
 
     rpc_identifier_t type = CAST_DEREF(rpc_identifier_t, recv_msg->words,
                                        sizeof(lmp_single_msg_size_t));
@@ -134,18 +135,15 @@ errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap,
         type = CAST_DEREF(rpc_identifier_t, frame_payload, sizeof(size_t));  // replace
         buf = OFFSET(frame_payload, sizeof(size_t) + sizeof(rpc_identifier_t));
 
-        *recv_cap = NULL_CAP;  // no cap is actually received
         helper->payload_frame = *recv_cap;
         helper->mapped_frame = frame_payload;
 
+        *recv_cap = NULL_CAP;  // no cap is actually received
     } else {
         size = (size_t)CAST_DEREF(lmp_single_msg_size_t, recv_msg->words, 0);
         // type is already decoded
         buf = OFFSET(recv_msg->words,
                      sizeof(lmp_single_msg_size_t) + sizeof(rpc_identifier_t));
-
-        helper->payload_frame = NULL_CAP;
-        helper->mapped_frame = NULL;
     }
 
     *ret_type = type;
@@ -227,13 +225,13 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier, struct cap
     return SYS_ERR_OK;
 }
 
-static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
+static errval_t rpc_lmp_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
                              struct capref call_cap, const void *call_buf,
                              size_t call_size, struct capref *ret_cap, void **ret_buf,
                              size_t *ret_size)
 {
-    assert(chan->type == AOS_CHAN_TYPE_LMP);
-    struct lmp_chan *lc = &chan->lc;
+    assert(rpc->chan.type == AOS_CHAN_TYPE_LMP);
+    struct lmp_chan *lc = &rpc->chan.lc;
 
     errval_t err;
 
@@ -249,6 +247,7 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     }
 
     // Make the call
+    // We do not use mutex to protect send since it may trigger recursive RPC
     err = rpc_lmp_send(lc, identifier, call_cap, call_buf, call_size);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "rpc_lmp_call: failed to send\n");
@@ -258,18 +257,22 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     // Receive acknowledgement and/or return message
     struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
     struct capref recv_cap;
-    while (true) {
-        err = lmp_chan_recv(lc, &recv_msg, &recv_cap);
-        if (err_is_fail(err)) {
-            if (err == LIB_ERR_NO_LMP_MSG) {
-                thread_yield();
+    THREAD_MUTEX_ENTER(&rpc->recv_mutex)
+    {
+        while (true) {
+            err = lmp_chan_recv(lc, &recv_msg, &recv_cap);
+            if (err_is_fail(err)) {
+                if (err == LIB_ERR_NO_LMP_MSG) {
+                    thread_yield();
+                } else {
+                    return err;
+                }
             } else {
-                return err;
+                break;
             }
-        } else {
-            break;
         }
     }
+    THREAD_MUTEX_EXIT(&rpc->recv_mutex)
 
     // Refill recv cap if the slot is consumed
     if (!capref_is_null(recv_cap)) {
@@ -330,28 +333,19 @@ static errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     return err;
 }
 
-static errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
-                              struct capref call_cap, const void *call_buf,
-                              size_t call_size, struct capref *ret_cap, void **ret_buf,
-                              size_t *ret_size)
+errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                      struct capref call_cap, const void *call_buf, size_t call_size,
+                      struct capref *ret_cap, void **ret_buf, size_t *ret_size)
 {
-    switch (chan->type) {
+    switch (rpc->chan.type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_call(chan, identifier, call_cap, call_buf, call_size, ret_cap,
+        return rpc_lmp_call(rpc, identifier, call_cap, call_buf, call_size, ret_cap,
                             ret_buf, ret_size);
     case AOS_CHAN_TYPE_UMP:
         return LIB_ERR_NOT_IMPLEMENTED;
     default:
         assert(!"aos_chan_nack: unknown chan->type");
     }
-}
-
-errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
-                      struct capref call_cap, const void *call_buf, size_t call_size,
-                      struct capref *ret_cap, void **ret_buf, size_t *ret_size)
-{
-    return aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
-                         ret_buf, ret_size);
 }
 
 errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
@@ -565,6 +559,7 @@ errval_t aos_rpc_init(struct aos_rpc *rpc)
 {
     memset(rpc, 0, sizeof(*rpc));
     assert(rpc->chan.type == AOS_CHAN_TYPE_UNKNOWN);
+    thread_mutex_init(&rpc->recv_mutex);
     return SYS_ERR_OK;
 }
 
