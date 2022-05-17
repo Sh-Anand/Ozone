@@ -390,7 +390,6 @@ static void server_ump_handler(void *arg)
 
 FREE_REPLY_PAYLOAD:
     free(reply_payload);
-FREE_RECV_PAYLOAD:
     free(recv_payload);
 RE_REGISTER:
     err = ump_chan_register_recv(uc, get_default_waitset(),
