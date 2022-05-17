@@ -337,9 +337,8 @@ HANDLER(terminal_gets_handler)
 		char *buf = (char*)malloc(*len);
 		size_t i = 0;
 		for (; i < *len; i++) {
-			DEBUG_PRINTF("Reading character...\n");
 			buf[i] = terminal_getchar();
-			if (buf[i] == '\0' || buf[i] == 0x03 || buf[i] == 0x04 || buf[i] == 0x17) break; // terminate if EOF like characters are read
+			//if (buf[i] == '\0' || buf[i] == 0x03 || buf[i] == 0x04 || buf[i] == 0x17) break; // terminate if EOF like characters are read
 		}
 		*out_payload = realloc(buf, i); // in case there has been less read than requested
 		if (!*out_payload) *out_payload = buf; // in case realloc failed
@@ -358,13 +357,15 @@ HANDLER(terminal_puts_handler)
 		acquire_spinlock(global_print_lock);
 		size_t i = 0;
 		for (; i < in_size; i++) {
-			if (c[i] == 0) break;
+			if (c[i] == 0) {
+				break;
+			}
 			grading_rpc_handler_serial_putchar(c[i]);
 			terminal_putchar(c[i]);
 		}
 		release_spinlock(global_print_lock);
 		MALLOC_OUT_MSG_WITH_SIZE(len, size_t, sizeof(size_t));
-		*len = i;
+		*len = in_size;
 		return SYS_ERR_OK;
 	} else {
 		return forward_to_core(0, in_payload, in_size, out_payload, out_size);

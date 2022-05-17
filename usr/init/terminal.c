@@ -156,6 +156,7 @@ size_t local_write_function(const char* buf, size_t len)
 {
 	acquire_spinlock(global_print_lock);
 	for (size_t i = 0; i < len; i++) {
+		if (buf[i] == 0) break;
 		grading_rpc_handler_serial_putchar(buf[i]);
 		terminal_putchar(buf[i]);
 	}

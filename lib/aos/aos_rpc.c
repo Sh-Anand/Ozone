@@ -373,7 +373,6 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
     if (err_is_ok(err)) {
         assert(ret_size >= sizeof(char));
         *retc = *ret_char;
-        // printf("retc: %c (err: %d)\n", *retc, err);
     }
     free(ret_char);
     return err;
@@ -393,8 +392,17 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
 
 errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, size_t *retlen)
 {
-	errval_t err = aos_rpc_call_general(rpc, RPC_TERMINAL_PUTS, NULL_CAP, buf, len, NULL, (void**)&retlen, NULL);
+	size_t *rbuf = NULL;
+	size_t rlen = 0;
+	char* tmp_buf = alloca(len+1);
+	memcpy(tmp_buf, buf, len);
+	tmp_buf[len] = 0;
+	errval_t err = aos_rpc_call_general(rpc, RPC_TERMINAL_PUTS, NULL_CAP, tmp_buf, len+1, NULL, (void**)&rbuf, &rlen);
 	
+	assert(rlen >= sizeof(size_t));
+	*retlen = *rbuf;
+	free(rbuf);
+		
 	return err;
 }
 
@@ -407,8 +415,7 @@ errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t 
 	return err;
 }
 
-errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core,
-                               domainid_t *newpid)
+errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core, domainid_t *newpid)
 {
     size_t call_msg_size = sizeof(struct rpc_process_spawn_call_msg) + strlen(cmdline) + 1;
     struct rpc_process_spawn_call_msg *call_msg = calloc(call_msg_size, 1);

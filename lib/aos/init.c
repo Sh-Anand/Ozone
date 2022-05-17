@@ -103,6 +103,8 @@ static size_t aos_terminal_write(const char *buf, size_t len)
 		sent++;
 	}*/
 	
+	//DEBUG_PRINTF("str: '%s' (%d)\n", buf, strlen(buf));
+	
 	// this is the way
 	size_t ret_len;
 	err = aos_rpc_serial_puts(serial_rpc, buf, len, &ret_len);
@@ -110,6 +112,8 @@ static size_t aos_terminal_write(const char *buf, size_t len)
 		DEBUG_ERR(err, "Failed to print!");
 		return 0;
 	}
+	
+	//if (ret_len > len) DEBUG_PRINTF("ret_len: %llu, len: %llu\n", ret_len, len);
 	
 	// return the number of characters sent
 	return ret_len;
@@ -145,7 +149,7 @@ static size_t aos_terminal_read(char *buf, size_t len)
 	
     return read;
 }
-
+static size_t local_terminal_write(const char* buf, size_t len) __attribute__((unused));
 static size_t local_terminal_write(const char* buf, size_t len)
 {
 	if (local_terminal_write_function) return local_terminal_write_function(buf, len);

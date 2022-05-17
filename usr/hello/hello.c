@@ -368,7 +368,7 @@ int main(int argc, char *argv[])
 
     printf("Hello world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
-        printf("arg[%d]: %s\n\0", i, argv[i]);
+        printf("arg[%d]: %s\n", i, argv[i]);
 		fflush(stdout);
     }
 
@@ -603,12 +603,12 @@ int main(int argc, char *argv[])
             } else if (c == 127 || c == 8) {
                 if (offset > 0) {
                     printf("\b \b");  // destructive backspace
-                    fflush(stdout);
+                    //fflush(stdout);
                     offset--;
                 }
             } else {
                 putchar(c);  // echo
-                fflush(stdout);
+                //fflush(stdout);
                 buf[offset] = c;
                 offset++;
                 if (offset == SHELL_BUF_SIZE) {

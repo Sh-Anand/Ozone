@@ -784,9 +784,9 @@ static int bsp_main(int argc, char *argv[])
 
     debug_printf("Message handler loop\n");
 	
-	struct spawninfo hello_si;
-	domainid_t hello_pid;
-	err = spawn_load_by_name("hello", &hello_si, &hello_pid);
+	struct spawninfo shell_si;
+	domainid_t shell_pid;
+	err = spawn_load_by_name("sh", &shell_si, &shell_pid);
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;
