@@ -99,6 +99,13 @@ errval_t proc_mgmt_get_dispatcher(struct proc_mgmt *ps, domainid_t pid,
     return SYS_ERR_OK;
 }
 
+errval_t proc_mgmt_get_chan(struct proc_mgmt *ps, domainid_t pid, struct aos_chan **chan)
+{
+    FIND_NODE_OR_RETURN_ERR(node)
+    *chan = &node->chan;
+    return SYS_ERR_OK;
+}
+
 errval_t proc_mgmt_get_all_pids(struct proc_mgmt *ps, domainid_t **pids, size_t *pid_count)
 {
     if (ps->running_count == 0) {

@@ -34,10 +34,11 @@ struct aos_chan {
 typedef uint8_t rpc_identifier_t;
 enum rpc_identifier {
     RPC_ACK,
-    RPC_ACK_CAP_TRANSFER,
+    RPC_ACK_CAP_CHANNEL,  // on UMP: capability transfer channel is setup
+    RPC_PUT_CAP,          // on LMP: this message is putting a cap in the init channel
     RPC_ERR,
-    RPC_MSG_IN_FRAME,
-    RPC_CAP_TRANSFER,
+    RPC_MSG_IN_FRAME,     // on LMP: the actual message in encode in the frame cap
+    RPC_TRANSFER_CAP,     // on LMP: transfer cap to the init channel of the given domain
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,
@@ -99,6 +100,8 @@ errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap_
                          struct lmp_helper *helper);
 
 errval_t lmp_cleanup(struct lmp_helper *helper);
+
+errval_t lmp_put_cap(struct lmp_chan *lc, struct capref cap);
 
 /**
  * Prefix an identifier to the buffer

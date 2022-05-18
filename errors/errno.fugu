@@ -384,6 +384,7 @@ errors libaos LIB_ERR_ {
     failure UMP_CHAN_ACCEPT     "Failure in ump_chan_accept()",
     failure LMP_ALLOC_RECV_SLOT "Failure in lmp_chan_alloc_recv_slot()",
     failure LMP_NOT_CONNECTED   "Channel is disconnected",
+    failure LMP_PUT_CAP   "Failed to put cap in LMP channel",
     failure MSGBUF_OVERFLOW     "Attempted to demarshall beyond bounds of message buffer",
     failure MSGBUF_CANNOT_GROW  "Failed to grow message buffer while marshalling",
     failure LMP_SERIALIZE       "Failed to serialize LMP message",

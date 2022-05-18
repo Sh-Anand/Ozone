@@ -120,6 +120,7 @@ void urpc_handler(void *arg)
 
     uint8_t *recv_payload = NULL;
     size_t recv_size = 0;
+    struct capref recv_cap = NULL_CAP;
 
     errval_t err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
     if (err == LIB_ERR_RING_NO_MSG) {
@@ -131,6 +132,19 @@ void urpc_handler(void *arg)
     }
 
     rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_payload);
+
+    if (recv_type & RPC_SPECIAL_CAP_TRANSFER_FLAG) {
+        err = ump_recv_cap(uc, &recv_cap);
+        if (err_is_fail(err)) {
+            err = err_push(err, LIB_ERR_UMP_CHAN_RECV_CAP);
+            DEBUG_ERR(err, "rpc_ump_call: ump_recv_cap failed\n");
+            goto FREE_RECV_PAYLOAD;
+        }
+
+        // Clear the flag
+        recv_type ^= RPC_SPECIAL_CAP_TRANSFER_FLAG;
+    }
+
     if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
         DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", recv_type);
         goto FREE_RECV_PAYLOAD;
@@ -144,8 +158,6 @@ void urpc_handler(void *arg)
     err = rpc_handlers[recv_type](NULL, recv_payload + sizeof(rpc_identifier_t),
                                   recv_size - sizeof(rpc_identifier_t), &reply_payload,
                                   &reply_size, NULL_CAP, &reply_cap);
-
-    assert(capref_is_null(reply_cap));  // cannot send cap for now
 
     if (err_is_fail(err)) {
         err = aos_chan_nack(chan, err);

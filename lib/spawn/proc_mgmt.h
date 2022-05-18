@@ -66,6 +66,15 @@ errval_t proc_mgmt_get_dispatcher(struct proc_mgmt *ps, domainid_t pid,
                                   struct capref *dispatcher);
 
 /**
+ * Get aos channel of a process by PID.
+ * @param ps
+ * @param pid
+ * @param chan
+ * @return
+ */
+errval_t proc_mgmt_get_chan(struct proc_mgmt *ps, domainid_t pid, struct aos_chan **chan);
+
+/**
  * Get an array of all PIDs.
  * @param ps
  * @param pids  Pointer to a domainid_t* which is set as the array. Should be freed.

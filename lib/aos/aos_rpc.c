@@ -274,10 +274,10 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
             THREAD_MUTEX_BREAK;
         }
 
-        // Step 2: decode the reply and make sure it's RPC_ACK_CAP_TRANSFER
+        // Step 2: decode the reply and make sure it's RPC_ACK_CAP_CHANNEL
         assert(recv_size >= sizeof(rpc_identifier_t));
         rpc_identifier_t recv_identifier = CAST_DEREF(rpc_identifier_t, recv_payload, 0);
-        if (recv_identifier == RPC_ACK_CAP_TRANSFER) {
+        if (recv_identifier == RPC_ACK_CAP_CHANNEL) {
             // pass
             assert(recv_size == sizeof(rpc_identifier_t));
         } else if (recv_identifier == RPC_ERR) {
@@ -298,13 +298,28 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
             struct lmp_recv_msg dummy_msg = LMP_RECV_MSG_INIT;
             memset(dummy_msg.words, 0, sizeof(dummy_msg.words));
 
-            // Protocol: RPC_CAP_TRANSFER, domain ID, call_cap
-            CAST_DEREF(rpc_identifier_t, dummy_msg.words, 0) = RPC_CAP_TRANSFER;
-            CAST_DEREF(domainid_t, dummy_msg.words, sizeof(rpc_identifier_t)) = uc->pid;
-            err = lmp_try_send(&get_init_rpc()->chan.lc, dummy_msg.words, call_cap);
+            // Protocol: call_cap, [size, RPC_TRANSFER_CAP, payload = domain ID]
+            uintptr_t send_words[LMP_MSG_LENGTH];
+            struct capref send_cap;
+            struct lmp_helper send_helper;
+
+            // Serialization
+            // We do not use mutex to protect send since it may trigger recursive RPC
+            err = lmp_serialize(RPC_TRANSFER_CAP, call_cap, &uc->pid, sizeof(uc->pid),
+                                send_words, &send_cap, &send_helper);
+            if (err_is_fail(err)) {
+                return err_push(err, LIB_ERR_LMP_SERIALIZE);
+            }
+            assert(capcmp(send_cap, call_cap));
+            err = lmp_try_send(&get_init_rpc()->chan.lc, send_words, send_cap);
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "ump_send_cap: cap transfer step 3 fail\n");
                 THREAD_MUTEX_BREAK;
+            }
+
+            errval_t err2 = lmp_cleanup(&send_helper);
+            if (err_is_fail(err2)) {
+                DEBUG_ERR(err2, "ump_send_cap: failed to clean up\n");
             }
         }
     }
@@ -324,14 +339,11 @@ errval_t ump_recv_cap(struct ump_chan *uc, struct capref *recv_cap)
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
 
-    uint8_t *recv_payload = NULL;
-    size_t recv_size = 0;
-
     // Grab init rpc for capability transfer
     THREAD_MUTEX_ENTER(&get_init_rpc()->mutex)
     {
-        // Step 1: send RPC_ACK_CAP_TRANSFER from UMP channel
-        rpc_identifier_t ack = RPC_ACK_CAP_TRANSFER;
+        // Step 1: send RPC_ACK_CAP_CHANNEL in UMP channel
+        rpc_identifier_t ack = RPC_ACK_CAP_CHANNEL;
         err = ump_chan_send(uc, &ack, sizeof(ack));
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_recv_cap: cap transfer step 1 fail\n");
@@ -340,32 +352,52 @@ errval_t ump_recv_cap(struct ump_chan *uc, struct capref *recv_cap)
 
         // Step 2: receive the cap on init channel
         // Work on raw LMP channel to bypass mutex
-        struct lmp_recv_msg dummy_msg = LMP_RECV_MSG_INIT;
-        err = lmp_try_recv(&get_init_rpc()->chan.lc, &dummy_msg, recv_cap);
+        struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
+        err = lmp_try_recv(&get_init_rpc()->chan.lc, &recv_msg, recv_cap);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_recv_cap: cap transfer step 2 fail\n");
             THREAD_MUTEX_BREAK;
         }
 
-        // Step 3: decode the message
-        assert(recv_size >= sizeof(rpc_identifier_t));
-        rpc_identifier_t recv_identifier = CAST_DEREF(rpc_identifier_t, recv_payload, 0);
-        if (recv_identifier == RPC_ACK_CAP_TRANSFER) {
-            // pass
-            assert(recv_size == sizeof(rpc_identifier_t));
-        } else if (recv_identifier == RPC_ERR) {
-            assert(recv_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
-            err = CAST_DEREF(errval_t, recv_payload, sizeof(rpc_identifier_t));
-            DEBUG_ERR(err, "ump_recv_cap: cap transfer step 3 fail\n");
-            THREAD_MUTEX_BREAK;
+        // Refill the slot
+        if (!capref_is_null(*recv_cap)) {
+            lmp_chan_set_recv_slot(&get_init_rpc()->chan.lc, refill_slot);
         } else {
-            DEBUG_PRINTF("ump_recv_cap: unknown identifier %u in step 3\n",
-                         recv_identifier);
-            err = LIB_ERR_UMP_CHAN_RECV_CAP_UNKNOWN;
-            THREAD_MUTEX_BREAK;
+            err = slot_free(refill_slot);
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "ump_recv_cap: refill_slot fail\n");
+            }
         }
 
-        lmp_chan_set_recv_slot(&get_init_rpc()->chan.lc, refill_slot);
+        // Step 3: decode the message
+        rpc_identifier_t recv_type;
+        uint8_t *recv_buf;
+        size_t recv_size;
+        struct lmp_helper recv_helper;
+
+        err = lmp_deserialize(&recv_msg, recv_cap, &recv_type, &recv_buf, &recv_size,
+                              &recv_helper);
+        if (err_is_fail(err)) {
+            err = err_push(err, LIB_ERR_LMP_DESERIALIZE);
+            THREAD_MUTEX_BREAK;
+        }
+        if (recv_type == RPC_PUT_CAP) {
+            // pass
+            assert(recv_size == sizeof(rpc_identifier_t));
+            assert(!capref_is_null(*recv_cap));
+        } else if (recv_type == RPC_ERR) {
+            assert(recv_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
+            err = CAST_DEREF(errval_t, recv_buf, sizeof(rpc_identifier_t));
+            DEBUG_ERR(err, "ump_recv_cap: cap transfer step 3 fail\n");
+        } else {
+            DEBUG_PRINTF("ump_recv_cap: unknown identifier %u in step 3\n", recv_type);
+            err = LIB_ERR_UMP_CHAN_RECV_CAP_UNKNOWN;
+        }
+
+        errval_t err2 = lmp_cleanup(&recv_helper);
+        if (err_is_fail(err2)) {
+            DEBUG_ERR(err2, "ump_recv_cap: failed to clean up\n");
+        }
     }
     THREAD_MUTEX_EXIT(&get_init_rpc()->mutex)
 
@@ -633,6 +665,11 @@ errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
     default:
         assert(!"aos_chan_nack: unknown chan->type");
     }
+}
+
+errval_t lmp_put_cap(struct lmp_chan *lc, struct capref cap)
+{
+    return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0);
 }
 
 errval_t aos_chan_nack(struct aos_chan *chan, errval_t err)

@@ -10,11 +10,12 @@
 #include <spawn/spawn.h>
 #include <grading.h>
 
+// Does not allow cap sending or receiving
 static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
                                 void **out_payload, size_t *out_size)
 {
     // XXX: trick to retrieve the rpc identifier by -1
-    // Bypass aos_rpc and aos_chan to put raw buffer
+    // Bypass aos_rpc, aos_chan, and ump_chan to operate on raw buffer
     errval_t err = ring_producer_send(&urpc[core]->chan.uc.send,
                                       ((uint8_t *)in_payload) - 1, in_size + 1);
     if (err_is_fail(err)) {
@@ -156,7 +157,8 @@ RPC_HANDLER(ram_request_msg_handler)
             err = err_push(err, LIB_ERR_SLOT_ALLOC);
             goto RET;
         }
-        err = ram_forge(ram_cap, ram->base, ram->bytes, disp_get_current_core_id());
+        err = ram_forge(ram_cap, ram->base, ram->bytes,
+                        disp_get_current_core_id());  // XXX: owner?
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ram_request_msg_handler: failed to forge RAM");
             goto RET;
@@ -184,43 +186,6 @@ RPC_HANDLER(ram_request_msg_handler)
     } else {
         return err;
     }
-}
-
-RPC_HANDLER(bind_core_urpc_handler)
-{
-    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_bind_core_urpc_msg);
-    errval_t err;
-
-    DEBUG_PRINTF("setup urpc binding with core %u (listener_first = %u)\n", msg->core,
-                 msg->listener_first);
-
-    // Forge frame
-    assert(msg->frame.bytes == (UMP_CHAN_SHARED_FRAME_SIZE * 2));
-    struct capref urpc_frame;
-    err = slot_alloc(&urpc_frame);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-    err = frame_forge(urpc_frame, msg->frame.base, msg->frame.bytes,
-                      disp_get_current_core_id());
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Setup URPC
-    err = setup_urpc(msg->core, urpc_frame, false, msg->listener_first);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Start handling URPCs
-    err = ump_chan_register_recv(&urpc_listen_from[msg->core]->uc, get_default_waitset(),
-                                 MKCLOSURE(urpc_handler, urpc_listen_from[msg->core]));
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    return SYS_ERR_OK;
 }
 
 RPC_HANDLER(remote_ram_request_handler)
@@ -336,12 +301,14 @@ RPC_HANDLER(process_get_all_pids_handler)
     for (coreid_t core = 0; core < MAX_COREID; ++core) {
         size_t msg_size = 0;
         if (core == disp_get_current_core_id()) {
-            err = get_local_pids_handler(arg, NULL, 0, (void **)&msg[core], &msg_size, NULL_CAP, NULL);
+            err = get_local_pids_handler(arg, NULL, 0, (void **)&msg[core], &msg_size,
+                                         NULL_CAP, NULL);
             if (err_is_fail(err)) {
                 return err;
             }
         } else if (urpc[core] != NULL) {
-            err = aos_rpc_call(urpc[core], INTERNAL_RPC_GET_LOCAL_PIDS, NULL_CAP, NULL, 0, NULL, (void **)&msg[core], &msg_size);
+            err = aos_rpc_call(urpc[core], INTERNAL_RPC_GET_LOCAL_PIDS, NULL_CAP, NULL, 0,
+                               NULL, (void **)&msg[core], &msg_size);
             if (err_is_fail(err)) {
                 return err;
             }
@@ -360,7 +327,8 @@ RPC_HANDLER(process_get_all_pids_handler)
     size_t offset = 0;
     for (coreid_t core = 0; core < MAX_COREID; ++core) {
         if (msg[core] != NULL) {
-            memcpy(reply->pids + offset, msg[core]->pids, msg[core]->count * sizeof(domainid_t));
+            memcpy(reply->pids + offset, msg[core]->pids,
+                   msg[core]->count * sizeof(domainid_t));
             offset += msg[core]->count;
 
             free(msg[core]);
@@ -404,8 +372,148 @@ RPC_HANDLER(terminal_putchar_handler)
     }
 }
 
+
+RPC_HANDLER(bind_core_urpc_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_bind_core_urpc_msg);
+    errval_t err;
+
+    DEBUG_PRINTF("setup urpc binding with core %u (listener_first = %u)\n", msg->core,
+                 msg->listener_first);
+
+    // Forge frame
+    assert(msg->frame.bytes == (UMP_CHAN_SHARED_FRAME_SIZE * 2));
+    struct capref urpc_frame;
+    err = slot_alloc(&urpc_frame);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+    err = frame_forge(urpc_frame, msg->frame.base, msg->frame.bytes,
+                      disp_get_current_core_id());  // XXX: owner?
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Setup URPC
+    err = setup_urpc(msg->core, urpc_frame, false, msg->listener_first);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Start handling URPCs
+    err = ump_chan_register_recv(&urpc_listen_from[msg->core]->uc, get_default_waitset(),
+                                 MKCLOSURE(urpc_handler, urpc_listen_from[msg->core]));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    return SYS_ERR_OK;
+}
+
+RPC_HANDLER(cap_transfer_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+    assert(!capref_is_null(in_cap));
+
+    errval_t err;
+
+    coreid_t core = spawn_get_core(*pid);
+    if (core == disp_get_current_core_id()) {
+        struct aos_chan *chan;
+        err = spawn_get_chan(*pid, &chan);
+        if (err_is_fail(err)) {
+            return err;
+        }
+        assert(chan->type == AOS_CHAN_TYPE_LMP);
+        err = lmp_put_cap(&chan->lc, in_cap);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_LMP_PUT_CAP);
+        }
+    } else {
+        struct internal_rpc_remote_cap_transfer_msg msg;
+        msg.pid = *pid;
+
+        // Serialize the cap
+        err = cap_direct_identify(in_cap, &msg.cap);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_CAP_IDENTIFY);
+        }
+
+        // Check and send
+        switch (msg.cap.type) {
+        case ObjType_Frame:
+        case ObjType_DevFrame:
+        case ObjType_RAM:
+            err = aos_rpc_call(urpc[core], INTERNAL_RPC_REMOTE_CAP_TRANSFER, NULL_CAP,
+                               &msg, sizeof(msg), NULL, NULL, NULL);
+            if (err_is_fail(err)) {
+                return err;
+            }
+            break;
+        default:
+            return MON_ERR_CAP_SEND;
+        }
+    }
+
+    return SYS_ERR_OK;
+}
+
+RPC_HANDLER(remote_cap_transfer_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_transfer_msg);
+    assert(msg->pid == disp_get_current_core_id());
+
+    errval_t err;
+
+    struct capref cap;
+    err = slot_alloc(&cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    switch (msg->cap.type) {
+    case ObjType_Frame:
+        err = frame_forge(cap, msg->cap.u.frame.base, msg->cap.u.frame.bytes,
+                          disp_get_current_core_id());  // XXX: owner?
+        if (err_is_fail(err)) {
+            return err_push(err, MON_ERR_CAP_CREATE);
+        }
+        break;
+    case ObjType_DevFrame:
+        err = devframe_forge(cap, msg->cap.u.devframe.base, msg->cap.u.devframe.bytes,
+                          disp_get_current_core_id());  // XXX: owner?
+        if (err_is_fail(err)) {
+            return err_push(err, MON_ERR_CAP_CREATE);
+        }
+    case ObjType_RAM:
+        err = ram_forge(cap, msg->cap.u.ram.base, msg->cap.u.ram.bytes,
+                             disp_get_current_core_id());  // XXX: owner?
+        if (err_is_fail(err)) {
+            return err_push(err, MON_ERR_CAP_CREATE);
+        }
+        break;
+    default:
+        return MON_ERR_CAP_CREATE;
+    }
+
+    // Put the cap
+    struct aos_chan *chan;
+    err = spawn_get_chan(msg->pid, &chan);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    assert(chan->type == AOS_CHAN_TYPE_LMP);
+    err = lmp_put_cap(&chan->lc, in_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_PUT_CAP);
+    }
+
+    return SYS_ERR_OK;
+}
+
 // Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
+    [RPC_TRANSFER_CAP] = cap_transfer_handler,
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,
     [RPC_RAM_REQUEST] = ram_request_msg_handler,
@@ -417,5 +525,6 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
     [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
+    [INTERNAL_RPC_REMOTE_CAP_TRANSFER] = remote_cap_transfer_handler,
     [INTERNAL_RPC_GET_LOCAL_PIDS] = get_local_pids_handler,
 };

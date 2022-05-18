@@ -61,6 +61,8 @@ errval_t spawn_kill(domainid_t pid);
 
 errval_t spawn_get_name(domainid_t pid, char **name);
 
+errval_t spawn_get_chan(domainid_t pid, struct aos_chan **chan);
+
 errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count);
 
 // Start a child process using the multiboot command line. Fills in si.
