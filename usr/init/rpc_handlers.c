@@ -325,8 +325,11 @@ HANDLER(spawn_msg_handler)
 
 HANDLER(process_get_name_handler)
 {
-    if (disp_get_current_core_id() == 0) {
-        CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+    CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+
+    coreid_t core = spawn_get_core(*pid);
+    if (disp_get_current_core_id() == core) {
+        grading_rpc_handler_process_get_name(*pid);
 
         char *name = NULL;
         errval_t err = spawn_get_name(*pid, &name);
@@ -338,32 +341,75 @@ HANDLER(process_get_name_handler)
         *out_size = strlen(name) + 1;
         return SYS_ERR_OK;
     } else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+        return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }
+}
+
+HANDLER(get_local_pids_handler)
+{
+    size_t count;
+    domainid_t *pids;
+    errval_t err = spawn_get_all_pids(&pids, &count);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    MALLOC_OUT_MSG_WITH_SIZE(reply, struct rpc_process_get_all_pids_return_msg,
+                             sizeof(struct rpc_process_get_all_pids_return_msg)
+                                 + count * sizeof(domainid_t));
+    reply->count = count;
+    memcpy(reply->pids, pids, count * sizeof(domainid_t));
+    free(pids);
+    return SYS_ERR_OK;
 }
 
 HANDLER(process_get_all_pids_handler)
 {
-    if (disp_get_current_core_id() == 0) {
-        grading_rpc_handler_process_get_all_pids();
+    grading_rpc_handler_process_get_all_pids();
 
-        size_t count;
-        domainid_t *pids;
-        errval_t err = spawn_get_all_pids(&pids, &count);
-        if (err_is_fail(err)) {
-            return err;
+    errval_t err;
+
+    struct rpc_process_get_all_pids_return_msg *msg[MAX_COREID];
+    memset(msg, 0, sizeof(msg));
+
+    size_t count = 0;
+
+    for (coreid_t core = 0; core < MAX_COREID; ++core) {
+        size_t msg_size = 0;
+        if (core == disp_get_current_core_id()) {
+            err = get_local_pids_handler(NULL, 0, (void **)&msg[core], &msg_size, NULL);
+            if (err_is_fail(err)) {
+                return err;
+            }
+        } else if (urpc[core] != NULL) {
+            err = aos_rpc_call(urpc[core], INTERNAL_RPC_GET_LOCAL_PIDS, NULL_CAP, NULL, 0, NULL, (void **)&msg[core], &msg_size);
+            if (err_is_fail(err)) {
+                return err;
+            }
+        } else {
+            continue;  // core not booted
         }
-
-        MALLOC_OUT_MSG_WITH_SIZE(reply, struct rpc_process_get_all_pids_return_msg,
-                                 sizeof(struct rpc_process_get_all_pids_return_msg)
-                                     + count * sizeof(domainid_t));
-        reply->count = count;
-        memcpy(reply->pids, pids, count * sizeof(domainid_t));
-        free(pids);
-        return SYS_ERR_OK;
-    } else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+        assert(msg_size >= sizeof(struct rpc_process_get_all_pids_return_msg));
+        count += msg[core]->count;
     }
+
+    MALLOC_OUT_MSG_WITH_SIZE(reply, struct rpc_process_get_all_pids_return_msg,
+                             sizeof(struct rpc_process_get_all_pids_return_msg)
+                                 + count * sizeof(domainid_t));
+    reply->count = count;
+
+    size_t offset = 0;
+    for (coreid_t core = 0; core < MAX_COREID; ++core) {
+        if (msg[core] != NULL) {
+            memcpy(reply->pids + offset, msg[core]->pids, msg[core]->count * sizeof(domainid_t));
+            offset += msg[core]->count;
+
+            free(msg[core]);
+        }
+    }
+    assert(offset == count);
+
+    return SYS_ERR_OK;
 }
 
 HANDLER(terminal_getchar_handler)
@@ -418,4 +464,5 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
     [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
+    [INTERNAL_RPC_GET_LOCAL_PIDS] = get_local_pids_handler,
 };
