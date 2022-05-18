@@ -47,8 +47,7 @@ static errval_t ensure_nameserver_chan(void)
     errval_t err;
 
     // Create a new LMP channel
-    ns_rpc.chan.type = AOS_CHAN_TYPE_LMP;
-    err = lmp_chan_init_local(&ns_rpc.chan.lc, NAMESERVER_CHAN_BUF_LEN);
+    err = aos_chan_lmp_init_local(&ns_rpc.chan, NAMESERVER_CHAN_BUF_LEN);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_LMP_CHAN_INIT);
         goto FAILURE_SETUP_NAMESERVER_RPC;

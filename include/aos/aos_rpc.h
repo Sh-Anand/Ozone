@@ -31,10 +31,13 @@ struct aos_chan {
     };
 };
 
-enum rpc_msg_type {
+typedef uint8_t rpc_identifier_t;
+enum rpc_identifier {
     RPC_ACK,
+    RPC_ACK_CAP_TRANSFER,
     RPC_ERR,
     RPC_MSG_IN_FRAME,
+    RPC_CAP_TRANSFER,
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,
@@ -45,11 +48,12 @@ enum rpc_msg_type {
     RPC_TERMINAL_PUTCHAR,
     RPC_STRESS_TEST,
     RPC_BIND_NAMESERVER,
-    RPC_MSG_COUNT
+    RPC_MSG_COUNT,
+    // User defined identifier cannot exceed this number
+    RPC_IDENTIFIER_MAX = (1U << (sizeof(uint8_t) * 8 - 1)) - 1,
+    // Internal usage
+    RPC_SPECIAL_CAP_TRANSFER_FLAG = (1U << (sizeof(uint8_t) * 8 - 1))
 };
-
-// Identifier can be used for multiple purpose, such as rpc_msg_type or payload size
-typedef uint8_t rpc_identifier_t;
 
 struct aos_rpc_msg_ram {
     size_t size;
@@ -58,7 +62,7 @@ struct aos_rpc_msg_ram {
 
 struct aos_rpc {
     struct aos_chan chan;
-    struct thread_mutex recv_mutex;
+    struct thread_mutex mutex;  // make one respond associated with one request
 };
 
 struct rpc_process_spawn_call_msg {
@@ -104,7 +108,10 @@ errval_t lmp_cleanup(struct lmp_helper *helper);
  * @param ret
  * @return
  */
-errval_t ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t identifier, void **ret);
+errval_t ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t identifier,
+                               void **ret);
+
+errval_t ump_recv_cap(struct ump_chan *uc, struct capref *recv_cap);
 
 /**
  * \brief Initialize an aos_rpc struct.
@@ -116,7 +123,38 @@ void aos_rpc_init(struct aos_rpc *rpc);
  */
 void aos_rpc_destroy(struct aos_rpc *rpc);
 
-/** There is no aos_chan_init(). Set type directly and use LMP/UMP initializers. */
+static inline void aos_chan_lmp_init(struct aos_chan *chan)
+{
+    chan->type = AOS_CHAN_TYPE_LMP;
+    lmp_chan_init(&chan->lc);
+}
+
+static inline errval_t aos_chan_lmp_accept(struct aos_chan *chan, size_t buflen_words,
+                                           struct capref endpoint)
+{
+    chan->type = AOS_CHAN_TYPE_LMP;
+    return lmp_chan_accept(&chan->lc, buflen_words, endpoint);
+}
+
+static inline errval_t aos_chan_lmp_init_local(struct aos_chan *chan, size_t buflen_words)
+{
+    chan->type = AOS_CHAN_TYPE_LMP;
+    return lmp_chan_init_local(&chan->lc, buflen_words);
+}
+
+static inline errval_t aos_chan_ump_init(struct aos_chan *chan, struct capref zeroed_frame,
+                                         enum UMP_CHAN_ROLE role, domainid_t pid)
+{
+    chan->type = AOS_CHAN_TYPE_UMP;
+    return ump_chan_init(&chan->uc, zeroed_frame, role, pid);
+}
+
+static inline errval_t aos_chan_ump_init_from_buf(struct aos_chan *chan, void *zeroed_buf,
+                                                  enum UMP_CHAN_ROLE role, domainid_t pid)
+{
+    chan->type = AOS_CHAN_TYPE_UMP;
+    return ump_chan_init_from_buf(&chan->uc, zeroed_buf, role, pid);
+}
 
 /**
  * \brief Destroy an aos_chan struct. Call LMP/UMP destroy function based on type.
@@ -138,9 +176,8 @@ void aos_chan_destroy(struct aos_chan *chan);
  * @return
  */
 errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
-                                    struct capref call_cap, const void *call_buf,
-                                    size_t call_size, struct capref *ret_cap,
-                                    void **ret_buf, size_t *ret_size);
+                      struct capref call_cap, const void *call_buf, size_t call_size,
+                      struct capref *ret_cap, void **ret_buf, size_t *ret_size);
 
 /**
  * Reply a successful RPC call.
@@ -150,7 +187,8 @@ errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
  * @param size
  * @return
  */
-errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf, size_t size);
+errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
+                      size_t size);
 
 /**
  * Reply a failed RPC call.

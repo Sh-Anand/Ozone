@@ -215,10 +215,8 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         aos_rpc_init(init_rpc);
 
         /* initialize init RPC client with lmp channel */
-        init_rpc->chan.type = AOS_CHAN_TYPE_LMP;
-
+        aos_chan_lmp_init(&init_rpc->chan);
         struct lmp_chan *init_lc = &init_rpc->chan.lc;
-        lmp_chan_init(init_lc);
 
         /* set remote endpoint to init's endpoint */
         assert(!capref_is_null(cap_initep) && "init ep not available");

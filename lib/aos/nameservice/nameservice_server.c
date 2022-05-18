@@ -111,9 +111,8 @@ static errval_t create_pending_lmp_chan_on_service(struct service *service)
     if (err_is_fail(err)) {
         return err;
     }
-    service->pending_lmp_chan->chan.type = AOS_CHAN_TYPE_LMP;
-    err = lmp_chan_init_local(&service->pending_lmp_chan->chan.lc,
-                              SERVER_SIDE_LMP_BUF_LEN);
+    err = aos_chan_lmp_init_local(&service->pending_lmp_chan->chan,
+                                  SERVER_SIDE_LMP_BUF_LEN);
     if (err_is_fail(err)) {
         delete_chan(service->pending_lmp_chan);
         return err_push(err, LIB_ERR_LMP_CHAN_INIT_LOCAL);
@@ -256,8 +255,7 @@ errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame)
         return err;
     }
     assert(chan->chan.type == AOS_CHAN_TYPE_UNKNOWN);
-    chan->chan.type = AOS_CHAN_TYPE_UMP;
-    err = ump_chan_init(&chan->chan.uc, frame, UMP_CHAN_SERVER);
+    err = aos_chan_ump_init(&chan->chan, frame, UMP_CHAN_SERVER, pid);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_UMP_CHAN_INIT);
         goto FAILURE_CREATE_UMP_CHAN;

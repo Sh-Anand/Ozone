@@ -33,8 +33,7 @@ errval_t nameserver_bind(domainid_t pid, struct capref client_ep, struct capref 
 
     assert(spawn_get_core(pid) == disp_get_core_id());
     b->pid = pid;
-    b->chan.type = AOS_CHAN_TYPE_LMP;
-    err = lmp_chan_accept(&b->chan.lc, NAMESERVER_EP_BUF_LEN, client_ep);
+    err = aos_chan_lmp_accept(&b->chan, NAMESERVER_EP_BUF_LEN, client_ep);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_LMP_CHAN_INIT);
         goto FAILURE;
@@ -45,8 +44,7 @@ errval_t nameserver_bind(domainid_t pid, struct capref client_ep, struct capref 
         err = err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
         goto FAILURE;
     }
-    b->notifier.type = AOS_CHAN_TYPE_LMP;
-    lmp_chan_init(&b->notifier.lc);
+    aos_chan_lmp_init(&b->notifier);
     b->notifier.lc.remote_cap = NULL_CAP;
 
     LIST_INSERT_HEAD(&clients, b, link);

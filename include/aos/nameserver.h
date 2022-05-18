@@ -19,7 +19,7 @@ enum nameservice_rpc_identifier {
     NAMESERVICE_DEREGISTER,           // [call] payload: name
                                       // [return] errval
     NAMESERVICE_LOOKUP,               // [call] payload: name
-                                      // [return] err / cap: lmp endpoint or frame
+                                      // [return] err / cap: lmp endpoint or frame, payload: pid
     NAMESERVICE_ENUMERATE,            // [call] none
                                       // [return] err / struct enumerate_reply_msg
     NAMESERVICE_RPC_COUNT

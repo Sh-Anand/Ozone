@@ -22,7 +22,7 @@ errval_t proc_mgmt_init(struct proc_mgmt *ps)
 {
     RB_INIT(&ps->running);
     LIST_INIT(&ps->free_list);
-    ps->pid_upper = 0;
+    ps->pid_upper = 1;
     ps->running_count = 0;
     return SYS_ERR_OK;
 }

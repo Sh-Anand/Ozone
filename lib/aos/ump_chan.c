@@ -13,8 +13,9 @@
  * \param uc  UMP channel
  * \param zeroed_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE that is already zeroed
  * \param client  Whether the current program is the client
+ * \param pid
  */
-errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role)
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role, domainid_t pid)
 {
     assert(uc != NULL);
 
@@ -36,7 +37,7 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
 
-    return ump_chan_init_from_buf(uc, buf, role);
+    return ump_chan_init_from_buf(uc, buf, role, pid);
 }
 
 /**
@@ -45,8 +46,9 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP
  * \param uc  UMP channel
  * \param zeroed_buf  Mapped memory region of the shared frame, should be memset to 0
  * \param client  Whether the current program is the client
+ * \param pid
  */
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role)
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role, domainid_t pid)
 {
     assert(uc != NULL);
     assert(role == UMP_CHAN_SERVER || role == UMP_CHAN_CLIENT);
@@ -66,6 +68,8 @@ errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_
     }
 
     waitset_chanstate_init(&uc->recv_waitset, CHANTYPE_UMP_IN);
+
+    uc->pid = pid;
 
     return SYS_ERR_OK;
 }

@@ -7,7 +7,9 @@
 struct aos_chan *urpc_listen_from[MAX_COREID];
 struct aos_rpc *urpc[MAX_COREID];
 
-errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame, bool listener_first) {
+errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame,
+                    bool listener_first)
+{
     assert(urpc[core] == NULL);
     assert(urpc_listen_from[core] == NULL);
 
@@ -31,8 +33,9 @@ errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame, bo
     if (urpc_listen_from[core] == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
-    urpc_listen_from[core]->type = AOS_CHAN_TYPE_UMP;
-    err = ump_chan_init_from_buf(&urpc_listen_from[core]->uc, urpc_buffer + (listener_first ? 0 : UMP_CHAN_SHARED_FRAME_SIZE), UMP_CHAN_SERVER);
+    err = aos_chan_ump_init_from_buf(
+        urpc_listen_from[core],
+        urpc_buffer + (listener_first ? 0 : UMP_CHAN_SHARED_FRAME_SIZE), UMP_CHAN_SERVER, 0);
     if (err_is_fail(err)) {
         return err;
     }
@@ -43,9 +46,9 @@ errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame, bo
         return LIB_ERR_MALLOC_FAIL;
     }
     aos_rpc_init(urpc[core]);
-    urpc[core]->chan.type = AOS_CHAN_TYPE_UMP;
-    err = ump_chan_init_from_buf(&urpc[core]->chan.uc,
-                                 urpc_buffer + + (listener_first ? UMP_CHAN_SHARED_FRAME_SIZE : 0), UMP_CHAN_CLIENT);
+    err = aos_chan_ump_init_from_buf(
+        &urpc[core]->chan,
+        urpc_buffer + +(listener_first ? UMP_CHAN_SHARED_FRAME_SIZE : 0), UMP_CHAN_CLIENT, 0);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_UMP_CHAN_INIT);
     }

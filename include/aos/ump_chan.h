@@ -20,6 +20,7 @@ struct ump_chan {
     struct waitset_chanstate recv_waitset;  ///< State belonging to waitset (for recv)
     struct ring_consumer recv;              ///< Ringbuffer receiver
     struct ring_producer send;              ///< Ringbuffer sender
+    domainid_t pid;                         ///< PID of the other end
 };
 
 enum UMP_CHAN_ROLE {
@@ -27,8 +28,8 @@ enum UMP_CHAN_ROLE {
     UMP_CHAN_CLIENT
 };
 
-errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role);
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role);
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role, domainid_t pid);
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role, domainid_t pid);
 void ump_chan_destroy(struct ump_chan *uc);
 
 /**
@@ -53,6 +54,19 @@ static inline errval_t ump_chan_send(struct ump_chan *uc, const void *payload, s
  */
 static inline errval_t ump_chan_recv(struct ump_chan *uc, void **payload, size_t *size) {
     return ring_consumer_recv_non_blocking(&uc->recv, payload, size);
+}
+
+/**
+ * \brief Retrieve an UMP payload
+ *
+ * \param uc UMP channel
+ * \param payload UMP payload, malloc by this function and should be freed outside
+ * \param size Payload size, to be filled by this function
+ *
+ * \return
+ */
+static inline errval_t ump_chan_recv_blocking(struct ump_chan *uc, void **payload, size_t *size) {
+    return ring_consumer_recv(&uc->recv, payload, size);
 }
 
 /**

@@ -57,9 +57,10 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
 
     // Sanity check
     assert(ret_size == sizeof(domainid_t));
-    assert(!capref_is_null(ret_cap));
+    domainid_t pid = *((domainid_t *)ret_buf);
 
     // Identify the return cap
+    assert(!capref_is_null(ret_cap));
     struct capability c;
     err = cap_direct_identify(ret_cap, &c);
     if (err_is_fail(err)) {
@@ -69,20 +70,18 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
 
     // Create a new channel
     struct client_side_chan *chan = NULL;
-    err = create_chan(*((domainid_t *)ret_buf), &chan);
+    err = create_chan(pid, &chan);
     if (err_is_fail(err)) {
         goto FAILURE_CREATE_CHAN;
     }
 
     switch (c.type) {
     case ObjType_EndPointLMP: {
-        chan->rpc.chan.type = AOS_CHAN_TYPE_LMP;
-        struct lmp_chan *lc = &chan->rpc.chan.lc;
-
-        err = lmp_chan_accept(lc, CLIENT_SIDE_LMP_BUF_LEN, ret_cap);
+        err = aos_chan_lmp_accept(&chan->rpc.chan, CLIENT_SIDE_LMP_BUF_LEN, ret_cap);
         if (err_is_fail(err)) {
             goto FAILURE_CHAN_SETUP;
         }
+        struct lmp_chan *lc = &chan->rpc.chan.lc;
 
         // Send the local cap through the channel to complete setup
         err = aos_rpc_call(&chan->rpc, IDENTIFIER_NORMAL, lc->local_cap, NULL, 0, NULL,
@@ -92,10 +91,8 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
             goto FAILURE_CHAN_SETUP;
         }
     } break;
-    case ObjType_DevFrame: {
-        chan->rpc.chan.type = AOS_CHAN_TYPE_UMP;
-        struct ump_chan *uc = &chan->rpc.chan.uc;
-        err = ump_chan_init(uc, ret_cap, UMP_CHAN_CLIENT);
+    case ObjType_Frame: {
+        err = aos_chan_ump_init(&chan->rpc.chan, ret_cap, UMP_CHAN_CLIENT, pid);
         if (err_is_fail(err)) {
             goto FAILURE_CHAN_SETUP;
         }
