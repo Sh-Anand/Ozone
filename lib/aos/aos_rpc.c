@@ -173,18 +173,16 @@ errval_t lmp_cleanup(struct lmp_helper *helper)
     return SYS_ERR_OK;
 }
 
-errval_t ump_prefix_identifier(void **buf, size_t *size, rpc_identifier_t identifier) {
-    uint8_t *new_buf = malloc(sizeof(rpc_identifier_t) + *size);
+errval_t ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t identifier, void **ret) {
+    uint8_t *new_buf = malloc(sizeof(rpc_identifier_t) + size);
     if (new_buf == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
     CAST_DEREF(rpc_identifier_t, new_buf, 0) = identifier;
-    if (*size != 0) {
-        memcpy(OFFSET(new_buf, sizeof(rpc_identifier_t)), *buf, *size);
+    if (size != 0) {
+        memcpy(OFFSET(new_buf, sizeof(rpc_identifier_t)), buf, size);
     }
-    free(*buf);  // OK to be NULL
-    *buf = new_buf;
-    *size += 1;
+    *ret = new_buf;
     return SYS_ERR_OK;
 }
 
@@ -222,6 +220,26 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, uint8_t identifier, struct cap
         return err_push(err, LIB_ERR_LMP_CLEANUP);
     }
 
+    return SYS_ERR_OK;
+}
+
+static errval_t rpc_ump_send(struct ump_chan *uc, uint8_t identifier, struct capref cap,
+                             const void *buf, size_t size)
+{
+    errval_t err;
+    void *send_payload = NULL;
+    err = ump_prefix_identifier(buf, size, identifier, &send_payload);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    err = ump_chan_send(uc, send_payload, size + sizeof(rpc_identifier_t));
+    if (err_is_fail(err)) {
+        free(send_payload);
+        return err_push(err, LIB_ERR_UMP_CHAN_SEND);
+    }
+
+    free(send_payload);
     return SYS_ERR_OK;
 }
 
@@ -332,6 +350,74 @@ static errval_t rpc_lmp_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
 
     return err;
 }
+static errval_t rpc_ump_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
+                             struct capref call_cap, const void *call_buf,
+                             size_t call_size, struct capref *ret_cap, void **ret_buf,
+                             size_t *ret_size)
+{
+    assert(rpc->chan.type == AOS_CHAN_TYPE_UMP);
+    struct ump_chan *uc = &rpc->chan.uc;
+
+    if (!capref_is_null(call_cap)) {
+        return LIB_ERR_UMP_CHAN_SEND_CAP;
+    }
+    if (ret_cap != NULL) {
+        return LIB_ERR_UMP_CHAN_RECV_CAP;
+    }
+
+    errval_t err;
+
+    // Make the call
+    err = rpc_ump_send(uc, identifier, call_cap, call_buf, call_size);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "rpc_ump_call: failed to send\n");
+        return err;
+    }
+
+    // Receive acknowledgement and/or return message
+    uint8_t *recv_payload = NULL;
+    size_t recv_size = 0;
+    THREAD_MUTEX_ENTER(&rpc->recv_mutex)
+    {
+        while (true) {
+            err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
+            if (err_is_fail(err)) {
+                if (err == LIB_ERR_RING_NO_MSG) {
+                    thread_yield();
+                } else {
+                    return err;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    THREAD_MUTEX_EXIT(&rpc->recv_mutex)
+
+    if (*((rpc_identifier_t *)recv_payload) == RPC_ACK) {
+        if (ret_buf != NULL) {
+            // XXX: it is annoying to malloc a new buf and make the copy just to remove
+            //      the identifier. Consider moving it into ring buffer.
+            *ret_size = recv_size - sizeof(rpc_identifier_t);
+            *ret_buf = malloc(*ret_size);
+            if (*ret_buf == NULL) {
+                err = LIB_ERR_MALLOC_FAIL;
+                goto RET;
+            }
+            memcpy(*ret_buf, recv_payload + sizeof(rpc_identifier_t), *ret_size);
+        }
+        err = SYS_ERR_OK;
+        goto RET;
+    } else {
+        assert(recv_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
+        err = *((errval_t *)(recv_payload + sizeof(rpc_identifier_t)));
+        goto RET;
+    }
+
+RET:
+    free(recv_payload);
+    return err;
+}
 
 errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
                       struct capref call_cap, const void *call_buf, size_t call_size,
@@ -342,9 +428,10 @@ errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
         return rpc_lmp_call(rpc, identifier, call_cap, call_buf, call_size, ret_cap,
                             ret_buf, ret_size);
     case AOS_CHAN_TYPE_UMP:
-        return LIB_ERR_NOT_IMPLEMENTED;
+        return rpc_ump_call(rpc, identifier, call_cap, call_buf, call_size, ret_cap,
+                            ret_buf, ret_size);
     default:
-        assert(!"aos_chan_nack: unknown chan->type");
+        assert(!"aos_chan_nack: unknown rpc->chan.type");
     }
 }
 
@@ -355,7 +442,7 @@ errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
     case AOS_CHAN_TYPE_LMP:
         return rpc_lmp_send(&chan->lc, RPC_ACK, cap, buf, size);
     case AOS_CHAN_TYPE_UMP:
-        return LIB_ERR_NOT_IMPLEMENTED;
+        return rpc_ump_send(&chan->uc, RPC_ACK, cap, buf, size);
     default:
         assert(!"aos_chan_nack: unknown chan->type");
     }
@@ -367,7 +454,7 @@ errval_t aos_chan_nack(struct aos_chan *chan, errval_t err)
     case AOS_CHAN_TYPE_LMP:
         return rpc_lmp_send(&chan->lc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
     case AOS_CHAN_TYPE_UMP:
-        return LIB_ERR_NOT_IMPLEMENTED;
+        return rpc_ump_send(&chan->uc, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
     default:
         assert(!"aos_chan_nack: unknown chan->type");
     }

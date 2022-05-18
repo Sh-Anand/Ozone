@@ -2,15 +2,13 @@
 // Created by Zikai Liu on 4/27/22.
 //
 
+#include "init_urpc.h"
 #include "rpc_handlers.h"
 #include "mem_alloc.h"
 #include "mm/mm.h"
 #include <aos/kernel_cap_invocations.h>
 #include <spawn/spawn.h>
 #include <grading.h>
-#include <aos/ump_chan.h>
-
-struct aos_rpc *urpc[MAX_COREID];
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -74,9 +72,10 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
         goto RET;
     }
 
-
     if (*((rpc_identifier_t *)ret_payload) == RPC_ACK) {
         if (ret_payload != NULL) {
+            // XXX: it is annoying to malloc a new buf and make the copy just to remove
+            //      the identifier. Consider moving it into ring buffer.
             MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
             memcpy(reply, ret_payload + sizeof(rpc_identifier_t),
                    ret_size - sizeof(rpc_identifier_t));
@@ -194,12 +193,13 @@ HANDLER(ram_request_msg_handler)
         }
         struct RAM *ram = reply_payload;
 
-        // As seen from the init ram alloc function in mem_alloc.c, we place the RAM cap
-        // starting from the second slot of cnode_super
-        static cslot_t forge_ram_slot = 1;
-        struct capref ram_cap = { .cnode = cnode_super, .slot = forge_ram_slot++ };
-
         // Forge ram
+        struct capref ram_cap;
+        err = slot_alloc(&ram_cap);
+        if (err_is_fail(err)) {
+            err = err_push(err, LIB_ERR_SLOT_ALLOC);
+            goto RET;
+        }
         err = ram_forge(ram_cap, ram->base, ram->bytes, disp_get_current_core_id());
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ram_request_msg_handler: failed to forge RAM");
@@ -230,7 +230,44 @@ HANDLER(ram_request_msg_handler)
     }
 }
 
-HANDLER(remote_ram_request_msg_handler)
+HANDLER(bind_core_urpc_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_bind_core_urpc_msg);
+    errval_t err;
+
+    DEBUG_PRINTF("setup urpc binding with core %u (listener_first = %u)\n", msg->core,
+                 msg->listener_first);
+
+    // Forge frame
+    assert(msg->frame.bytes == (UMP_CHAN_SHARED_FRAME_SIZE * 2));
+    struct capref urpc_frame;
+    err = slot_alloc(&urpc_frame);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+    err = frame_forge(urpc_frame, msg->frame.base, msg->frame.bytes,
+                      disp_get_current_core_id());
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Setup URPC
+    err = setup_urpc(msg->core, urpc_frame, false, msg->listener_first);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Start handling URPCs
+    err = ump_chan_register_recv(&urpc_listen_from[msg->core]->uc, get_default_waitset(),
+                                 MKCLOSURE(urpc_handler, urpc_listen_from[msg->core]));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    return SYS_ERR_OK;
+}
+
+HANDLER(remote_ram_request_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     errval_t err;
@@ -379,5 +416,6 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_STRESS_TEST] = stress_test_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
-    [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_msg_handler,
+    [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
+    [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
 };

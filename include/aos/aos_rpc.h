@@ -98,13 +98,13 @@ errval_t lmp_cleanup(struct lmp_helper *helper);
 
 /**
  * Prefix an identifier to the buffer
- * @param buf         The input buffer will be copied and freed (can be NULL if size is
- *                    also 0). The pointer will be replaced as the output buffer.
- * @param size        Will increment by sizeof(rpc_identifier_t)
+ * @param buf         The input buffer (can be NULL if size is also 0).
+ * @param size
  * @param identifier
+ * @param ret
  * @return
  */
-errval_t ump_prefix_identifier(void **buf, size_t *size, rpc_identifier_t identifier);
+errval_t ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t identifier, void **ret);
 
 /**
  * \brief Initialize an aos_rpc struct.
