@@ -3,6 +3,6 @@
 
 #include "sh.h"
 
-int builtin(struct shell_env *env, const char* command);
+int builtin(struct shell_env *env);
 
 #endif // _BUILTINS_H

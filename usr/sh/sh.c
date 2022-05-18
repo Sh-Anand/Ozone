@@ -6,12 +6,9 @@
 
 #include <aos/debug.h>
 
+#include "strutil.h"
 #include "sh.h"
 #include "builtins.h"
-
-static char* command_buffer = NULL;
-static size_t command_buffer_size = 128; // default value
-static size_t command_buffer_offset = 0;
 
 
 // environment of the shell
@@ -23,8 +20,14 @@ static struct shell_env env;
  */
 inline static void allocate_command_buffer(void)
 {
-	command_buffer_size *= 2;
-	command_buffer = (char*)realloc(command_buffer, command_buffer_size);
+	env.command_buffer_size *= 2;
+	env.command_buffer = (char*)realloc(env.command_buffer, env.command_buffer_size);
+}
+
+inline static void allocate_argv(void)
+{
+	env.max_args *= 2;
+	env.argv = (char**)realloc(env.argv, sizeof(char*) * env.max_args);
 }
 
 /**
@@ -32,19 +35,17 @@ inline static void allocate_command_buffer(void)
  */
 static void setup_environment(void)
 {
-	// allocate command buffer space
-	command_buffer_size /= 2;
+	// allocate buffers
+	env.command_buffer_size = 64;
 	allocate_command_buffer();
+	env.max_args = 16;
+	allocate_argv();
 	
 	// set stdin to unbuffered
 	setbuffer(stdin, NULL, 0);
 	
 	// mark the shell as active
 	env.active = true;
-}
-
-inline static bool is_alpha(char c) {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
 /**
@@ -54,17 +55,17 @@ inline static bool is_alpha(char c) {
  */
 static uint8_t read_from_input(void)
 {
-	if (command_buffer_offset >= command_buffer_size) allocate_command_buffer();
+	if (env.command_buffer_offset >= env.command_buffer_size) allocate_command_buffer();
 	
 	char c = getchar();
 	
-	if (c == '\n' || c == '\r') {
-		command_buffer[command_buffer_offset++] = 0;
+	if (c == '\n' || c == '\r') { // enter was pressed
+		env.command_buffer[env.command_buffer_offset++] = 0;
 		printf("\r\n");
 		return 0;
-	} else if (c == 0x08 || c == 0x7f) {
-		if (command_buffer_offset) {
-			command_buffer[--command_buffer_offset] = 0;
+	} else if (c == 0x08 || c == 0x7f) { // backspace
+		if (env.command_buffer_offset) {
+			env.command_buffer[--env.command_buffer_offset] = 0;
 			printf("\b \b");
 		}
 		return 1;
@@ -87,8 +88,8 @@ static uint8_t read_from_input(void)
 		// TODO: handle escape sequences...
 		
 		return 1;
-	} else {
-		command_buffer[command_buffer_offset++] = c;
+	} else { // nothing interesting, just another character, so add it to the pile
+		env.command_buffer[env.command_buffer_offset++] = c;
 		putchar(c);
 		return 1;
 	}
@@ -107,11 +108,30 @@ int main(int argc, char **argv)
 	setup_environment();
 	
 	while (env.active) {
-		command_buffer_offset = 0;
+		// setup new command prompt
+		env.command_buffer_offset = 0;
 		shell_print_prefix();
-		while (read_from_input());
 		
-		if (builtin(&env, command_buffer)) continue;
+		// read the input
+		while (read_from_input());
+		if (env.command_buffer_offset == 0 || env.command_buffer[0] == 0) continue;
+		
+		// split the command line into tokens
+		env.argc = 0;
+		char* state;
+		
+		//TODO: support quoted strings
+		
+		// split string into tokens and store in env.argv
+		char* token = strtok_r(env.command_buffer, " \r\n\t", &state);
+		do {
+			if (argc == env.max_args) allocate_argv();
+			env.argv[env.argc++] = token;
+		} while ((token = strtok_r(NULL, " \r\n\t", &state)));
+		
+		if (env.argc == 0) continue;
+		
+		if (builtin(&env)) continue;
 	}
 	
 	puts("Shell terminating...\n");
