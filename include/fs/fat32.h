@@ -1,5 +1,14 @@
+#ifndef FS_FAT32_H_
+#define FS_FAT32_H_
+
 #include <fs/fs.h>
-#include <types.h>
+
+#include <drivers/sdhc.h>
+
+#define BPB_SECTOR 0
+#define BPB_RootClus 44
+#define BPB_RootClus_Size 4
+#define BPB_FATSz32  36
 
 typedef void *fat32_handle_t;
 typedef void *fat32_mount_t;
@@ -39,3 +48,9 @@ errval_t fat32_mkdir(void *st, const char *path);
 errval_t fat32_rmdir(void *st, const char *path);
 
 errval_t fat32_mount(const char *uri, fat32_mount_t *retst);
+
+void set_sd(struct sdhc_s *sd);
+
+errval_t fat32_init(struct sdhc_s *sd);
+
+#endif

@@ -987,6 +987,7 @@ errors fs FS_ERR_ {
     failure NOTEMPTY            "The given directory is not empty",
     
     failure READ                "Failure during file read",
+    failure BLOCK_READ          "Failure trying to read block from SD",
     failure WRITE               "Failure during writing the file",
     failure OPEN                "Failure during open",
     failure CLOSE               "Failure during close",

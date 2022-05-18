@@ -28,6 +28,7 @@
 #include <aos/capabilities.h>
 #include <ringbuffer/ringbuffer.h>
 #include <drivers/sdhc.h>
+#include <fs/fat32.h>
 
 #include "mem_alloc.h"
 #include <barrelfish_kpi/platform.h>
@@ -48,8 +49,6 @@ struct ump_chan *urpc_client[MAX_COREID] = { NULL };
 
 struct capref dev_cap_sdhc2;
 struct capref dev_cap_enet;
-
-struct sdhc_s *sd;
 
 /**
  * @brief TODO: make use of this function
@@ -451,10 +450,28 @@ static errval_t init_sd(void) {
     if(err_is_fail(err))
         return err;
     
+    struct sdhc_s *sd;
     err = sdhc_init(&sd, sdhc_base);
     if(err_is_fail(err))
         return err;
 
+    //set_sd(sd);
+
+    // err = fat32_init(sd);
+
+    struct capref dma;
+    char *dma_vaddr;
+    frame_alloc(&dma, BASE_PAGE_SIZE, NULL);
+    paging_map_frame_attr(get_current_paging_state(), (void **) &dma_vaddr, BASE_PAGE_SIZE, dma, VREGION_FLAGS_READ_WRITE_NOCACHE);
+    struct frame_identity dma_id;
+    cap_identify_mappable(dma, &dma_id);
+    lpaddr_t paddr = dma_id.base;
+    DEBUG_PRINTF("paddr: %p\n:", paddr);
+    sdhc_read_block(sd, 0, paddr);
+    debug_printf("%x, %x;\n",dma_vaddr[0], dma_vaddr[2]);
+    debug_printf("%d, %d;\n",(uint8_t) dma_vaddr[0], (uint8_t)dma_vaddr[2]);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "RIP");
     return SYS_ERR_OK;
 }
 
@@ -515,6 +532,8 @@ static int bsp_main(int argc, char *argv[])
 
     debug_printf("Initialized SD card\n");
 
+    return SYS_ERR_OK;
+    
     // Booting second core
     for (int i = 1; i < 4; i++) {
         err = boot_core(i);
