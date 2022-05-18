@@ -95,7 +95,7 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
     case ObjType_DevFrame: {
         chan->rpc.chan.type = AOS_CHAN_TYPE_UMP;
         struct ump_chan *uc = &chan->rpc.chan.uc;
-        err = ump_chan_init(uc, ret_cap, true);
+        err = ump_chan_init(uc, ret_cap, UMP_CHAN_CLIENT);
         if (err_is_fail(err)) {
             goto FAILURE_CHAN_SETUP;
         }

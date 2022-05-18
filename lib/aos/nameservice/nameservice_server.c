@@ -257,7 +257,7 @@ errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame)
     }
     assert(chan->chan.type == AOS_CHAN_TYPE_UNKNOWN);
     chan->chan.type = AOS_CHAN_TYPE_UMP;
-    err = ump_chan_init(&chan->chan.uc, frame, false);
+    err = ump_chan_init(&chan->chan.uc, frame, UMP_CHAN_SERVER);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_UMP_CHAN_INIT);
         goto FAILURE_CREATE_UMP_CHAN;
@@ -293,12 +293,12 @@ static void server_lmp_handler(void *arg)
     struct lmp_chan *lc = &chan->chan.lc;
 
     // Receive the message and cap, refill the recv slot, deserialize
-    LMP_HANDLER_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
+    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
                                         recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
 
     // If the channel is not setup yet, set it up
     if (lc->connstate == LMP_BIND_WAIT) {
-        LMP_HANDLER_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
+        LMP_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
 
         // Ack
         err = aos_chan_ack(&chan->chan, NULL_CAP, NULL, 0);
@@ -309,29 +309,14 @@ static void server_lmp_handler(void *arg)
         goto RE_REGISTER;
     }
 
-    // Identifier is not used and always set as RPC_USER for nameservice_chan
+    // Identifier is not used and always set as IDENTIFIER_NORMAL for nameservice_chan
     assert(recv_type == IDENTIFIER_NORMAL);
 
     // Call the handler
-    void *reply_payload = NULL;
-    size_t reply_size = 0;
-    struct capref reply_cap = NULL_CAP;
-    chan->recv_handler(chan->st, recv_buf, recv_size, &reply_payload, &reply_size,
-                       recv_cap, &reply_cap);
-
-    // Reply
-    err = aos_chan_ack(&chan->chan, reply_cap, reply_payload, reply_size);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_lmp_handler: failed to reply\n");
-    }
-
-    // Clean up
-    if (reply_payload != NULL) {
-        free(reply_payload);
-    }
+    LMP_DISPATCH_AND_REPLY_NO_FAIL(err, &chan->chan, NULL, chan->recv_handler, recv_cap)
 
     // Deserialization cleanup
-    LMP_HANDLER_CLEANUP(err, helper)
+    LMP_CLEANUP(err, helper)
 
 FAILURE:
 RE_REGISTER:
@@ -376,16 +361,10 @@ static void server_ump_handler(void *arg)
 
     assert(capref_is_null(reply_cap));  // cannot send cap for now
 
-
-    err = ump_prefix_identifier(&reply_payload, &reply_size, RPC_ACK);
+    err = aos_chan_ack(&chan->chan, reply_cap, reply_payload, reply_size);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_ump_handler: ump_prefix_identifier failed\n");
+        DEBUG_ERR(err, "server_ump_handler: aos_chan_ack failed\n");
         goto FREE_REPLY_PAYLOAD;  // on failure, reply_payload is not freed inside
-    }
-
-    err = ump_chan_send(uc, reply_payload, reply_size);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_ump_handler: failed to reply\n");
     }
 
 FREE_REPLY_PAYLOAD:

@@ -8,6 +8,23 @@
 
 #include <aos/aos.h>
 
+// XXX: is there a more elegant way to expose it only to aos lib and init?
+enum nameservice_rpc_identifier {
+    NAMESERVICE_SET_LISTEN_EP,        // [call] cap: lmp endpoint
+                                      // [return] errval
+    NAMESERVICE_REGISTER,             // [call] cap: lmp endpoint, payload: name
+                                      // [return] errval
+    NAMESERVICE_REFILL_LMP_ENDPOINT,  // [call] cap: lmp endpoint, payload: name
+                                      // [return] errval
+    NAMESERVICE_DEREGISTER,           // [call] payload: name
+                                      // [return] errval
+    NAMESERVICE_LOOKUP,               // [call] payload: name
+                                      // [return] err / cap: lmp endpoint or frame
+    NAMESERVICE_ENUMERATE,            // [call] none
+                                      // [return] err / struct enumerate_reply_msg
+    NAMESERVICE_RPC_COUNT
+};
+
 typedef void* nameservice_chan_t;
 
 /**

@@ -69,12 +69,12 @@ static void rpc_lmp_handler(void *arg)
     struct lmp_chan *lc = &chan->lc;
 
     // Receive the message and cap, refill the recv slot, deserialize
-    LMP_HANDLER_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
-                                        recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
+    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type, recv_buf,
+                                recv_size, helper, RE_REGISTER, FAILURE)
 
     // If the channel is not setup yet, set it up
     if (lc->connstate == LMP_BIND_WAIT) {
-        LMP_HANDLER_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
+        LMP_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
 
         // Ack
         err = aos_chan_ack(chan, NULL_CAP, NULL, 0);
@@ -95,27 +95,11 @@ static void rpc_lmp_handler(void *arg)
         goto RE_REGISTER;
     }
 
-    // DEBUG_PRINTF("rpc_lmp_handler: handling %u\n", recv_type);
-
     // Call the handler
-    void *reply_payload = NULL;
-    size_t reply_size = 0;
-    struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[recv_type](recv_buf, recv_size, &reply_payload, &reply_size,
-                                  &reply_cap);
-    if (err_is_ok(err)) {
-        aos_chan_ack(chan, reply_cap, reply_payload, reply_size);
-    } else {
-        aos_chan_nack(chan, err);  // reply error
-    }
-
-    // Clean up, regardless of err is ok or fail
-    if (reply_payload != NULL) {
-        free(reply_payload);
-    }
+    LMP_DISPATCH_AND_REPLY_MAY_FAIL(err, chan, NULL, rpc_handlers[recv_type], recv_cap)
 
     // Deserialization cleanup
-    LMP_HANDLER_CLEANUP(err, helper)
+    LMP_CLEANUP(err, helper)
 
 FAILURE:
     // XXX: maybe kill the caller here
@@ -157,9 +141,9 @@ void urpc_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[recv_type](recv_payload + sizeof(rpc_identifier_t),
+    err = rpc_handlers[recv_type](NULL, recv_payload + sizeof(rpc_identifier_t),
                                   recv_size - sizeof(rpc_identifier_t), &reply_payload,
-                                  &reply_size, &reply_cap);
+                                  &reply_size, NULL_CAP, &reply_cap);
 
     assert(capref_is_null(reply_cap));  // cannot send cap for now
 
@@ -337,14 +321,16 @@ static errval_t boot_core(coreid_t core)
 
             msg.core = core;
             msg.listener_first = true;  // existing core
-            err = aos_rpc_call(urpc[i], INTERNAL_RPC_BIND_CORE_URPC, NULL_CAP, &msg, sizeof(msg), NULL, NULL, NULL);
+            err = aos_rpc_call(urpc[i], INTERNAL_RPC_BIND_CORE_URPC, NULL_CAP, &msg,
+                               sizeof(msg), NULL, NULL, NULL);
             if (err_is_fail(err)) {
                 return err;
             }
 
             msg.core = i;
             msg.listener_first = false;  // newly booted core
-            err = aos_rpc_call(urpc[core], INTERNAL_RPC_BIND_CORE_URPC, NULL_CAP, &msg, sizeof(msg), NULL, NULL, NULL);
+            err = aos_rpc_call(urpc[core], INTERNAL_RPC_BIND_CORE_URPC, NULL_CAP, &msg,
+                               sizeof(msg), NULL, NULL, NULL);
             if (err_is_fail(err)) {
                 return err;
             }

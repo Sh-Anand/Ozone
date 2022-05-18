@@ -5,9 +5,8 @@
 #ifndef AOS_LMP_HANDLER_BUILDER_H
 #define AOS_LMP_HANDLER_BUILDER_H
 
-#define LMP_HANDLER_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,  \
-                                            recv_buf, recv_size, helper, RE_REGISTER,    \
-                                            FAILURE)                                     \
+#define LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,          \
+                                    recv_buf, recv_size, helper, RE_REGISTER, FAILURE)   \
     struct lmp_recv_msg recv_raw_msg = LMP_RECV_MSG_INIT;                                \
     struct capref recv_cap;                                                              \
                                                                                          \
@@ -42,7 +41,7 @@
         goto FAILURE;                                                                    \
     }
 
-#define LMP_HANDLER_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)                        \
+#define LMP_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)                                \
     assert(lc->connstate == LMP_BIND_WAIT);                                              \
     /* Check the received endpoint */                                                    \
     if (capref_is_null(recv_cap)) {                                                      \
@@ -63,11 +62,58 @@
     lc->connstate = LMP_CONNECTED;
 
 
-#define LMP_HANDLER_CLEANUP(err, helper)                                                 \
+#define LMP_DISPATCH_AND_REPLY_MAY_FAIL(err, chan, st, rpc_handler, recv_cap)            \
+    {                                                                                    \
+        /* Call the handler */                                                           \
+        void *reply_payload = NULL;                                                      \
+        size_t reply_size = 0;                                                           \
+        struct capref reply_cap = NULL_CAP;                                              \
+        err = rpc_handler(st, recv_buf, recv_size, &reply_payload, &reply_size,          \
+                          recv_cap, &reply_cap);                                         \
+        if (err_is_ok(err)) {                                                            \
+            err = aos_chan_ack(chan, reply_cap, reply_payload, reply_size);              \
+            if (err_is_fail(err)) {                                                      \
+                DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);                   \
+            }                                                                            \
+        } else {                                                                         \
+            err = aos_chan_nack(chan, err);                                              \
+            if (err_is_fail(err)) {                                                      \
+                DEBUG_ERR(err, "%s: aos_chan_nack failed\n", __func__);                  \
+            }                                                                            \
+        }                                                                                \
+                                                                                         \
+        /* Clean up, regardless of err is ok or fail */                                  \
+        if (reply_payload != NULL) {                                                     \
+            free(reply_payload);                                                         \
+        }                                                                                \
+    }
+
+#define LMP_DISPATCH_AND_REPLY_NO_FAIL(err, chan, st, rpc_handler, recv_cap)             \
+    {                                                                                    \
+        /* Call the handler */                                                           \
+        void *reply_payload = NULL;                                                      \
+        size_t reply_size = 0;                                                           \
+        struct capref reply_cap = NULL_CAP;                                              \
+                                                                                         \
+        rpc_handler(st, recv_buf, recv_size, &reply_payload, &reply_size, recv_cap,      \
+                    &reply_cap);                                                         \
+                                                                                         \
+        err = aos_chan_ack(chan, reply_cap, reply_payload, reply_size);                  \
+        if (err_is_fail(err)) {                                                          \
+            DEBUG_ERR(err, "%s: aos_chan_ack failed\n");                                 \
+        }                                                                                \
+                                                                                         \
+        /* Clean up, regardless of err is ok or fail */                                  \
+        if (reply_payload != NULL) {                                                     \
+            free(reply_payload);                                                         \
+        }                                                                                \
+    }
+
+#define LMP_CLEANUP(err, helper)                                                         \
     /* Deserialization cleanup */                                                        \
     err = lmp_cleanup(&helper);                                                          \
     if (err_is_fail(err)) {                                                              \
-        DEBUG_ERR(err, "rpc_lmp_handler: failed to clean up\n");                         \
+        DEBUG_ERR(err, "%s: failed to clean up\n", __func__);                            \
     }
 
 #endif

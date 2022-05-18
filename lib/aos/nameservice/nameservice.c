@@ -48,20 +48,10 @@ static errval_t ensure_nameserver_chan(void)
 
     // Create a new LMP channel
     ns_rpc.chan.type = AOS_CHAN_TYPE_LMP;
-    lmp_chan_init(&ns_rpc.chan.lc);
-
-    err = slot_alloc(&ns_rpc.chan.lc.local_cap);
+    err = lmp_chan_init_local(&ns_rpc.chan.lc, NAMESERVER_CHAN_BUF_LEN);
     if (err_is_fail(err)) {
-        err = err_push(err, LIB_ERR_SLOT_ALLOC);
-        goto FAILURE_SETUP_NAMESERVER_RPC;  // slot will be free in lmp_chan_destroy
-    }
-
-    err = lmp_endpoint_create_in_slot(NAMESERVER_CHAN_BUF_LEN, ns_rpc.chan.lc.local_cap,
-                                      &ns_rpc.chan.lc.endpoint);
-    if (err_is_fail(err)) {
-        err = err_push(err, LIB_ERR_ENDPOINT_CREATE);
-        goto FAILURE_SETUP_NAMESERVER_RPC;  // local_cap and endpoint will be deleted in
-                                            // lmp_chan_destroy
+        err = err_push(err, LIB_ERR_LMP_CHAN_INIT);
+        goto FAILURE_SETUP_NAMESERVER_RPC;
     }
 
     // Bind with the nameserver
@@ -211,7 +201,7 @@ static void ns_notification_handler(void *arg)
     struct lmp_chan *lc = arg;
 
     // Receive the message and cap, refill the recv slot, deserialize
-    LMP_HANDLER_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
+    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
                                         recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
 
     switch ((enum ns_notification_identifier)recv_type) {
@@ -248,7 +238,7 @@ static void ns_notification_handler(void *arg)
     }
 
     // Deserialization cleanup
-    LMP_HANDLER_CLEANUP(err, helper)
+    LMP_CLEANUP(err, helper)
 
 FAILURE:
     // No special error handling is needed for now

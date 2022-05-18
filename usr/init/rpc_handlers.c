@@ -10,50 +10,6 @@
 #include <spawn/spawn.h>
 #include <grading.h>
 
-/*
- * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
- *
- * XXX: maybe init *out_payload to the buffer of LMP message, so that small message can
- * directly write to this buffer without using malloc.
- *
- * If *out_payload != NULL after return, it will be freed.
- *
- * Notice that in_size can be larger than the protocol payload (an LMP message or a page)
- * and therefore should only be used to assert out-of-bound access (check size is enough
- * rather than exact).
- */
-#define HANDLER(name)                                                                    \
-    static errval_t name(void *in_payload, size_t in_size, void **out_payload,           \
-                         size_t *out_size, struct capref *out_cap)
-
-#define CAST_IN_MSG_NO_CHECK(var, type) type *var = in_payload
-
-#define CAST_IN_MSG_AT_LEAST_SIZE(var, type)                                             \
-    if (in_size < sizeof(type)) {                                                        \
-        DEBUG_PRINTF("%s: invalid payload size %lu < sizeof(%s) (%lu)\n", __func__,      \
-                     in_size, #type, sizeof(type));                                      \
-        return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
-    }                                                                                    \
-    type *var = in_payload
-
-#define CAST_IN_MSG_EXACT_SIZE(var, type)                                                \
-    if (in_size != sizeof(type)) {                                                       \
-        DEBUG_PRINTF("%s: invalid payload size %lu != sizeof(%s) (%lu)\n", __func__,     \
-                     in_size, #type, sizeof(type));                                      \
-        return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
-    }                                                                                    \
-    type *var = in_payload
-
-#define MALLOC_OUT_MSG_WITH_SIZE(var, type, size)                                        \
-    type *var = malloc(size);                                                            \
-    if (var == NULL) {                                                                   \
-        return LIB_ERR_MALLOC_FAIL;                                                      \
-    }                                                                                    \
-    *out_payload = var;                                                                  \
-    *out_size = size
-
-#define MALLOC_OUT_MSG(var, type) MALLOC_OUT_MSG_WITH_SIZE(var, type, sizeof(*var))
-
 static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
                                 void **out_payload, size_t *out_size)
 {
@@ -93,7 +49,7 @@ RET:
     return err;
 }
 
-HANDLER(stress_test_handler)
+RPC_HANDLER(stress_test_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_NO_CHECK(vals, uint8_t);
@@ -112,7 +68,7 @@ HANDLER(stress_test_handler)
     }
 }
 
-HANDLER(num_msg_handler)
+RPC_HANDLER(num_msg_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_EXACT_SIZE(num, uintptr_t);
@@ -134,7 +90,7 @@ static size_t strlen_s(const char *s, size_t max)
     return i;
 }
 
-HANDLER(str_msg_handler)
+RPC_HANDLER(str_msg_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_NO_CHECK(str, char);
@@ -158,7 +114,7 @@ HANDLER(str_msg_handler)
     }
 }
 
-HANDLER(ram_request_msg_handler)
+RPC_HANDLER(ram_request_msg_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     grading_rpc_handler_ram_cap(ram_msg->size, ram_msg->alignment);
@@ -230,7 +186,7 @@ HANDLER(ram_request_msg_handler)
     }
 }
 
-HANDLER(bind_core_urpc_handler)
+RPC_HANDLER(bind_core_urpc_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_bind_core_urpc_msg);
     errval_t err;
@@ -267,7 +223,7 @@ HANDLER(bind_core_urpc_handler)
     return SYS_ERR_OK;
 }
 
-HANDLER(remote_ram_request_handler)
+RPC_HANDLER(remote_ram_request_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     errval_t err;
@@ -300,7 +256,7 @@ HANDLER(remote_ram_request_handler)
     return SYS_ERR_OK;
 }
 
-HANDLER(spawn_msg_handler)
+RPC_HANDLER(spawn_msg_handler)
 {
     CAST_IN_MSG_AT_LEAST_SIZE(msg, struct rpc_process_spawn_call_msg);
     grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
@@ -323,7 +279,7 @@ HANDLER(spawn_msg_handler)
     }
 }
 
-HANDLER(process_get_name_handler)
+RPC_HANDLER(process_get_name_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
 
@@ -345,8 +301,10 @@ HANDLER(process_get_name_handler)
     }
 }
 
-HANDLER(get_local_pids_handler)
+RPC_HANDLER(get_local_pids_handler)
 {
+    ASSERT_ZERO_IN_SIZE;
+
     size_t count;
     domainid_t *pids;
     errval_t err = spawn_get_all_pids(&pids, &count);
@@ -363,8 +321,9 @@ HANDLER(get_local_pids_handler)
     return SYS_ERR_OK;
 }
 
-HANDLER(process_get_all_pids_handler)
+RPC_HANDLER(process_get_all_pids_handler)
 {
+    ASSERT_ZERO_IN_SIZE;
     grading_rpc_handler_process_get_all_pids();
 
     errval_t err;
@@ -377,7 +336,7 @@ HANDLER(process_get_all_pids_handler)
     for (coreid_t core = 0; core < MAX_COREID; ++core) {
         size_t msg_size = 0;
         if (core == disp_get_current_core_id()) {
-            err = get_local_pids_handler(NULL, 0, (void **)&msg[core], &msg_size, NULL);
+            err = get_local_pids_handler(arg, NULL, 0, (void **)&msg[core], &msg_size, NULL_CAP, NULL);
             if (err_is_fail(err)) {
                 return err;
             }
@@ -412,8 +371,9 @@ HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
-HANDLER(terminal_getchar_handler)
+RPC_HANDLER(terminal_getchar_handler)
 {
+    ASSERT_ZERO_IN_SIZE;
     if (disp_get_current_core_id() == 0) {
         char c;
         grading_rpc_handler_serial_getchar();
@@ -433,7 +393,7 @@ HANDLER(terminal_getchar_handler)
     }
 }
 
-HANDLER(terminal_putchar_handler)
+RPC_HANDLER(terminal_putchar_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_EXACT_SIZE(c, char);
@@ -443,13 +403,6 @@ HANDLER(terminal_putchar_handler)
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
 }
-
-#undef HANDLER
-#undef CAST_IN_MSG_NO_CHECK
-#undef CAST_IN_MSG_AT_LEAST_SIZE
-#undef CAST_IN_MSG_EXACT_SIZE
-#undef MALLOC_OUT_MSG_WITH_SIZE
-#undef MALLOC_OUT_MSG
 
 // Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
