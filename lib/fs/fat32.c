@@ -9,9 +9,9 @@
 #include "fs_internal.h"
 
 
-// struct sdhc_s *sd;
+struct sdhc_s *sd;
 
-int ROOT_CLUSER;
+int ROOT_CLUSTER;
 
 /**
  * @brief an entry in the fat32_fs
@@ -89,12 +89,12 @@ struct memory_data {
 //     free(mem);
 // }
 
-// void set_sd(struct sdhc_s *sdh) {
-//     sd = sdh;
-// }
+void set_sd(struct sdhc_s *sdh) {
+    sd = sdh;
+}
 
 //Read logical sector <sector> and return a pointer to the info
-static errval_t sd_read_sector(struct sdhc_s *sd, int sector, void *data) {
+static errval_t sd_read_sector(int sector, void *data) {
     errval_t err;
     //invalidate the buffer from the cache
 
@@ -109,7 +109,7 @@ static errval_t sd_read_sector(struct sdhc_s *sd, int sector, void *data) {
     if(err_is_fail(err))
         return err;
 
-    err = sdhc_read_block(sd, 0, f_id.base);
+    err = sdhc_read_block(sd, sector, f_id.base);
     if(err_is_fail(err))
         return err_push(err, FS_ERR_BLOCK_READ);
     
@@ -125,36 +125,27 @@ static errval_t sd_read_sector(struct sdhc_s *sd, int sector, void *data) {
     return SYS_ERR_OK;
 }
 
-errval_t fat32_init(struct sdhc_s *sd) { 
+errval_t fat32_init(void) { 
     errval_t err;
     
     void *bpb = malloc(SDHC_BLOCK_SIZE);
-    //err = get_memory(SDHC_BLOCK_SIZE, &BPB);
-    // if(err_is_fail(err))
-    //     return err;
     
-    err = sd_read_sector(sd, 0, bpb);
+    err = sd_read_sector(BPB_SECTOR, bpb);
     if(err_is_fail(err))
         return err;
     
     int root;
-    char *bpb_block = (char *) bpb + BPB_RootClus;
     uint8_t *blockbpb = (uint8_t *) bpb;
     
-    memcpy((void *) &root, (void *) bpb_block, BPB_RootClus_Size);
+    memcpy((void *) &root, bpb + BPB_RootClus, BPB_RootClus_Size);
 
     assert(blockbpb[510] == 0x55);
     assert(blockbpb[511] == 0xAA);
-    DEBUG_PRINTF("FIRST BYTE : %d", * (uint8_t *) bpb);
-    assert(blockbpb[0] == 0xEB || blockbpb[0] == 0xE9);
+    assert((blockbpb[0] == 0xEB && blockbpb[2] == 0x90) || blockbpb[0] == 0xE9);
 
-    ROOT_CLUSER = root;
+    ROOT_CLUSTER = root;
 
-    char *data = calloc(0, 8);
-
-    memcpy(data, bpb + 3, 8);
-
-    DEBUG_PRINTF("STRING IS : %s\n", data);
+    DEBUG_PRINTF("Root cluster : %d\n", root);
 
     //free_memory(BPB);
     return SYS_ERR_OK; 

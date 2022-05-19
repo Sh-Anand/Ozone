@@ -5,10 +5,14 @@
 
 #include <drivers/sdhc.h>
 
-#define BPB_SECTOR 0
-#define BPB_RootClus 44
+#define BPB_SECTOR      0
 #define BPB_RootClus_Size 4
-#define BPB_FATSz32  36
+#define BPB_BytsPerSec 11
+#define BPB_SecPerClus 13
+#define BPB_RsvdSecCnt 14
+#define BPB_NumFATs    16
+#define BPB_FATSz32    36
+#define BPB_RootClus   44
 
 typedef void *fat32_handle_t;
 typedef void *fat32_mount_t;
@@ -51,6 +55,6 @@ errval_t fat32_mount(const char *uri, fat32_mount_t *retst);
 
 void set_sd(struct sdhc_s *sd);
 
-errval_t fat32_init(struct sdhc_s *sd);
+errval_t fat32_init(void);
 
 #endif
