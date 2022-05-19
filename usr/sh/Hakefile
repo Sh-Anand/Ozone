@@ -1,7 +1,7 @@
 [ build application 
   { 
     target = "sh",
-    cFiles = [ "sh.c", "builtins.c" ],
+    cFiles = [ "sh.c", "builtins.c", "exec_binary.c" ],
 	architectures = allArchitectures
   }
 ]

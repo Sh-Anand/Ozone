@@ -53,7 +53,7 @@ void libc_exit(int status)
     debug_printf("libc exit NYI!\n");
     thread_exit(status);
     // If we're not dead by now, we wait
-    while (1) {}
+    //while (1) {}
 }
 
 static void libc_assert(const char *expression, const char *file,

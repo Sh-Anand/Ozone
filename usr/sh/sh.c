@@ -9,6 +9,7 @@
 #include "strutil.h"
 #include "sh.h"
 #include "builtins.h"
+#include "exec_binary.h"
 
 
 // environment of the shell
@@ -132,6 +133,8 @@ int main(int argc, char **argv)
 		if (env.argc == 0) continue;
 		
 		if (builtin(&env)) continue;
+		
+		exec_binary(&env);
 	}
 	
 	puts("Shell terminating...\n");

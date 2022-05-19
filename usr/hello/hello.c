@@ -365,6 +365,8 @@ int main(int argc, char *argv[])
     errval_t err;
 	
 	DEBUG_PRINTF("Init RPC channel: %p\n", aos_rpc_get_init_channel());
+	
+	setbuffer(stdin, NULL, 0);
 
     printf("Hello world! from userspace (core %u) and through RPC, presented by AOS team 1\n", disp_get_core_id());
     for (int i = 0; i < argc; i++) {
