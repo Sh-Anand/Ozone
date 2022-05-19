@@ -49,46 +49,6 @@ struct fat32_handle
     };
 };
 
-struct memory_data {
-    lvaddr_t paddr;
-    lvaddr_t vaddr;
-};
-
-// //get a memory data struct of size
-// static errval_t get_memory(size_t size, struct memory_data **ret_mem) {
-//     errval_t err;
-
-//     struct capref frame;
-//     size_t ret_size;
-//     err = frame_alloc(&frame, size, &ret_size);
-//     if(err_is_fail(err))
-//         return err;
-    
-//     struct frame_identity f_id;
-//     err = frame_identify(frame, &f_id);
-//     if(err_is_fail(err))
-//         return err;
-
-//     void *vaddr;
-//     err = paging_map_frame(get_current_paging_state(), &vaddr, ret_size, frame);
-//     if(err_is_fail(err))
-//         return err;
-    
-//     struct memory_data *mem = malloc(sizeof(struct memory_data));
-//     mem->paddr = f_id.base;
-//     mem->vaddr = (lvaddr_t) vaddr;
-
-//     *ret_mem = mem;
-
-//     return SYS_ERR_OK;
-// }
-
-// //free a memory data region. it is the programmer's responsiblity to not reuse this mem
-// static void free_memory(struct memory_data *mem) {
-//     // free((void *)mem->vaddr);
-//     free(mem);
-// }
-
 void set_sd(struct sdhc_s *sdh) {
     sd = sdh;
 }

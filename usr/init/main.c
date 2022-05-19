@@ -459,17 +459,6 @@ static errval_t init_sd(void) {
 
     err = fat32_init();
 
-    // struct capref dma;
-    // char *dma_vaddr;
-    // frame_alloc(&dma, BASE_PAGE_SIZE, NULL);
-    // paging_map_frame_attr(get_current_paging_state(), (void **) &dma_vaddr, BASE_PAGE_SIZE, dma, VREGION_FLAGS_READ_WRITE_NOCACHE);
-    // struct frame_identity dma_id;
-    // cap_identify_mappable(dma, &dma_id);
-    // lpaddr_t paddr = dma_id.base;
-    // DEBUG_PRINTF("paddr: %p\n:", paddr);
-    // sdhc_read_block(sd, 0, paddr);
-    // debug_printf("%x, %x;\n",dma_vaddr[0], dma_vaddr[2]);
-    // debug_printf("%d, %d;\n",(uint8_t) dma_vaddr[0], (uint8_t)dma_vaddr[2]);
     if(err_is_fail(err))
         DEBUG_ERR(err, "RIP");
     return SYS_ERR_OK;
