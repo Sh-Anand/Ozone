@@ -6,7 +6,6 @@
 #include <drivers/sdhc.h>
 
 #define BPB_SECTOR      0
-#define BPB_RootClus_Size 4
 #define BPB_BytsPerSec 11
 #define BPB_SecPerClus 13
 #define BPB_RsvdSecCnt 14

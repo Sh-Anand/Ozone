@@ -11,7 +11,12 @@
 
 struct sdhc_s *sd;
 
-int ROOT_CLUSTER;
+int RootClus;
+int BytsPerSec;
+int SecPerClus;
+int RsvdSecCnt;
+int NumFATs;
+int FATSz32;
 
 /**
  * @brief an entry in the fat32_fs
@@ -82,31 +87,40 @@ static errval_t sd_read_sector(int sector, void *data) {
 
     memcpy(data, vaddr, SDHC_BLOCK_SIZE);
     
+    err = cap_destroy(frame);
+
     return SYS_ERR_OK;
 }
 
 errval_t fat32_init(void) { 
     errval_t err;
     
-    void *bpb = malloc(SDHC_BLOCK_SIZE);
+    uint8_t *bpb = malloc(SDHC_BLOCK_SIZE);
     
     err = sd_read_sector(BPB_SECTOR, bpb);
     if(err_is_fail(err))
         return err;
-    
-    int root;
-    uint8_t *blockbpb = (uint8_t *) bpb;
-    
-    memcpy((void *) &root, bpb + BPB_RootClus, BPB_RootClus_Size);
 
-    assert(blockbpb[510] == 0x55);
-    assert(blockbpb[511] == 0xAA);
-    assert((blockbpb[0] == 0xEB && blockbpb[2] == 0x90) || blockbpb[0] == 0xE9);
 
-    ROOT_CLUSTER = root;
+    assert(bpb[510] == 0x55);
+    assert(bpb[511] == 0xAA);
+    assert((bpb[0] == 0xEB && bpb[2] == 0x90) || bpb[0] == 0xE9);
 
-    DEBUG_PRINTF("Root cluster : %d\n", root);
+    BytsPerSec = *(uint16_t *)(bpb + BPB_BytsPerSec);
+    SecPerClus = *(bpb + BPB_SecPerClus);
+    RsvdSecCnt = *(uint16_t *)(bpb + BPB_RsvdSecCnt);
+    RootClus = *(uint32_t *)(bpb + BPB_RootClus);
+    FATSz32 = *(bpb + BPB_FATSz32);
+    NumFATs = *(uint32_t *)(bpb + BPB_NumFATs);
 
-    //free_memory(BPB);
+    DEBUG_PRINTF("BytsPerSec : %d\n", BytsPerSec);
+    DEBUG_PRINTF("SecPerClus : %d\n", SecPerClus);
+    DEBUG_PRINTF("RsvdSecCnt : %d\n", RsvdSecCnt);
+    DEBUG_PRINTF("RootClus : %d\n", RootClus);
+    DEBUG_PRINTF("FATSz32 : %d\n", FATSz32);
+    DEBUG_PRINTF("NumFATs : %d\n", NumFATs);
+
+
+    free(bpb);
     return SYS_ERR_OK; 
 }
