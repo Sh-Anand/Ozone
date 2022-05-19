@@ -9,12 +9,19 @@
 #define BPB_BytsPerSec 11
 #define BPB_SecPerClus 13
 #define BPB_RsvdSecCnt 14
+#define BPB_RootEntCnt 17
 #define BPB_NumFATs    16
 #define BPB_FATSz32    36
 #define BPB_RootClus   44
 
+//end of cluster marker
+#define EOC            0x0ffffff8
+#define BAD_CLUSTER    0x0ffffff7
+
 typedef void *fat32_handle_t;
 typedef void *fat32_mount_t;
+
+typedef uint32_t FAT_Entry;
 
 errval_t fat32_open(void *st, const char *path, fat32_handle_t *rethandle);
 

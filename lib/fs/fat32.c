@@ -8,15 +8,25 @@
 
 #include "fs_internal.h"
 
-
 struct sdhc_s *sd;
 
+//meta data
 int RootClus;
 int BytsPerSec;
 int SecPerClus;
 int RsvdSecCnt;
+int RootEntCnt;
 int NumFATs;
 int FATSz32;
+
+//computed from meta data
+int FirstDataSector;
+
+#define FIRST_SECTOR_OF_CLUSTER(n) ((n-2) * SecPerClus) + FirstDataSector
+#define FAT_SECTOR(n) RsvdSecCnt + (n * 4 / BytsPerSec)
+#define FAT_OFFSET(n) (n*4) % BytsPerSec
+
+int RootSector;
 
 /**
  * @brief an entry in the fat32_fs
@@ -106,21 +116,44 @@ errval_t fat32_init(void) {
     assert(bpb[511] == 0xAA);
     assert((bpb[0] == 0xEB && bpb[2] == 0x90) || bpb[0] == 0xE9);
 
+    //grab all the metadata
     BytsPerSec = *(uint16_t *)(bpb + BPB_BytsPerSec);
     SecPerClus = *(bpb + BPB_SecPerClus);
     RsvdSecCnt = *(uint16_t *)(bpb + BPB_RsvdSecCnt);
+    RootEntCnt = *(uint16_t *)(bpb + BPB_RootEntCnt);
     RootClus = *(uint32_t *)(bpb + BPB_RootClus);
-    FATSz32 = *(bpb + BPB_FATSz32);
+    FATSz32 = *(uint32_t *)(bpb + BPB_FATSz32);
     NumFATs = *(uint32_t *)(bpb + BPB_NumFATs);
+
+    assert(RootEntCnt == 0);
+
+    //calculate the first data sector
+    FirstDataSector = RsvdSecCnt + (NumFATs * FATSz32);
+    //calculat the sector of the root cluster
+    RootSector = FIRST_SECTOR_OF_CLUSTER(RootClus);
 
     DEBUG_PRINTF("BytsPerSec : %d\n", BytsPerSec);
     DEBUG_PRINTF("SecPerClus : %d\n", SecPerClus);
     DEBUG_PRINTF("RsvdSecCnt : %d\n", RsvdSecCnt);
+    DEBUG_PRINTF("RootEntCnt : %d\n", RootEntCnt);
     DEBUG_PRINTF("RootClus : %d\n", RootClus);
     DEBUG_PRINTF("FATSz32 : %d\n", FATSz32);
     DEBUG_PRINTF("NumFATs : %d\n", NumFATs);
+    DEBUG_PRINTF("FirstDataSector : %d\n", FirstDataSector);
+    DEBUG_PRINTF("RootSector : %d\n", RootSector);
+    DEBUG_PRINTF("RootFATSector : %d\n", FAT_SECTOR(RootClus));
+    DEBUG_PRINTF("RootFATOffset : %d\n", FAT_OFFSET(RootClus));
 
+    uint8_t *fat_sec = malloc(SDHC_BLOCK_SIZE);
+    err = sd_read_sector(FAT_SECTOR(RootClus), fat_sec);
+
+    FAT_Entry root_fat = *(FAT_Entry *)(fat_sec + FAT_OFFSET(RootClus));
+
+    DEBUG_PRINTF("FAT Entry of RootCluster : 0x%x\n", root_fat);
+
+    assert(root_fat >= EOC);
 
     free(bpb);
+    free(fat_sec);
     return SYS_ERR_OK; 
 }
