@@ -11,12 +11,16 @@
 #define BPB_RsvdSecCnt 14
 #define BPB_RootEntCnt 17
 #define BPB_NumFATs    16
+#define BPB_TotSec32   32
 #define BPB_FATSz32    36
 #define BPB_RootClus   44
 
-//end of cluster marker
+#define DATA_CLUSTER_START 2
+
+//special cluster symbols
+#define CLUSTER_FREE   0x0
 #define EOC            0x0ffffff8
-#define BAD_CLUSTER    0x0ffffff7
+#define CLUSTER_BAD    0x0ffffff7
 
 typedef void *fat32_handle_t;
 typedef void *fat32_mount_t;
