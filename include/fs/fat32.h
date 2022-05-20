@@ -38,6 +38,51 @@
 
 //Directory attributes
 #define ATTR_DIRECTORY 0x10
+#define DIR_FREE       0xE5
+#define DIR_ALL_FREE   0x0
+
+struct Time {
+    uint8_t hour, minute, sec;
+};
+
+struct Date {
+    uint8_t Year, Month, Day;
+};
+
+/**
+ * @brief an entry in the fat32_fs
+ */
+struct fat32_dirent
+{   
+    char *name;                     ///< name of the file or directory
+
+    uint8_t Attr;                   ///< attributes (read/hidden/etc)
+
+    struct Time CrtTime, LastWrtTime;     
+    struct Date CrtDate, LastWrtDate;
+
+    int FstCluster;
+
+    size_t size;                    ///< the size of the direntry in bytes or files, -1 implies root directory
+    size_t refcount;                ///< reference count for open handles
+
+    struct fat32_dirent *parent;    ///< parent directory
+
+    bool is_dir;                    ///< flag indicationg this is a dir
+
+    // int currCluster, currClusterOffset;
+};
+
+/**
+ * @brief a handle to an open file or directory
+ */
+struct fat32_handle
+{
+    char *path;
+    bool isdir;
+    struct fat32_dirent *dirent;
+    off_t pos;
+};
 
 typedef void *fat32_handle_t;
 typedef void *fat32_mount_t;
