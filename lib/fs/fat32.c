@@ -25,6 +25,10 @@ int RootClus;
 int FirstDataSector;
 int TotalClusters;
 
+//tracking data for current cluster; used for getting free blocks
+#define FREE_CLUSTERS_SCANNED_BLOCKS 2
+int FreeClustersToCheckFrom;
+
 #define FIRST_SECTOR_OF_CLUSTER(n) ((n-2) * SecPerClus) + FirstDataSector
 #define FAT_SECTOR(n) RsvdSecCnt + (n * 4 / BytsPerSec)
 #define FAT_OFFSET(n) (n*4) % BytsPerSec
@@ -159,41 +163,50 @@ static void check_set_bpb_metadata(uint8_t *bpb) {
     DEBUG_PRINTF("RootFATOffset : %d\n", FAT_OFFSET(RootClus));
 }
 
-//it takes a stupidly large amount of time to scan through all the almost 1 million clusters, so we are limiting to about a 1000 for now
-#define CLUSTERS_WE_CARE_ABOUT 100
+static errval_t refill_free_clusters(void) {
+    if(FreeClustersToCheckFrom == TotalClusters)
+        return FS_ERR_NO_FREE_BLOCKS;
 
-static errval_t initialize_free_clusters(void) {
-    list_init(&free_clusters);
-    
-    //NOTE : WE MAKE A MASSIVE ASSUMPTION HERE THAT FAT TABLE IS CONTIGUOUSLY STORED FOR CLUSTERS. I HOPE THAT THIS IS TRUE
     uint8_t FAT_block[SDHC_BLOCK_SIZE];
 
     //read first sector as offset may not be zero
     CHECK_ERR(sd_read_sector(FAT_SECTOR(DATA_CLUSTER_START), FAT_block), "FAT sector read failed");
 
-    //iterate through all free clusters starting at DATA_CLUSTER_START
-    for(int i = DATA_CLUSTER_START; i < DATA_CLUSTER_START + CLUSTERS_WE_CARE_ABOUT; i++) {
-        int FAT_offset = FAT_OFFSET(i);
-        DEBUG_PRINTF("CLUSTER %d has OFFSET %d\n", i, FAT_offset);
+    size_t pre_sz = free_clusters->size; 
+    //iterate through free clusters
+    int blocks = FREE_CLUSTERS_SCANNED_BLOCKS - 1;
+    while((FreeClustersToCheckFrom != TotalClusters)) {
+        int FAT_offset = FAT_OFFSET(FreeClustersToCheckFrom);
+
         //if we are the start of a new FAT sector, read it
         if(FAT_offset == 0) {
-            CHECK_ERR(sd_read_sector(FAT_SECTOR(i), FAT_block), "FAT sector read failed");
+            CHECK_ERR(sd_read_sector(FAT_SECTOR(FreeClustersToCheckFrom), FAT_block), "FAT sector read failed");
+            blocks--;
         }
         //grab entry from offset into block
         FAT_Entry entry = *(FAT_Entry *)(FAT_block + FAT_offset);
         //if free cluster, insert into free list
         if(entry == CLUSTER_FREE) {
-            push_back(free_clusters, i);
+            push_back(free_clusters, FreeClustersToCheckFrom);
         }
+
+        if(!blocks && FAT_offset == 508)
+            break;
+
+        FreeClustersToCheckFrom++;
     }
 
-    DEBUG_PRINTF("Found %d free clusters\n", free_clusters->size);
+    DEBUG_PRINTF("Found %d free clusters\n", free_clusters->size - pre_sz);
 
-    struct free_cluster *head = free_clusters->head;
-    while(head != NULL) {
-        DEBUG_PRINTF("Item %d\n", head->cluster);
-        head = head->next;
-    }
+    return SYS_ERR_OK;
+}
+
+static errval_t initialize_free_clusters(void) {
+    list_init(&free_clusters);
+    
+    FreeClustersToCheckFrom = DATA_CLUSTER_START;
+
+    CHECK_ERR(refill_free_clusters(), "Failed to refill clusters");
 
     return SYS_ERR_OK;
 }

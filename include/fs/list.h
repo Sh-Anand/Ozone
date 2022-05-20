@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <aos/debug.h>
 
 struct free_cluster {
     int cluster;
@@ -17,3 +18,5 @@ void push_back(struct free_cluster_list *list, int item);
 int pop_front(struct free_cluster_list *list);
 
 int is_empty(struct free_cluster_list *list);
+
+void debug_print_list(struct free_cluster_list *list);

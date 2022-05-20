@@ -995,6 +995,8 @@ errors fs FS_ERR_ {
     failure BUSY                "There were open handles for the file",
     failure BULK_NOT_INIT       "The bulk transfer mode has not been initialised",
     failure BULK_ALREADY_INIT   "The bulk_init() call may only be made once per connection",
+
+    failure NO_FREE_BLOCKS      "Failure no free blocks available",
 };
 
 // errors in the vfs library

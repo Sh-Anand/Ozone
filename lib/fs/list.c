@@ -46,3 +46,14 @@ int pop_front(struct free_cluster_list *list) {
 int is_empty(struct free_cluster_list *list) {
     return list->size == 0;
 }
+
+void debug_print_list(struct free_cluster_list *list) {
+
+    struct free_cluster *head = list->head;
+    while(head != NULL) {
+        DEBUG_PRINTF("%d, ", head->cluster);
+        head = head->next;
+    }
+
+    DEBUG_PRINTF("\n");
+}
