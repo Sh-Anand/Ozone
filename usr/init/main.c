@@ -460,7 +460,14 @@ static errval_t init_sd(void) {
     err = fat32_init();
 
     if(err_is_fail(err))
-        DEBUG_ERR(err, "RIP");
+        DEBUG_ERR(err, "FAT INIT FAILED");
+
+    fat32_handle_t handle;
+    err = fat32_opendir("/HELLO/WRLD", &handle);
+    
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open hello");
+
     return SYS_ERR_OK;
 }
 

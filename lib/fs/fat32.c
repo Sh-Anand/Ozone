@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
+#include <string.h>
 
 #include <aos/aos.h>
 #include <aos/cache.h>
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <fs/list.h>
+#include <libgen.h>
 
 #include "fs_internal.h"
 
@@ -24,6 +27,7 @@ int RootClus;
 //computed from meta data
 int FirstDataSector;
 int TotalClusters;
+int BlocksPerSec;
 
 //tracking data for current cluster; used for getting free blocks
 #define FREE_CLUSTERS_SCANNED_BLOCKS 2
@@ -48,25 +52,36 @@ int FreeClustersToCheckFrom;
 
 int RootSector;
 
+struct Time {
+    uint8_t hour, minute, sec;
+};
+
+struct Date {
+    uint8_t Year, Month, Day;
+};
+
 /**
  * @brief an entry in the fat32_fs
  */
 struct fat32_dirent
-{
-    char *name;                     ///< name of the file or directoyr
-    size_t size;                    ///< the size of the direntry in bytes or files
-    size_t refcount;                ///< reference count for open handles
-    struct fat32_dirent *parent;    ///< parent directory
+{   
+    char *name;                     ///< name of the file or directory
 
-    struct fat32_dirent *next;      ///< parent directory
-    struct fat32_dirent *prev;      ///< parent directory
+    uint8_t Attr;                   ///< attributes (read/hidden/etc)
+
+    struct Time CrtTime, LastWrtTime;     
+    struct Date CrtDate, LastWrtDate;
+
+    int FstCluster;
+
+    size_t size;                    ///< the size of the direntry in bytes or files, -1 implies root directory
+    size_t refcount;                ///< reference count for open handles
+
+    struct fat32_dirent *parent;    ///< parent directory
 
     bool is_dir;                    ///< flag indicationg this is a dir
 
-    union {
-        void *data;                 ///< file data pointer
-        struct fat32_dirent *dir;   ///< directory pointer
-    };
+    // int currCluster, currClusterOffset;
 };
 
 /**
@@ -74,17 +89,17 @@ struct fat32_dirent
  */
 struct fat32_handle
 {
-    struct fs_handle common;
     char *path;
     bool isdir;
     struct fat32_dirent *dirent;
-    union {
-        off_t file_pos;
-        struct fat32_dirent *dir_pos;
-    };
+    off_t pos;
 };
 
 struct free_cluster_list *free_clusters;
+
+struct fat32_dirent *current_directory;
+struct fat32_dirent *root_directory;
+char *mount;
 
 void set_sd(struct sdhc_s *sdh) {
     sd = sdh;
@@ -147,6 +162,17 @@ static void check_set_bpb_metadata(uint8_t *bpb) {
     RootSector = FIRST_SECTOR_OF_CLUSTER(RootClus);
     //calculate total number of clusters in the volume
     TotalClusters = TotSec32/SecPerClus;
+    //calculate blocks per sector
+    BlocksPerSec = BytsPerSec/SDHC_BLOCK_SIZE;
+
+    //create and set root directory
+    root_directory = malloc(sizeof(struct fat32_dirent));
+    root_directory->Attr = ATTR_DIRECTORY;
+    root_directory->FstCluster = RootClus;
+    root_directory->name = malloc(1);
+    root_directory->name[0] = '/';
+    root_directory->parent = NULL;
+    root_directory->size = -1;
 
     DEBUG_PRINTF("BytsPerSec : %d\n", BytsPerSec);
     DEBUG_PRINTF("SecPerClus : %d\n", SecPerClus);
@@ -186,7 +212,7 @@ static errval_t refill_free_clusters(void) {
         //grab entry from offset into block
         FAT_Entry entry = *(FAT_Entry *)(FAT_block + FAT_offset);
         //if free cluster, insert into free list
-        if(entry == CLUSTER_FREE) {
+        if((entry & CLUSTER_FREE_MASK) == CLUSTER_FREE) {
             push_back(free_clusters, FreeClustersToCheckFrom);
         }
 
@@ -211,6 +237,163 @@ static errval_t initialize_free_clusters(void) {
     return SYS_ERR_OK;
 }
 
+static void shortname_to_name(char *shortname, char **retname) {
+    char *name = calloc(1, 12);
+    int i = 0, k = 0;
+    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
+    i = 8;
+    if(shortname[i] != 0x20) name[k++] = '.';
+    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
+    name[k] = '\0'; 
+    *retname = name;
+}
+
+static errval_t get_next_cluster(int cluster, int *next_cluster) {
+    uint8_t FAT_Sector[SDHC_BLOCK_SIZE];
+
+    CHECK_ERR(sd_read_sector(FAT_SECTOR(cluster), FAT_Sector), "failed to read FAT");
+    FAT_Entry *entry = (FAT_Entry *) (FAT_Sector + FAT_OFFSET(cluster));
+    *next_cluster = *entry;
+
+    return SYS_ERR_OK;
+}
+
+//given a 32 byte directory entry, extracts info out of it
+//TODO : get file times
+static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, struct fat32_dirent **retent) {
+
+    struct fat32_dirent *dirent = malloc(sizeof(struct fat32_dirent));
+    
+    char shortname[11];
+    memcpy(shortname, dir, 11);
+    shortname_to_name(shortname, &dirent->name);
+
+    dirent->Attr = *(dir + DIR_ATTR);
+
+    if(dirent->Attr == ATTR_DIRECTORY)
+        dirent->is_dir = true;
+    else
+        dirent->is_dir = false;
+
+    uint16_t cluster_high = *(uint16_t *) (dir + DIR_FST_CLUSTER_HIGH), cluster_low = *(uint16_t *) (dir + DIR_FST_CLUSTER_LOW);
+    dirent->FstCluster = (cluster_high << 2) + cluster_low;
+
+    dirent->parent = parent;
+    dirent->size = *(uint32_t *) (dir + DIR_FILE_SIZE);
+
+    *retent = dirent;
+}
+
+static void free_dirent(struct fat32_dirent *dir, bool recursive) {
+    if(dir == NULL)
+        return;
+    if(dir->name != NULL)
+        free(dir->name);
+    if(recursive)
+        free_dirent(dir->parent, recursive);
+    free(dir);
+}
+
+static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, struct fat32_dirent **retdir) {
+
+    int cluster = dir->FstCluster;
+    while(cluster != EOC) {
+        int start_sector = FIRST_SECTOR_OF_CLUSTER(dir->FstCluster);
+        for(int sector = 0; sector < SecPerClus; sector++) {
+            uint8_t sector_data[SDHC_BLOCK_SIZE];
+            CHECK_ERR(sd_read_sector(start_sector + sector, sector_data), "bad sd read");
+            for(int i = 0; i < SDHC_BLOCK_SIZE; i+=32) {
+                if(sector_data[i] == 0x00)
+                    return FS_ERR_NOTFOUND;
+                if(sector_data[i] == 0xE5)
+                    continue;
+                struct fat32_dirent *dirent;
+                parse_directory_entry(sector_data + i, dir, &dirent);
+                if(strcmp(dirent->name, name) == 0) {
+                    *retdir = dirent;
+                    return SYS_ERR_OK;
+                }
+                free_dirent(dirent, false);
+            }
+        }
+        CHECK_ERR(get_next_cluster(cluster, &cluster), "error getting next cluster");
+    }
+
+    return FS_ERR_NOTFOUND;
+}
+
+//TODO : Nasty bug when file not found : DEBUG_ERR reprints the same few lines multiple times..... 
+static errval_t search_dirent(struct fat32_dirent *curr, const char *path, struct fat32_dirent **retent) {
+    errval_t err;
+    if(*path == '\0') {
+        *retent = curr;
+        return SYS_ERR_OK;
+    }
+    
+    if(curr->Attr != ATTR_DIRECTORY)
+        return FS_ERR_NOTDIR;
+        
+
+    while(*path != '\0') {
+        int i = 0;
+        while(path[i] != '\0' && path[i] != FS_PATH_SEP) i++;
+        char *next_dir_name = malloc(i);
+        memcpy(next_dir_name, path, i);
+        path += i;
+        if(*path != '\0')
+            path ++;
+        
+        struct fat32_dirent *dir;
+        err = find_in_directory(curr, next_dir_name, &dir);
+        free(next_dir_name);
+        if(err_is_fail(err)) {
+            return err;
+        }
+        curr = dir;
+    }
+
+    *retent = curr;
+
+    return SYS_ERR_OK;
+}
+
+static errval_t find_dirent(const char *mount_point, const char *path, struct fat32_dirent **retent) {
+    bool from_root = strstr(path, mount_point) == path;
+
+    struct fat32_dirent *dir;
+    if(from_root) {
+        path += strlen(mount_point);
+        dir = root_directory;
+    }
+    else {
+        dir = current_directory;
+    }
+
+    CHECK_ERR_PUSH(search_dirent(dir, path, retent), FS_ERR_SEARCH_FAIL);
+
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
+    struct fat32_dirent *dir;
+    CHECK_ERR_PUSH(find_dirent(mount, path, &dir), FS_ERR_OPEN);
+    
+    if(dir->Attr != ATTR_DIRECTORY)
+        return FS_ERR_NOTDIR;
+    
+    struct fat32_handle *handle = malloc(sizeof(struct fat32_handle));
+    handle->dirent = dir;
+    handle->isdir = true;
+    handle->path = malloc(strlen(path));
+    strncpy(handle->path, path, strlen(path));
+    handle->pos = 0;
+
+    *rethandle = handle;
+
+    return SYS_ERR_OK;
+}
+
+// Initialize the FAT32 filesystem, get all the necessary information, and populate the free block list with some free blocks
 errval_t fat32_init(void) { 
 
     uint8_t bpb[SDHC_BLOCK_SIZE];
@@ -221,5 +404,40 @@ errval_t fat32_init(void) {
 
     CHECK_ERR(initialize_free_clusters(), "Failed to find free clusters");
 
+    current_directory = NULL;
+
+    mount = malloc(8);
+    mount = "/"; 
+
     return SYS_ERR_OK; 
 }
+
+// static bool strisalnum(char *name, int len) {
+//     for(int i=0;i<len;i++)
+//         if(!isalnum(name[i]))
+//             return false;
+    
+//     return true;
+// }
+// static bool valid_shortname(char *name) {
+//     int len = strlen(name);
+//     if(len > 12 || len == 0)
+//         return false;
+//     if(name[0] == '.' || isdigit(name[0]))
+//         return false;
+//     char *dot_pos = strchr(name, '.');
+//     if(dot_pos == NULL)
+//         if(len > 8 || !strisalnum(name, len))
+//             return false;
+//     else {
+//         int lenfirst = dot_pos - name;
+//         if(lenfirst > 8)
+//             return false;
+//         int lenext = len - (dot_pos - name) - 1;
+//         if(lenext > 3)
+//             return false;
+//         if(!strisalnum(name, lenfirst) && !strisalnum(dot_pos+1, lenext))
+//             return false;
+//     }    
+//     return true;
+// }
