@@ -2,13 +2,14 @@
 #include <string.h>
 #include <ctype.h>
 #include <string.h>
+#include <sys/param.h>
+#include <libgen.h>
 
 #include <aos/aos.h>
 #include <aos/cache.h>
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <fs/list.h>
-#include <libgen.h>
 
 #include "fs_internal.h"
 
@@ -36,6 +37,8 @@ int FreeClustersToCheckFrom;
 #define FIRST_SECTOR_OF_CLUSTER(n) ((n-2) * SecPerClus) + FirstDataSector
 #define FAT_SECTOR(n) RsvdSecCnt + (n * 4 / BytsPerSec)
 #define FAT_OFFSET(n) (n*4) % BytsPerSec
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 #define CHECK_ERR(f, msg) ({\
             err = f;\
@@ -337,21 +340,42 @@ static errval_t find_dirent(const char *mount_point, const char *path, struct fa
     return SYS_ERR_OK;
 }
 
-errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
+static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, int ATTR, errval_t ERR) {
     errval_t err;
     struct fat32_dirent *dir;
     CHECK_ERR_PUSH(find_dirent(mount, path, &dir), FS_ERR_OPEN);
     
-    if(dir->Attr != ATTR_DIRECTORY)
-        return FS_ERR_NOTDIR;
+    if(!(dir->Attr & ATTR))
+        return ERR;
     
     struct fat32_handle *handle = malloc(sizeof(struct fat32_handle));
     handle->dirent = dir;
-    handle->isdir = true;
     handle->path = malloc(strlen(path));
     strncpy(handle->path, path, strlen(path));
     handle->pos = 0;
 
+    *rethandle = handle;
+
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
+    errval_t err;
+
+    struct fat32_handle *handle;
+    CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE | ATTR_LONG_NAME, FS_ERR_NOTFILE), "failed to open file");
+    handle->isdir = false;
+    *rethandle = handle;
+
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
+    errval_t err;
+
+    struct fat32_handle *handle;
+    CHECK_ERR(open_dirent(path, &handle, ATTR_DIRECTORY, FS_ERR_NOTDIR), "failed to open file");
+    handle->isdir = true;
     *rethandle = handle;
 
     return SYS_ERR_OK;
@@ -369,6 +393,33 @@ static errval_t sector_from_cluster_offset(int cluster, int offset, int *retsect
     *retsector = FIRST_SECTOR_OF_CLUSTER(cluster) + (offset/BytsPerSec);
     *retoffset = offset % BytsPerSec;
 
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *bytes_read) {
+    errval_t err;
+
+    struct fat32_handle *fhandle = handle;
+    //read first block
+    uint8_t data[SDHC_BLOCK_SIZE];
+
+    size_t start_bytes = bytes;
+    while(bytes != 0 && fhandle->pos != fhandle->dirent->size) {
+        //we read every iteration, because we either read a new sector, or we terminate
+        int sector, offset;
+        CHECK_ERR(sector_from_cluster_offset(fhandle->dirent->FstCluster, fhandle->pos, &sector, &offset), "");
+        CHECK_ERR(sd_read_sector(sector, data), "bad read");
+
+        size_t cpy_bytes = MIN(SDHC_BLOCK_SIZE - offset, bytes);
+        memcpy(buffer, data + offset, cpy_bytes);
+        buffer += cpy_bytes;
+        fhandle->pos += cpy_bytes;
+        bytes -= cpy_bytes;
+    }
+
+    if(bytes_read != NULL)
+        *bytes_read = start_bytes - bytes;
+    
     return SYS_ERR_OK;
 }
 
@@ -399,6 +450,56 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
 
     handle->pos++;
 
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_tell(fat32_handle_t handle, size_t *pos) {
+    struct fat32_handle *h = handle;
+    if(h->isdir)
+        return FS_ERR_NOTFILE;
+    *pos = h->pos;
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_seek(fat32_handle_t handle, enum fs_seekpos whence, off_t offset) {
+    struct fat32_handle *h = handle;
+    if(h->isdir)
+        return FS_ERR_NOTFILE;
+
+    switch(whence) {
+        case FS_SEEK_SET:
+            h->pos = MIN(offset, h->dirent->size);
+            break;
+        case FS_SEEK_CUR:
+            h->pos = MIN(h->pos + offset, h->dirent->size);
+            break;
+        case FS_SEEK_END:
+            h->pos = MIN(h->dirent->size - offset, h->dirent->size);
+            break;
+    }
+
+    return SYS_ERR_OK;
+}
+
+static void close_handle(struct fat32_handle *handle) {
+    free(handle->path);
+    free_dirent(handle->dirent, false);
+    free(handle);
+}
+
+errval_t fat32_close(fat32_handle_t inhandle) {
+    struct fat32_handle *handle = inhandle;
+    if(handle->isdir)
+        return FS_ERR_NOTFILE;
+    close_handle(handle);
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_closedir(fat32_handle_t inhandle) {
+    struct fat32_handle *handle = inhandle;
+    if(!handle->isdir)
+        return FS_ERR_NOTDIR;
+    close_handle(handle);
     return SYS_ERR_OK;
 }
 

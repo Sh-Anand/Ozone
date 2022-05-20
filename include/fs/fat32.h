@@ -37,7 +37,13 @@
 #define DIR_FILE_SIZE  0x1C     
 
 //Directory attributes
+#define ATTR_READ_ONLY 0x01
+#define ATTR_HIDDEN    0x02
+#define ATTR_SYSTEM    0x04
+#define ATTR_VOLUME_ID 0x08
 #define ATTR_DIRECTORY 0x10
+#define ATTR_ARCHIVE   0x20
+#define ATTR_LONG_NAME ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID
 #define DIR_FREE       0xE5
 #define DIR_ALL_FREE   0x0
 
@@ -89,13 +95,13 @@ typedef void *fat32_mount_t;
 
 typedef uint32_t FAT_Entry;
 
-errval_t fat32_open(void *st, const char *path, fat32_handle_t *rethandle);
+errval_t fat32_open(const char *path, fat32_handle_t *rethandle);
 
 errval_t fat32_create(void *st, const char *path, fat32_handle_t *rethandle);
 
 errval_t fat32_remove(void *st, const char *path);
 
-errval_t fat32_read(void *st, fat32_handle_t handle, void *buffer, size_t bytes,
+errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes,
                     size_t *bytes_read);
 
 errval_t fat32_write(void *st, fat32_handle_t handle, const void *buffer,
@@ -103,14 +109,14 @@ errval_t fat32_write(void *st, fat32_handle_t handle, const void *buffer,
 
 errval_t fat32_truncate(void *st, fat32_handle_t handle, size_t bytes);
 
-errval_t fat32_tell(void *st, fat32_handle_t handle, size_t *pos);
+errval_t fat32_tell(fat32_handle_t handle, size_t *pos);
 
 errval_t fat32_stat(void *st, fat32_handle_t inhandle, struct fs_fileinfo *info);
 
-errval_t fat32_seek(void *st, fat32_handle_t handle, enum fs_seekpos whence,
+errval_t fat32_seek(fat32_handle_t handle, enum fs_seekpos whence,
                     off_t offset);
 
-errval_t fat32_close(void *st, fat32_handle_t inhandle);
+errval_t fat32_close(fat32_handle_t inhandle);
 
 errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle);
 

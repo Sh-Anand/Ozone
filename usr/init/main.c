@@ -459,15 +459,30 @@ static errval_t init_sd(void) {
 
     err = fat32_init();
 
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "FAT INIT FAILED");
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "FAT INIT FAILED");
 
-    fat32_handle_t handle;
-    err = fat32_opendir("/HELLO/", &handle);
+    // fat32_handle_t handle;
+    // err = fat32_opendir("/HELLO/", &handle);
     
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "failed to open hello");
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to open hello");
 
+    // fat32_handle_t fhandle;
+    // err = fat32_open("/HELLO/WOW.TXT", &fhandle);
+
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to open wow.txt");
+
+    // char data[2];
+    // err = fat32_read(fhandle, data, 2, NULL);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to read bytes");
+    // DEBUG_PRINTF("Read : %s\n", data);
+
+    // err = fat32_seek(fhandle, FS_SEEK_CUR, 3);
+    // err = fat32_read(fhandle, data, 3, NULL);
+    // DEBUG_PRINTF("Read : %s\n", data);
     return SYS_ERR_OK;
 }
 
