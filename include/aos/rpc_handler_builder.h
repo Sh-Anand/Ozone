@@ -49,11 +49,14 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
     }                                                                                    \
     type *var = in_payload
 
-#define MALLOC_OUT_MSG_WITH_SIZE(var, type, size)                                        \
+#define MALLOC_WITH_SIZE(var, type, size)                                                \
     type *var = malloc(size);                                                            \
     if (var == NULL) {                                                                   \
         return LIB_ERR_MALLOC_FAIL;                                                      \
-    }                                                                                    \
+    }
+
+#define MALLOC_OUT_MSG_WITH_SIZE(var, type, size)                                        \
+    MALLOC_WITH_SIZE(var, type, size)                                                    \
     *out_payload = var;                                                                  \
     *out_size = size
 

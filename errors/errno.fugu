@@ -593,6 +593,11 @@ errors monitor MON_ERR_ {
     failure INVOKE_IRQ_SET "Unable to install IRQ vector",
 };
 
+errors nameserver NAMESERVER_ERR_ {
+    failure NAME_CONFLICT   "A service with the same name is already registered",
+    failure NOT_FOUND       "Cannot find the service with the given name",
+};
+
 // errors related to the routing library
 errors routing ROUTE_ERR_ {
     // These are for the old routing library, remove them when old lib is removed

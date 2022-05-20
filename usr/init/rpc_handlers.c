@@ -482,13 +482,13 @@ RPC_HANDLER(remote_cap_transfer_handler)
         break;
     case ObjType_DevFrame:
         err = devframe_forge(cap, msg->cap.u.devframe.base, msg->cap.u.devframe.bytes,
-                          disp_get_current_core_id());  // XXX: owner?
+                             disp_get_current_core_id());  // XXX: owner?
         if (err_is_fail(err)) {
             return err_push(err, MON_ERR_CAP_CREATE);
         }
     case ObjType_RAM:
         err = ram_forge(cap, msg->cap.u.ram.base, msg->cap.u.ram.bytes,
-                             disp_get_current_core_id());  // XXX: owner?
+                        disp_get_current_core_id());  // XXX: owner?
         if (err_is_fail(err)) {
             return err_push(err, MON_ERR_CAP_CREATE);
         }
@@ -512,6 +512,60 @@ RPC_HANDLER(remote_cap_transfer_handler)
     return SYS_ERR_OK;
 }
 
+RPC_HANDLER(register_nameserver_hander)
+{
+    struct proc_node *proc = arg;
+    DEBUG_PRINTF("nameserver registers as %u\n", proc->pid);
+
+    errval_t err;
+    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_UNKNOWN);
+    err = aos_chan_lmp_accept(&nameserver_rpc.chan, 32, in_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
+    }
+
+    *out_cap = nameserver_rpc.chan.lc.local_cap;
+    return SYS_ERR_OK;
+}
+
+RPC_HANDLER(bind_nameserver_handler)
+{
+    struct proc_node *proc = arg;
+
+    DEBUG_PRINTF("process %u tries to bind nameserver\n", proc->pid);
+
+    errval_t err;
+    struct capref frame;
+    err = frame_alloc(&frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    }
+
+    uint8_t *urpc_buffer;
+    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
+                           INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, frame);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_PAGING_MAP);
+    }
+
+    // BSP core is responsible for zeroing the URPC frame
+    memset(urpc_buffer, 0, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE);
+
+    err = paging_unmap(get_current_paging_state(), (void *)urpc_buffer);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_PAGING_UNMAP);
+    }
+
+    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
+    err = aos_chan_ack(&nameserver_rpc.chan, frame, &proc->pid, sizeof(domainid_t));
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    *out_cap = frame;
+    return SYS_ERR_OK;
+}
+
 // Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TRANSFER_CAP] = cap_transfer_handler,
@@ -521,9 +575,11 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_PROCESS_SPAWN] = spawn_msg_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
-    [RPC_STRESS_TEST] = stress_test_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
+    [RPC_STRESS_TEST] = stress_test_handler,
+    [RPC_REGISTER_AS_NAMESERVER] = register_nameserver_hander,
+    [RPC_BIND_NAMESERVER] = bind_nameserver_handler,
     [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
     [INTERNAL_RPC_REMOTE_CAP_TRANSFER] = remote_cap_transfer_handler,

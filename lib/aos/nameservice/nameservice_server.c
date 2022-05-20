@@ -132,17 +132,17 @@ errval_t server_register(const char *name, nameservice_receive_handler_t recv_ha
         return err;
     }
 
-    // Create a pending LMP channel
-    err = create_pending_lmp_chan_on_service(service);
-    if (err_is_fail(err)) {
-        goto FAILURE_CREATE_PENDING_CHAN;
-    }
-    assert(service->pending_lmp_chan->chan.type == AOS_CHAN_TYPE_LMP);
-    assert(service->pending_lmp_chan->chan.lc.connstate == LMP_BIND_WAIT);
+//    // Create a pending LMP channel
+//    err = create_pending_lmp_chan_on_service(service);
+//    if (err_is_fail(err)) {
+//        goto FAILURE_CREATE_PENDING_CHAN;
+//    }
+//    assert(service->pending_lmp_chan->chan.type == AOS_CHAN_TYPE_LMP);
+//    assert(service->pending_lmp_chan->chan.lc.connstate == LMP_BIND_WAIT);
 
     // Register with nameserver
     err = aos_rpc_call(&ns_rpc, NAMESERVICE_REGISTER,
-                       service->pending_lmp_chan->chan.lc.local_cap, name,
+                       NULL_CAP, name,
                        strlen(name) + 1, NULL, NULL, NULL);
     if (err_is_fail(err)) {
         goto FAILURE_REGISTER;
@@ -151,9 +151,9 @@ errval_t server_register(const char *name, nameservice_receive_handler_t recv_ha
     return SYS_ERR_OK;
 
 FAILURE_REGISTER:
-FAILURE_CREATE_PENDING_CHAN:
-    // aos_chan_destroy() in delete_chan() will call lmp_chan_destroy()
-    delete_chan(service->pending_lmp_chan);  // can handle NULL and do the free inside
+//FAILURE_CREATE_PENDING_CHAN:
+//    // aos_chan_destroy() in delete_chan() will call lmp_chan_destroy()
+//    delete_chan(service->pending_lmp_chan);  // can handle NULL and do the free inside
     free(service);
     return err;
 }
@@ -362,7 +362,7 @@ static void server_ump_handler(void *arg)
     }
 
 FREE_REPLY_PAYLOAD:
-    free(reply_payload);
+    // free(reply_payload);
     free(recv_payload);
 RE_REGISTER:
     err = ump_chan_register_recv(uc, get_default_waitset(),

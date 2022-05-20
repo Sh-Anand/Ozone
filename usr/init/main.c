@@ -41,6 +41,8 @@ struct bootinfo *bi;
 coreid_t my_core_id;
 struct platform_info platform_info;
 
+struct aos_rpc nameserver_rpc;
+
 /**
  * @brief TODO: make use of this function
  *
@@ -65,7 +67,8 @@ static void rpc_lmp_handler(void *arg)
 {
     errval_t err;
 
-    struct aos_chan *chan = arg;
+    struct proc_node *proc = arg;
+    struct aos_chan *chan = &proc->chan;
     assert(chan->type == AOS_CHAN_TYPE_LMP);
     struct lmp_chan *lc = &chan->lc;
 
@@ -97,7 +100,7 @@ static void rpc_lmp_handler(void *arg)
     }
 
     // Call the handler
-    LMP_DISPATCH_AND_REPLY_MAY_FAIL(err, chan, NULL, rpc_handlers[recv_type], recv_cap)
+    LMP_DISPATCH_AND_REPLY_MAY_FAIL(err, chan, proc, rpc_handlers[recv_type], recv_cap)
 
     // Deserialization cleanup
     LMP_CLEANUP(err, helper)
@@ -119,16 +122,13 @@ void init_urpc_handler(void *arg)
     UMP_RECV_DESERIALIZE(uc)
 
     // Obviously no init-assisted cap transfer since we are just in init
-    struct capref recv_cap = NULL_CAP;
-
-    if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("init_urpc_handler: invalid URPC msg %u\n", recv_type);
-        goto FREE_RECV_PAYLOAD;
-    }
+    UMP_RECV_NO_CAP
 
     // DEBUG_PRINTF("init_urpc_handler: handling %u\n", type);
 
-    UMP_DISPATCH_MAY_FAIL(chan, rpc_handlers[recv_type])
+    UMP_ASSERT_DISPATCHER(rpc_handlers, INTERNAL_RPC_MSG_COUNT);
+
+    UMP_DISPATCH_AND_REPLY_MAY_FAIL(chan, rpc_handlers[recv_type], NULL)
 
     UMP_CLEANUP_AND_RE_REGISTER(uc, init_urpc_handler, arg)
 }
@@ -138,7 +138,7 @@ static errval_t boot_core(coreid_t core)
     errval_t err;
 
     struct capref urpc_frame;
-    err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE, NULL);
+    err = frame_alloc(&urpc_frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
     if (err_is_fail(err)) {
         return err;
     }
@@ -253,20 +253,20 @@ static errval_t boot_core(coreid_t core)
 
             DEBUG_PRINTF("coordinate URPC setup between %u and %u\n", core, i);
 
-            err = frame_alloc(&urpc_frame, URPC_FRAME_SIZE, NULL);
+            err = frame_alloc(&urpc_frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
             if (err_is_fail(err)) {
                 return err_push(err, LIB_ERR_FRAME_ALLOC);
             }
 
             uint8_t *urpc_buffer;
             err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
-                                   URPC_FRAME_SIZE, urpc_frame);
+                                   INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, urpc_frame);
             if (err_is_fail(err)) {
                 return err_push(err, LIB_ERR_PAGING_MAP);
             }
 
             // BSP core is responsible for zeroing the URPC frame
-            memset(urpc_buffer, 0, URPC_FRAME_SIZE);
+            memset(urpc_buffer, 0, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE);
 
             err = paging_unmap(get_current_paging_state(), (void *)urpc_buffer);
             if (err_is_fail(err)) {
@@ -300,6 +300,19 @@ static errval_t boot_core(coreid_t core)
     return SYS_ERR_OK;
 }
 
+static errval_t start_nameserver(void) {
+    errval_t err;
+    struct spawninfo si;
+    domainid_t pid;
+    err = spawn_load_by_name("nameserver", &si, &pid);
+    if (err_is_fail(err)) {
+        return err_push(err, SPAWN_ERR_LOAD);
+    }
+
+    aos_rpc_init(&nameserver_rpc);
+    return SYS_ERR_OK;
+}
+
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -314,6 +327,7 @@ static int bsp_main(int argc, char *argv[])
     err = initialize_ram_alloc();
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "initialize_ram_alloc");
+        exit(EXIT_FAILURE);
     }
 
     spawn_init(rpc_lmp_handler);
@@ -331,6 +345,12 @@ static int bsp_main(int argc, char *argv[])
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to boot core");
         }
+    }
+
+    err = start_nameserver();
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to start nameserver");
+        exit(EXIT_FAILURE);
     }
 
     // Grading

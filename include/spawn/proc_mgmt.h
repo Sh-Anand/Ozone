@@ -18,8 +18,6 @@ struct proc_node {
     LIST_ENTRY(proc_node) link;
 };
 
-;  // tree type declaration
-
 struct proc_mgmt {
     RB_HEAD(proc_rb_tree, proc_node) running;
     LIST_HEAD(, proc_node) free_list;

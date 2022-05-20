@@ -176,8 +176,14 @@ errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,
             }
         }
     } else {
-        DEBUG_PRINTF("WARNING: client_rpc: received a cap but given up\n");
+        if (!capref_is_null(ret_cap)) {
+            DEBUG_PRINTF("WARNING: client_rpc: received a cap but given up\n");
+        }
     }
 
     return SYS_ERR_OK;
+}
+
+errval_t client_kill_by_pid(domainid_t pid) {
+    return LIB_ERR_NOT_IMPLEMENTED;
 }

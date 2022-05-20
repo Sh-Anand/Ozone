@@ -18,14 +18,14 @@ errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame,
     // Map the urpc frame to our address space
     uint8_t *urpc_buffer;
     err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
-                           URPC_FRAME_SIZE, urpc_frame);
+                           INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, urpc_frame);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
 
     if (zero_frame) {
         // BSP core is responsible for zeroing the URPC frame
-        memset(urpc_buffer, 0, URPC_FRAME_SIZE);
+        memset(urpc_buffer, 0, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE);
     }
 
     // Init URPC listener

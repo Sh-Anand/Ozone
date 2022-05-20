@@ -28,4 +28,6 @@ struct internal_rpc_remote_cap_transfer_msg {
 
 extern rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT];
 
+extern struct aos_rpc nameserver_rpc;
+
 #endif  // AOS_RPC_HANDLERS_H

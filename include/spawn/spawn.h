@@ -17,7 +17,7 @@
 
 #include "aos/slot_alloc.h"
 #include "aos/paging.h"
-
+#include "spawn/proc_mgmt.h"
 
 struct spawninfo {
     // the next in the list of spawned domains
@@ -44,6 +44,7 @@ struct spawninfo {
     struct capref dispatcher_cap_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
 
+    struct proc_node *proc;
     struct aos_chan *chan;  // should be AOS_CHAN_TYPE_LMP
     struct lmp_chan *lc;    // &chan.lc, helper when added when doing the refactor
 };

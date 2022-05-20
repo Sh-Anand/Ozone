@@ -13,8 +13,6 @@
 #include <spawn/multiboot.h>
 #include <spawn/argv.h>
 
-#include "proc_mgmt.h"
-
 extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
@@ -240,7 +238,7 @@ static errval_t setup_endpoint(struct spawninfo *si)
     }
 
     // Start receiving on the channel
-    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->chan));
+    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->proc));
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
     }
@@ -561,6 +559,7 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     si->pid = node->pid;
     *pid = si->pid;
 
+    si->proc = node;
     si->chan = &node->chan;  // will be filled by setup_endpoint()
     si->lc = &si->chan->lc;
 

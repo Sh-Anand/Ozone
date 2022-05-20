@@ -1290,7 +1290,7 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
  */
 errval_t paging_init(void)
 {
-    debug_printf("paging_init\n");
+//    debug_printf("paging_init\n");
     // DONE (M2): Call paging_init_state for &current
     // DONE (M4): initialize self-paging handler
     // TIP: use thread_set_exception_handler() to setup a page fault handler

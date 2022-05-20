@@ -7,7 +7,7 @@
 
 #include <aos/aos_rpc.h>
 
-#define URPC_FRAME_SIZE (UMP_CHAN_SHARED_FRAME_SIZE * 2)
+#define INIT_BIDIRECTIONAL_URPC_FRAME_SIZE (UMP_CHAN_SHARED_FRAME_SIZE * 2)
 extern struct aos_chan *urpc_listen_from[MAX_COREID];  // the current init should listen on them
 extern struct aos_rpc *urpc[MAX_COREID];            // the current init make calls on them
 

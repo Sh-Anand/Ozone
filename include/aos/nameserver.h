@@ -10,19 +10,30 @@
 
 // XXX: is there a more elegant way to expose it only to aos lib and init?
 enum nameservice_rpc_identifier {
-    NAMESERVICE_SET_LISTEN_EP,        // [call] cap: lmp endpoint
+    NAMESERVICE_REGISTER,             // [call] payload: name
                                       // [return] errval
-    NAMESERVICE_REGISTER,             // [call] cap: lmp endpoint, payload: name
-                                      // [return] errval
-    NAMESERVICE_REFILL_LMP_ENDPOINT,  // [call] cap: lmp endpoint, payload: name
-                                      // [return] errval
+
+    NAMESERVICE_REFILL_LMP_ENDPOINT,  // Deprecated
+
+
     NAMESERVICE_DEREGISTER,           // [call] payload: name
                                       // [return] errval
     NAMESERVICE_LOOKUP,               // [call] payload: name
-                                      // [return] err / cap: lmp endpoint or frame, payload: pid
+                                      // [return] err / cap: zeroed urpc_frame, payload: pid
     NAMESERVICE_ENUMERATE,            // [call] none
                                       // [return] err / struct enumerate_reply_msg
     NAMESERVICE_RPC_COUNT
+};
+
+enum ns_notification_identifier {
+    SERVER_BIND_LMP,
+    SERVER_BIND_UMP,
+    KILL_BY_PID,
+};
+
+struct ns_binding_notification {
+    domainid_t pid;
+    char name[0];
 };
 
 typedef void* nameservice_chan_t;

@@ -37,8 +37,8 @@ enum rpc_identifier {
     RPC_ACK_CAP_CHANNEL,  // on UMP: capability transfer channel is setup
     RPC_PUT_CAP,          // on LMP: this message is putting a cap in the init channel
     RPC_ERR,
-    RPC_MSG_IN_FRAME,     // on LMP: the actual message in encode in the frame cap
-    RPC_TRANSFER_CAP,     // on LMP: transfer cap to the init channel of the given domain
+    RPC_MSG_IN_FRAME,  // on LMP: the actual message in encode in the frame cap
+    RPC_TRANSFER_CAP,  // on LMP: transfer cap to the init channel of the given domain
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,
@@ -48,6 +48,7 @@ enum rpc_identifier {
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
     RPC_STRESS_TEST,
+    RPC_REGISTER_AS_NAMESERVER,
     RPC_BIND_NAMESERVER,
     RPC_MSG_COUNT,
     // User defined identifier cannot exceed this number
@@ -80,6 +81,11 @@ struct lmp_helper {
     struct capref payload_frame;
     void *mapped_frame;
 };
+
+errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap);
+
+errval_t lmp_try_recv(struct lmp_chan *lc, struct lmp_recv_msg *recv_msg,
+                      struct capref *recv_cap);
 
 errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const void *buf,
                        size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
@@ -181,6 +187,9 @@ void aos_chan_destroy(struct aos_chan *chan);
 errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
                       struct capref call_cap, const void *call_buf, size_t call_size,
                       struct capref *ret_cap, void **ret_buf, size_t *ret_size);
+
+errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
+                       struct capref cap, const void *buf, size_t size);
 
 /**
  * Reply a successful RPC call.
