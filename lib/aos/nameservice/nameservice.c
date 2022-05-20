@@ -242,9 +242,5 @@ static void ns_notification_handler(void *arg)
 FAILURE:
     // No special error handling is needed for now
 RE_REGISTER:
-    err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(ns_notification_handler, arg));
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "ns_notification_handler: error re-registering handler\n");
-    }
+    LMP_RE_REGISTER(err, lc, ns_notification_handler, arg)
 }

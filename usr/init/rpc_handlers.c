@@ -401,8 +401,9 @@ RPC_HANDLER(bind_core_urpc_handler)
     }
 
     // Start handling URPCs
-    err = ump_chan_register_recv(&urpc_listen_from[msg->core]->uc, get_default_waitset(),
-                                 MKCLOSURE(urpc_handler, urpc_listen_from[msg->core]));
+    err = ump_chan_register_recv(
+        &urpc_listen_from[msg->core]->uc, get_default_waitset(),
+        MKCLOSURE(init_urpc_handler, urpc_listen_from[msg->core]));
     if (err_is_fail(err)) {
         return err;
     }

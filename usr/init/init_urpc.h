@@ -13,6 +13,6 @@ extern struct aos_rpc *urpc[MAX_COREID];            // the current init make cal
 
 errval_t setup_urpc(coreid_t core, struct capref urpc_frame, bool zero_frame, bool listener_first);
 
-void urpc_handler(void *arg);
+void init_urpc_handler(void *arg);
 
 #endif  // AOS_INIT_URPC_H

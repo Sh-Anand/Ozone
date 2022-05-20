@@ -318,11 +318,7 @@ static void server_lmp_handler(void *arg)
 
 FAILURE:
 RE_REGISTER:
-    err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(server_lmp_handler, arg /* not chan */));
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_lmp_handler: error re-registering handler\n");
-    }
+    LMP_RE_REGISTER(err, lc, server_lmp_handler, arg)
 }
 
 /**

@@ -24,6 +24,7 @@
 #include <aos/ump_chan.h>
 #include <aos/kernel_cap_invocations.h>
 #include <aos/lmp_handler_builder.h>
+#include <aos/ump_handler_builder.h>
 #include <mm/mm.h>
 #include <grading.h>
 #include <aos/capabilities.h>
@@ -104,85 +105,32 @@ static void rpc_lmp_handler(void *arg)
 FAILURE:
     // XXX: maybe kill the caller here
 RE_REGISTER:
-    err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(rpc_lmp_handler, arg));
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "rpc_lmp_handler: error re-registering handler\n");
-        // XXX: maybe kill the caller here
-    }
+    LMP_RE_REGISTER(err, lc, rpc_lmp_handler, arg)
 }
 
-void urpc_handler(void *arg)
+void init_urpc_handler(void *arg)
 {
     struct aos_chan *chan = arg;
     assert(chan->type == AOS_CHAN_TYPE_UMP);
     struct ump_chan *uc = &chan->uc;
 
-    uint8_t *recv_payload = NULL;
-    size_t recv_size = 0;
+    errval_t err;
+
+    UMP_RECV_DESERIALIZE(uc)
+
+    // Obviously no init-assisted cap transfer since we are just in init
     struct capref recv_cap = NULL_CAP;
 
-    errval_t err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
-    if (err == LIB_ERR_RING_NO_MSG) {
-        goto RE_REGISTER;
-    }
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "urpc_handler: ring_consumer_recv failed\n");
-        goto RE_REGISTER;
-    }
-
-    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_payload);
-
-    if (recv_type & RPC_SPECIAL_CAP_TRANSFER_FLAG) {
-        err = ump_recv_cap(uc, &recv_cap);
-        if (err_is_fail(err)) {
-            err = err_push(err, LIB_ERR_UMP_CHAN_RECV_CAP);
-            DEBUG_ERR(err, "rpc_ump_call: ump_recv_cap failed\n");
-            goto FREE_RECV_PAYLOAD;
-        }
-
-        // Clear the flag
-        recv_type ^= RPC_SPECIAL_CAP_TRANSFER_FLAG;
-    }
-
     if (recv_type >= INTERNAL_RPC_MSG_COUNT || rpc_handlers[recv_type] == NULL) {
-        DEBUG_PRINTF("urpc_handler: invalid URPC msg %u\n", recv_type);
+        DEBUG_PRINTF("init_urpc_handler: invalid URPC msg %u\n", recv_type);
         goto FREE_RECV_PAYLOAD;
     }
 
-    // DEBUG_PRINTF("urpc_handler: handling %u\n", type);
+    // DEBUG_PRINTF("init_urpc_handler: handling %u\n", type);
 
-    void *reply_payload = NULL;
-    size_t reply_size = 0;
-    struct capref reply_cap = NULL_CAP;
-    err = rpc_handlers[recv_type](NULL, recv_payload + sizeof(rpc_identifier_t),
-                                  recv_size - sizeof(rpc_identifier_t), &reply_payload,
-                                  &reply_size, NULL_CAP, &reply_cap);
+    UMP_DISPATCH_MAY_FAIL(chan, rpc_handlers[recv_type])
 
-    if (err_is_fail(err)) {
-        err = aos_chan_nack(chan, err);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "urpc_handler: aos_chan_nack failed\n");
-            goto FREE_REPLY_PAYLOAD;
-        }
-    } else {
-        err = aos_chan_ack(chan, reply_cap, reply_payload, reply_size);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "urpc_handler: aos_chan_ack failed\n");
-            goto FREE_REPLY_PAYLOAD;
-        }
-    }
-
-FREE_REPLY_PAYLOAD:
-    free(reply_payload);
-FREE_RECV_PAYLOAD:
-    free(recv_payload);
-RE_REGISTER:
-    err = ump_chan_register_recv(uc, get_default_waitset(), MKCLOSURE(urpc_handler, arg));
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "urpc_handler: error re-registering handler");
-        // XXX: maybe kill the caller here
-    }
+    UMP_CLEANUP_AND_RE_REGISTER(uc, init_urpc_handler, arg)
 }
 
 static errval_t boot_core(coreid_t core)
@@ -294,7 +242,7 @@ static errval_t boot_core(coreid_t core)
 
     // Start handling URPCs from the newly booted core
     err = ump_chan_register_recv(&urpc_listen_from[core]->uc, get_default_waitset(),
-                                 MKCLOSURE(urpc_handler, urpc_listen_from[core]));
+                                 MKCLOSURE(init_urpc_handler, urpc_listen_from[core]));
     if (err_is_fail(err)) {
         return err;
     }
@@ -541,7 +489,7 @@ static int app_main(int argc, char *argv[])
     // Start handling URPCs from core 0
     assert(urpc_listen_from[0]->type == AOS_CHAN_TYPE_UMP);
     err = ump_chan_register_recv(&urpc_listen_from[0]->uc, get_default_waitset(),
-                                 MKCLOSURE(urpc_handler, urpc_listen_from[0]));
+                                 MKCLOSURE(init_urpc_handler, urpc_listen_from[0]));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "ump_chan_register_recv failed");
         abort();

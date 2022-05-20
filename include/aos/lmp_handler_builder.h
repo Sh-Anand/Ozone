@@ -116,4 +116,12 @@
         DEBUG_ERR(err, "%s: failed to clean up\n", __func__);                            \
     }
 
+#define LMP_RE_REGISTER(err, lc, func, arg)                                                   \
+    err = lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(func, arg));       \
+    if (err_is_fail(err)) {                                                              \
+        DEBUG_ERR(err, "%s: error re-registering handler\n", __func__);                  \
+        /* Only LIB_ERR_CHAN_ALREADY_REGISTERED is possible, safe to discard it */       \
+    }
+
+
 #endif

@@ -20,9 +20,9 @@ struct client {
 
 static LIST_HEAD(, client) clients = LIST_HEAD_INITIALIZER(&clients);
 
-static void nameserver_rpc_handler(void *arg);
+static void nameserver_urpc_handler(void *arg);
 
-errval_t nameserver_bind(domainid_t pid, struct capref client_ep, struct capref *reply_ep)
+errval_t nameserver_bind(domainid_t pid, struct capref urpc_frame)
 {
     errval_t err;
 
@@ -31,25 +31,21 @@ errval_t nameserver_bind(domainid_t pid, struct capref client_ep, struct capref 
         return LIB_ERR_MALLOC_FAIL;
     }
 
-    assert(spawn_get_core(pid) == disp_get_core_id());
     b->pid = pid;
-    err = aos_chan_lmp_accept(&b->chan, NAMESERVER_EP_BUF_LEN, client_ep);
+    err = aos_chan_ump_init(&b->chan, urpc_frame, UMP_CHAN_SERVER, pid);
     if (err_is_fail(err)) {
-        err = err_push(err, LIB_ERR_LMP_CHAN_INIT);
+        err = err_push(err, LIB_ERR_UMP_CHAN_INIT);
         goto FAILURE;
     }
-    err = lmp_chan_register_recv(&b->chan.lc, get_default_waitset(),
-                                 MKCLOSURE(nameserver_rpc_handler, b));
+    err = ump_chan_register_recv(&b->chan.uc, get_default_waitset(),
+                                 MKCLOSURE(nameserver_urpc_handler, b));
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
         goto FAILURE;
     }
-    aos_chan_lmp_init(&b->notifier);
-    b->notifier.lc.remote_cap = NULL_CAP;
+    b->notifier.type = AOS_CHAN_TYPE_UNKNOWN;
 
     LIST_INSERT_HEAD(&clients, b, link);
-    *reply_ep = b->chan.lc.local_cap;
-
     return SYS_ERR_OK;
 
 FAILURE:
@@ -59,13 +55,16 @@ FAILURE:
 
 static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT];
 
-static void nameserver_rpc_handler(void *arg)
+/**
+ * Nameserver URPC handler
+ * @param arg  *struct client
+ */
+static void nameserver_urpc_handler(void *arg)
 {
     errval_t err;
     struct client *client = arg;
-    assert(client->chan.type == AOS_CHAN_TYPE_LMP);
-    struct lmp_chan *lc = &client->chan.lc;
-    assert(lc->connstate == LMP_CONNECTED);
+    assert(client->chan.type == AOS_CHAN_TYPE_UMP);
+    struct ump_chan *uc = &client->chan.uc;
 
     // Receive the message and cap, refill the recv slot, deserialize
     LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type, recv_buf,
@@ -87,8 +86,8 @@ static void nameserver_rpc_handler(void *arg)
 
 FAILURE:
 RE_REGISTER:
-    err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                 MKCLOSURE(nameserver_rpc_handler, arg));
+    err = ump_chan_register_recv(uc, get_default_waitset(),
+                                 MKCLOSURE(nameserver_urpc_handler, arg));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "nameserver_rpc_handler: error re-registering handler\n");
     }
