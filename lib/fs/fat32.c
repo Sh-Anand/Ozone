@@ -395,7 +395,7 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
 
     *retname = dir->name;
     info->size = dir->size;
-    info->type = FS_DIRECTORY;
+    info->type = dir->is_dir ? FS_DIRECTORY : FS_FILE;
 
     handle->pos++;
 
