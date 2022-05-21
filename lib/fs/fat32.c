@@ -67,10 +67,8 @@ void set_sd(struct sdhc_s *sdh) {
     sd = sdh;
 }
 
-//Read logical sector <sector> and return a pointer to the info
-static errval_t sd_read_sector(int sector, void *data) {
+static errval_t get_no_cache_frame(int size, lpaddr_t *paddr, lpaddr_t *vaddr, struct capref *retframe) {
     errval_t err;
-    //invalidate the buffer from the cache
 
     struct capref frame;
 
@@ -82,21 +80,45 @@ static errval_t sd_read_sector(int sector, void *data) {
     err = cap_identify_mappable(frame, &f_id);
     if(err_is_fail(err))
         return err;
+    *paddr = f_id.base;
 
-    err = sdhc_read_block(sd, sector, f_id.base);
-    if(err_is_fail(err))
-        return err_push(err, FS_ERR_BLOCK_READ);
-    
-    void *vaddr;
-    err = paging_map_frame_attr(get_current_paging_state(), &vaddr, SDHC_BLOCK_SIZE, frame, VREGION_FLAGS_READ_WRITE_NOCACHE);
+    err = paging_map_frame_attr(get_current_paging_state(), (void **)vaddr, SDHC_BLOCK_SIZE, frame, VREGION_FLAGS_READ_WRITE_NOCACHE);
     if(err_is_fail(err))
         return err;
-    // arm64_dcache_wbinv_range((vm_offset_t)vaddr, SDHC_BLOCK_SIZE);
-    // arm64_dcache_wbinv_range((vm_offset_t)data, SDHC_BLOCK_SIZE);
-
-    memcpy(data, vaddr, SDHC_BLOCK_SIZE);
     
-    err = cap_destroy(frame);
+    *retframe = frame;
+    return SYS_ERR_OK;
+}
+
+//Read logical sector <sector> and return a pointer to the info
+static errval_t sd_read_sector(int sector, void *data) {
+    errval_t err;
+
+    lpaddr_t paddr, vaddr;
+    struct capref frame;
+
+    CHECK_ERR(get_no_cache_frame(SDHC_BLOCK_SIZE, &paddr, &vaddr, &frame), "");
+    
+    CHECK_ERR_PUSH(sdhc_read_block(sd, sector, paddr), FS_ERR_BLOCK_READ);
+
+    memcpy(data, (void *)vaddr, SDHC_BLOCK_SIZE);
+    
+    CHECK_ERR(cap_destroy(frame), "");
+
+    return SYS_ERR_OK;
+}
+
+//Write data to logical sector
+static errval_t sd_write_sector(int sector, void *data) {
+    errval_t err;
+    
+    lpaddr_t paddr, vaddr;
+    struct capref frame;
+    CHECK_ERR(get_no_cache_frame(SDHC_BLOCK_SIZE, &paddr, &vaddr, &frame), "");
+
+    CHECK_ERR_PUSH(sdhc_write_block(sd, sector, paddr), FS_ERR_BLOCK_WRITE);
+
+    CHECK_ERR(cap_destroy(frame), "");
 
     return SYS_ERR_OK;
 }
@@ -259,7 +281,10 @@ static void free_dirent(struct fat32_dirent *dir, bool recursive) {
     free(dir);
 }
 
-static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, struct fat32_dirent **retdir) {
+//if find_empty is set, finds the first empty dirent block
+//if find_empty, retsector and retoffset mandatory, else not mandatory
+//retcluster returns the cluster at which this was found (is important when you want to extend the cluster)
+static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bool find_empty, struct fat32_dirent **retdir, int *retsector, int *retoffset, int *retcluster) {
     errval_t err;
     int cluster = dir->FstCluster;
     while(cluster != EOC) {
@@ -268,17 +293,34 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, st
             uint8_t sector_data[SDHC_BLOCK_SIZE];
             CHECK_ERR(sd_read_sector(start_sector + sector, sector_data), "bad sd read");
             for(int i = 0; i < SDHC_BLOCK_SIZE; i+=32) {
-                if(sector_data[i] == 0x00)
-                    return FS_ERR_NOTFOUND;
-                if(sector_data[i] == 0xE5)
-                    continue;
-                struct fat32_dirent *dirent;
-                parse_directory_entry(sector_data + i, dir, &dirent);
-                if(strcmp(dirent->name, name) == 0) {
-                    *retdir = dirent;
-                    return SYS_ERR_OK;
+                if(find_empty) {
+                    if(sector_data[i] == DIR_ALL_FREE || sector_data[i] == DIR_FREE) {
+                        *retsector = start_sector + sector;
+                        *retoffset = i;
+                        if(retcluster != NULL)
+                            *retcluster = cluster;
+                        return SYS_ERR_OK;
+                    }
                 }
-                free_dirent(dirent, false);
+                else {
+                    if(sector_data[i] == DIR_ALL_FREE)
+                        return FS_ERR_NOTFOUND;
+                    if(sector_data[i] == DIR_FREE)
+                        continue;
+                    struct fat32_dirent *dirent;
+                    parse_directory_entry(sector_data + i, dir, &dirent);
+                    if(strcmp(dirent->name, name) == 0) {
+                        *retdir = dirent;
+                        if(retsector != NULL)
+                            *retsector = start_sector + sector;
+                        if(retoffset != NULL)
+                            *retoffset = i;
+                        if(retcluster != NULL)
+                            *retcluster = cluster;
+                        return SYS_ERR_OK;
+                    }
+                    free_dirent(dirent, false);
+                }
             }
         }
         CHECK_ERR(get_next_cluster(cluster, &cluster), "error getting next cluster");
@@ -287,8 +329,65 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, st
     return FS_ERR_NOTFOUND;
 }
 
-//TODO : Nasty bug when file not found : DEBUG_ERR reprints the same few lines multiple times..... 
-static errval_t search_dirent(struct fat32_dirent *curr, const char *path, struct fat32_dirent **retent) {
+static errval_t allocate_cluster(int *retclus) {
+    errval_t err;
+    if(free_clusters->size == 0) {
+        CHECK_ERR_PUSH(refill_free_clusters(), FS_ERR_DISK_FULL);
+    }
+
+    *retclus = pop_front(free_clusters);
+
+    return SYS_ERR_OK;
+}
+
+static void create_new_empty_dirent(struct fat32_dirent *parent, char *name, bool is_dir, int Attr, struct fat32_dirent **retent) {
+    struct fat32_dirent *ent = malloc(sizeof(struct fat32_dirent));
+    ent->size = 0;
+    ent->is_dir = is_dir;
+    ent->Attr = Attr;
+    ent->FstCluster = 0;
+    ent->name = malloc(strlen(name));
+    memcpy(ent->name, name, strlen(name));
+    ent->parent = parent;
+    *retent = ent;
+}
+
+static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_cluster, int *retcluster) {
+    errval_t err;
+
+    CHECK_ERR(allocate_cluster(retcluster), "");
+
+    uint8_t FAT_Sector[SDHC_BLOCK_SIZE];
+
+    int fat_logical_sector = FAT_SECTOR(last_cluster);
+    CHECK_ERR(sd_read_sector(fat_logical_sector, FAT_Sector), "failed to read FAT");
+    FAT_Entry *entry = (FAT_Entry *) (FAT_Sector + FAT_OFFSET(last_cluster));
+    *entry = *retcluster;
+    
+    CHECK_ERR(sd_write_sector(fat_logical_sector, FAT_Sector), "");
+
+    return SYS_ERR_OK;
+}
+
+static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool is_dir, int Attr, struct fat32_dirent **retent) {
+    errval_t err;
+
+    struct fat32_dirent *dir;
+    create_new_empty_dirent(curr, name, is_dir, Attr, &dir);
+
+    int sector,offset,cluster;   
+    err = find_in_directory(curr, name, true, NULL, &sector, &offset, &cluster);
+
+    if(err == FS_ERR_NOTFOUND) {
+        int next_cluster; 
+        CHECK_ERR(extend_dirent_by_one_cluster(curr, cluster, &next_cluster), "");
+    }
+    
+    return SYS_ERR_OK;
+}
+
+//given current directory and relative path, find and return dirent
+static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool CREATE_IF_NOT_EXIST, struct fat32_dirent **retent) {
     errval_t err;
     if(*path == '\0') {
         *retent = curr;
@@ -309,10 +408,15 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, struc
             path ++;
         
         struct fat32_dirent *dir;
-        err = find_in_directory(curr, next_dir_name, &dir);
-        free(next_dir_name);
+        err = find_in_directory(curr, next_dir_name, false, &dir, NULL, NULL, NULL);
         if(err_is_fail(err)) {
-            return err;
+            if(CREATE_IF_NOT_EXIST && err == FS_ERR_NOTFOUND) {
+                create_dirent_in_dir(curr, next_dir_name, true, 0, &dir); //STUB
+            }
+            else {
+                free(next_dir_name);
+                return err_push(err, FS_ERR_NOTFOUND);
+            }
         }
         curr = dir;
     }
@@ -322,7 +426,8 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, struc
     return SYS_ERR_OK;
 }
 
-static errval_t find_dirent(const char *mount_point, const char *path, struct fat32_dirent **retent) {
+//given a mount point and a path, find and return the directory entry
+static errval_t find_dirent(const char *mount_point, const char *path, bool CREATE_IF_NOT_EXIST, struct fat32_dirent **retent) {
     errval_t err;
     bool from_root = strstr(path, mount_point) == path;
 
@@ -335,7 +440,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, struct fa
         dir = current_directory;
     }
 
-    CHECK_ERR_PUSH(search_dirent(dir, path, retent), FS_ERR_SEARCH_FAIL);
+    CHECK_ERR_PUSH(search_dirent(dir, path, CREATE_IF_NOT_EXIST, retent), FS_ERR_SEARCH_FAIL);
 
     return SYS_ERR_OK;
 }
@@ -343,7 +448,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, struct fa
 static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, int ATTR, errval_t ERR) {
     errval_t err;
     struct fat32_dirent *dir;
-    CHECK_ERR_PUSH(find_dirent(mount, path, &dir), FS_ERR_OPEN);
+    CHECK_ERR_PUSH(find_dirent(mount, path, false, &dir), FS_ERR_OPEN);
     
     if(!(dir->Attr & ATTR))
         return ERR;
@@ -357,6 +462,25 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
     *rethandle = handle;
 
     return SYS_ERR_OK;
+}
+
+// Initialize the FAT32 filesystem, get all the necessary information, and populate the free block list with some free blocks
+errval_t fat32_init(void) { 
+    errval_t err;
+    uint8_t bpb[SDHC_BLOCK_SIZE];
+    
+    CHECK_ERR(sd_read_sector(BPB_SECTOR, bpb), "bad read");
+
+    check_set_bpb_metadata(bpb);
+
+    CHECK_ERR(initialize_free_clusters(), "Failed to find free clusters");
+
+    current_directory = NULL;
+
+    mount = malloc(8);
+    mount = "/"; 
+
+    return SYS_ERR_OK; 
 }
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
@@ -503,23 +627,8 @@ errval_t fat32_closedir(fat32_handle_t inhandle) {
     return SYS_ERR_OK;
 }
 
-// Initialize the FAT32 filesystem, get all the necessary information, and populate the free block list with some free blocks
-errval_t fat32_init(void) { 
-    errval_t err;
-    uint8_t bpb[SDHC_BLOCK_SIZE];
-    
-    CHECK_ERR(sd_read_sector(BPB_SECTOR, bpb), "bad read");
-
-    check_set_bpb_metadata(bpb);
-
-    CHECK_ERR(initialize_free_clusters(), "Failed to find free clusters");
-
-    current_directory = NULL;
-
-    mount = malloc(8);
-    mount = "/"; 
-
-    return SYS_ERR_OK; 
+errval_t fat32_mkdir(const char *path) {
+    return SYS_ERR_OK;
 }
 
 // static bool strisalnum(char *name, int len) {

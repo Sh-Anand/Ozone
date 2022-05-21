@@ -483,6 +483,7 @@ static errval_t init_sd(void) {
     // err = fat32_seek(fhandle, FS_SEEK_CUR, 3);
     // err = fat32_read(fhandle, data, 3, NULL);
     // DEBUG_PRINTF("Read : %s\n", data);
+
     return SYS_ERR_OK;
 }
 
