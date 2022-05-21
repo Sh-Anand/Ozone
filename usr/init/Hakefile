@@ -18,7 +18,6 @@
                         "distops/invocations.c",
                         "main.c",
                         "mem_alloc.c",
-                        "rpc_handlers.c",
 						"terminal.c",
                         "init_urpc.c",
                         "rpc_handlers.c"

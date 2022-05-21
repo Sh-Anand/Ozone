@@ -13,9 +13,6 @@
 
 #include "terminal.h"
 
-struct ump_chan *urpc_client[MAX_COREID];
-
-
 extern size_t (*local_terminal_write_function)(const char*, size_t);
 extern size_t (*local_terminal_read_function)(char*, size_t);
 
