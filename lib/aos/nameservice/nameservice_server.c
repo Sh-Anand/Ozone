@@ -5,6 +5,7 @@
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
 #include <aos/lmp_handler_builder.h>
+#include <aos/ump_handler_builder.h>
 #include "internal.h"
 
 #define SERVER_SIDE_LMP_BUF_LEN 32
@@ -331,45 +332,23 @@ static void server_ump_handler(void *arg)
     assert(chan->chan.type == AOS_CHAN_TYPE_UMP);
     struct ump_chan *uc = &chan->chan.uc;
 
-    uint8_t *recv_payload = NULL;
-    size_t recv_size = 0;
+    errval_t err;
 
-    errval_t err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
-    if (err == LIB_ERR_RING_NO_MSG) {
-        goto RE_REGISTER;
-    }
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_ump_handler: ring_consumer_recv failed\n");
-        goto RE_REGISTER;
-    }
+    UMP_RECV_DESERIALIZE(uc)
+    UMP_RECV_CAP_IF_ANY(uc)
 
-    rpc_identifier_t recv_type = *((rpc_identifier_t *)recv_payload);
-    (void)recv_type;  // XXX: recv_type is not used for now
-
+    // No free, do not use UMP_DISPATCH_AND_REPLY_NO_FAIL
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    chan->recv_handler(chan->st, recv_payload + sizeof(rpc_identifier_t),
-                       recv_size - sizeof(rpc_identifier_t), &reply_payload, &reply_size,
-                       NULL_CAP, &reply_cap);
-
-    assert(capref_is_null(reply_cap));  // cannot send cap for now
+    chan->recv_handler(chan->st, recv_buf, recv_size, &reply_payload, &reply_size, recv_cap, &reply_cap);
 
     err = aos_chan_ack(&chan->chan, reply_cap, reply_payload, reply_size);
     if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_ump_handler: aos_chan_ack failed\n");
-        goto FREE_REPLY_PAYLOAD;  // on failure, reply_payload is not freed inside
+        DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
     }
 
-FREE_REPLY_PAYLOAD:
-    // free(reply_payload);
-    free(recv_payload);
-RE_REGISTER:
-    err = ump_chan_register_recv(uc, get_default_waitset(),
-                                 MKCLOSURE(server_ump_handler, arg /* not chan */));
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "server_ump_handler: error re-registering handler");
-    }
+    UMP_CLEANUP_AND_RE_REGISTER(uc, server_ump_handler, arg)
 }
 
 errval_t server_kill_by_pid(domainid_t pid)

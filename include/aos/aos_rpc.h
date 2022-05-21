@@ -37,8 +37,8 @@ enum rpc_identifier {
     RPC_ACK_CAP_CHANNEL,  // on UMP: capability transfer channel is setup
     RPC_PUT_CAP,          // on LMP: this message is putting a cap in the init channel
     RPC_ERR,
-    RPC_MSG_IN_FRAME,  // on LMP: the actual message in encode in the frame cap
-    RPC_TRANSFER_CAP,  // on LMP: transfer cap to the init channel of the given domain
+    RPC_MSG_IN_FRAME,     // on LMP: the actual message in encode in the frame cap
+    RPC_TRANSFER_CAP,     // on LMP: transfer cap to the init channel of the given domain
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,
@@ -56,6 +56,7 @@ enum rpc_identifier {
     // Internal usage
     RPC_SPECIAL_CAP_TRANSFER_FLAG = (1U << (sizeof(uint8_t) * 8 - 1))
 };
+STATIC_ASSERT(RPC_SPECIAL_CAP_TRANSFER_FLAG == 0x80, "RPC_SPECIAL_CAP_TRANSFER_FLAG");
 
 struct aos_rpc_msg_ram {
     size_t size;

@@ -49,7 +49,7 @@
         goto FAILURE;                                                                    \
     }
 
-#define UMP_DISPATCH_AND_REPLY_MAY_FAIL(chan, handler, st)                                         \
+#define UMP_DISPATCH_AND_REPLY_MAY_FAIL(chan, handler, st)                               \
     void *reply_payload = NULL;                                                          \
     size_t reply_size = 0;                                                               \
     struct capref reply_cap = NULL_CAP;                                                  \
@@ -67,6 +67,20 @@
             DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);                       \
         }                                                                                \
     }                                                                                    \
+    free(reply_payload);
+
+#define UMP_DISPATCH_AND_REPLY_NO_FAIL(chan, handler, st)                                \
+    void *reply_payload = NULL;                                                          \
+    size_t reply_size = 0;                                                               \
+    struct capref reply_cap = NULL_CAP;                                                  \
+    handler(st, recv_buf, recv_size, &reply_payload, &reply_size, recv_cap, &reply_cap); \
+                                                                                         \
+                                                                                         \
+    err = aos_chan_ack(chan, reply_cap, reply_payload, reply_size);                      \
+    if (err_is_fail(err)) {                                                              \
+        DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);                           \
+    }                                                                                    \
+                                                                                         \
     free(reply_payload);
 
 #define UMP_CLEANUP_AND_RE_REGISTER(uc, func, arg)                                       \

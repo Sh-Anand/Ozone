@@ -20,6 +20,7 @@
 #include <aos/aos_rpc.h>
 #include <aos/except.h>
 #include <unistd.h>
+#include <mdb/mdb.h>
 
 #define SHELL_BUF_SIZE 256
 

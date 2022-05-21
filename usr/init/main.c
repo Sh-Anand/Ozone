@@ -257,7 +257,7 @@ static errval_t boot_core(coreid_t core)
     for (coreid_t i = 1; i < MAX_COREID; i++) {
         if (i != core && urpc[i] != NULL) {  // another booted core
 
-            DEBUG_PRINTF("coordinate URPC setup between %u and %u\n", core, i);
+            DEBUG_PRINTF("coordinate URPC setup between core %u and %u\n", core, i);
 
             err = frame_alloc(&urpc_frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
             if (err_is_fail(err)) {
