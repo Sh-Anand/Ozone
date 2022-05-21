@@ -13,25 +13,13 @@
 #include <spawn/multiboot.h>
 #include <spawn/argv.h>
 
-#include "proc_list.h"
-
 extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
-static struct capref local_endpoint_cap;
-static struct lmp_endpoint *binding_recv_ep = NULL;
-#define LOCAL_ENDPOINT_BUF_LEN 1024
-
 static void (*rpc_handler)(void *) = NULL;
 
-#define PID_START 1000
-static struct proc_list pl = {
-    .running = LIST_HEAD_INITIALIZER(),
-    .free_list = LIST_HEAD_INITIALIZER(),
-    .pid_upper = PID_START,
-    .running_count = 0,
-};
+static struct proc_mgmt mgmt;
 #define PROC_ENDPOINT_BUF_LEN 16
 
 // TODO: these address works?
@@ -227,119 +215,44 @@ static errval_t setup_dispatcher(struct spawninfo *si)
     return SYS_ERR_OK;
 }
 
-static errval_t refill_ep_recv_slot(void)
-{
-    struct capref ep_recv_slot;
-    errval_t err = slot_alloc(&ep_recv_slot);
-    if (err_is_fail(err)) {
-        return err;
-    }
-    lmp_endpoint_set_recv_slot(binding_recv_ep, ep_recv_slot);
-    return SYS_ERR_OK;
-}
-
-static void binding_handler(void *arg)
-{
-    struct spawninfo *si = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-    errval_t err;
-
-    // Try to receive a message
-    err = lmp_endpoint_recv(binding_recv_ep, &msg.buf, &cap);
-    if (err_is_fail(err)) {
-        if (lmp_err_is_transient(err)) {
-            // Re-register
-            err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
-                                        MKCLOSURE(binding_handler, arg));
-            if (err_is_ok(err))
-                return;  // otherwise, fall through
-        }
-        USER_PANIC_ERR(err_push(err, MON_ERR_IDC_BIND_LOCAL),  // XXX: another error
-                       "unhandled error in binding_handler");
-    }
-
-    // XXX: no checking for now, might be risky if user program exploit this endpoint
-    DEBUG_PRINTF("spawn: receive binding request from process %lu\n", msg.words[0]);
-    err = lmp_chan_accept(si->lc, PROC_ENDPOINT_BUF_LEN, cap);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to accept");
-    }
-
-    // Assign initial slot for incoming cap
-    err = lmp_chan_alloc_recv_slot(si->lc);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to alloc slot");
-    }
-
-    // Start receiving on the channel
-    err = lmp_chan_register_recv(si->lc, get_default_waitset(),
-                                MKCLOSURE(rpc_handler, si->lc));
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to register channel recv");
-    }
-
-
-    // Ack with the new endpoint
-    err = lmp_chan_send0(si->lc, LMP_SEND_FLAGS_DEFAULT, si->lc->local_cap);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "binding_handler: fail to send");
-    }
-    refill_ep_recv_slot();
-    // No need to re-register
-}
-
-static errval_t create_local_lmp_ep_if_not_yet(void) {
-    errval_t err;
-
-    // Create local endpoint if not done yet
-    if (binding_recv_ep == NULL) {
-        err = endpoint_create(LOCAL_ENDPOINT_BUF_LEN, &local_endpoint_cap,
-                              &binding_recv_ep);
-        if (err_is_fail(err)) {
-            return err;
-        }
-        assert(!capref_is_null(local_endpoint_cap));
-        assert(binding_recv_ep != NULL);
-
-        // Setup initial recv slot (recv handler will refill automatically)
-        refill_ep_recv_slot();
-    }
-    return SYS_ERR_OK;
-}
-
 static errval_t setup_endpoint(struct spawninfo *si)
 {
     if (rpc_handler == NULL) {
         return SPAWN_ERR_RPC_HANDLER_NOT_SET;
     }
-	DEBUG_PRINTF("Setting up endpoint...\n");
 
     errval_t err;
 
-    // Create local endpoint if not done yet
-    err = create_local_lmp_ep_if_not_yet();
-    if (err_is_fail(err)) {
-        return err;
-    }
-    assert(binding_recv_ep != NULL);
-
-    // Set receiver on the endpoint
+    // Create a new endpoint for the program
+    // si->lc should point to proc_node.chan.lc and uninitialized
     assert(si->lc != NULL);
-    si->lc->connstate = LMP_BIND_WAIT;
-    err = lmp_endpoint_register(binding_recv_ep, get_default_waitset(),
-                                MKCLOSURE(binding_handler, si));
+    err = lmp_chan_init_local(si->lc, PROC_ENDPOINT_BUF_LEN);
     if (err_is_fail(err)) {
-        return err;
+        return err_push(err, LIB_ERR_LMP_CHAN_INIT);
     }
+
+    // Assign initial slot for incoming cap
+    err = lmp_chan_alloc_recv_slot(si->lc);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    // Start receiving on the channel
+    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->proc));
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
+    }
+
+    // The channel is still waiting for remote_cap
+    si->lc->connstate = LMP_BIND_WAIT;
 
     struct capref child_initep_slot = {
         .cnode = si->taskcn,
         .slot = TASKCN_SLOT_INITEP,
     };
-    err = cap_copy(child_initep_slot, local_endpoint_cap);
+    err = cap_copy(child_initep_slot, si->lc->local_cap);
     if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);  // XXX: not this one
+        return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
 	DEBUG_PRINTF("Endpoint setup done.\n");
 
@@ -633,18 +546,23 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
         return SPAWN_ERR_FIND_MODULE;
     }
 
+    // Create new process node
     errval_t err;
     struct proc_node *node;
-    err = proc_list_alloc(&pl, &node);
+    err = proc_mgmt_alloc(&mgmt, &node);
     if (err_is_fail(err)) {
         return err;
     }
     strncpy(node->name, si->binary_name, DISP_NAME_LEN - 1);
     node->name[DISP_NAME_LEN - 1] = '\0';
+    node->chan.type = AOS_CHAN_TYPE_LMP;
+
     si->pid = node->pid;
     *pid = si->pid;
-    assert(node->lc.connstate == LMP_DISCONNECTED);
-    si->lc = &node->lc;  // will be filled by setup_endpoint()
+
+    si->proc = node;
+    si->chan = &node->chan;  // will be filled by setup_endpoint()
+    si->lc = &si->chan->lc;
 
     // Setup CSpace
     err = setup_cspace(si);
@@ -677,7 +595,8 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);  // XXX: not this one
     }
-    assert(node->lc.connstate == LMP_BIND_WAIT);
+    assert(node->chan.type == AOS_CHAN_TYPE_LMP);
+    assert(node->chan.lc.connstate == LMP_BIND_WAIT);
 
     // Setup arguments
     err = setup_arguments(si, argc, argv);
@@ -689,15 +608,6 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     err = start_dispatcher(si);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_ELF_MAP);
-    }
-
-    assert(si->lc->connstate == LMP_BIND_WAIT);
-    while (si->lc->connstate != LMP_CONNECTED) {
-        err = event_dispatch(get_default_waitset());
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "in spawn event_dispatch loop");
-            return err_push(err, LIB_ERR_BIND_LMP_REQ);  // XXX: not this one
-        }
     }
 
     return SYS_ERR_OK;
@@ -745,14 +655,15 @@ errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_
     return err;
 }
 
-void spawn_set_rpc_handler(void (*handler)(void *)) {
+void spawn_init(void (*handler)(void *)) {
+    proc_mgmt_init(&mgmt);
     rpc_handler = handler;
 }
 
 errval_t spawn_kill(domainid_t pid) {
     errval_t err;
     struct capref dispatcher;
-    err = proc_list_get_dispatcher(&pl, pid, &dispatcher);
+    err = proc_mgmt_get_dispatcher(&mgmt, pid, &dispatcher);
     if (err_is_fail(err)) {
         return err_push(err, PROC_MGMT_ERR_KILL);
     }
@@ -764,9 +675,13 @@ errval_t spawn_kill(domainid_t pid) {
 }
 
 errval_t spawn_get_name(domainid_t pid, char **name) {
-    return proc_list_get_name(&pl, pid, name);
+    return proc_mgmt_get_name(&mgmt, pid, name);
+}
+
+errval_t spawn_get_chan(domainid_t pid, struct aos_chan **chan) {
+    return proc_mgmt_get_chan(&mgmt, pid, chan);
 }
 
 errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count) {
-    return proc_list_get_all_pids(&pl, pids, pid_count);
+    return proc_mgmt_get_all_pids(&mgmt, pids, pid_count);
 }

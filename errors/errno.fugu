@@ -217,6 +217,7 @@ errors libaos LIB_ERR_ {
 
     //paging
     failure PAGING_MAP          "failed to create a page mapping",
+    failure PAGING_UNMAP          "failed to ummap",
     failure PAGING_INVALID_REGION  "Tried to fixed map into an invalid region",
     failure PAGING_REGION_NODE_NOT_FOUND  "Failed to find the region node",
     failure PAGING_NO_MEMORY  "Paging ran out of memory",
@@ -366,19 +367,29 @@ errors libaos LIB_ERR_ {
     failure CHAN_REGISTER_RECV  "Failure in *_chan_register_recv()",
     failure CHAN_DEREGISTER_RECV "Failure in *_chan_deregister_recv()",
     failure LMP_CHAN_INIT       "Failure in lmp_chan_init()",
+    failure LMP_CHAN_INIT_LOCAL       "Failure in lmp_chan_init_local()",
     failure UMP_CHAN_INIT       "Failure in ump_chan_init()",
     failure LMP_CHAN_RECV       "Failure in lmp_chan_recv()",
     failure UMP_CHAN_RECV       "Failure in ump_chan_recv()",
     failure LMP_CHAN_SEND       "Failure in lmp_chan_send()",
+    failure UMP_CHAN_SEND       "Failure in ump_chan_send()",
+    failure UMP_CHAN_SEND_CAP   "Failure in sending capability in UMP",
+    failure UMP_CHAN_SEND_CAP_NO_PID   "Cannot send capability in UMP without pid of the other side",
+    failure UMP_CHAN_SEND_CAP_NO_ACK   "Fail to send capability in UMP due to no ACK",
+    failure UMP_CHAN_RECV_CAP   "Failure in receiving capability in UMP",
+    failure UMP_CHAN_RECV_CAP_UNKNOWN   "Fail to receive capability in UMP due to invalid message from init",
     failure LMP_CHAN_BIND       "Failure in lmp_chan_bind()",
     failure UMP_CHAN_BIND       "Failure in ump_chan_bind()",
     failure LMP_CHAN_ACCEPT     "Failure in lmp_chan_accept()",
     failure UMP_CHAN_ACCEPT     "Failure in ump_chan_accept()",
     failure LMP_ALLOC_RECV_SLOT "Failure in lmp_chan_alloc_recv_slot()",
     failure LMP_NOT_CONNECTED   "Channel is disconnected",
+    failure LMP_PUT_CAP   "Failed to put cap in LMP channel",
     failure MSGBUF_OVERFLOW     "Attempted to demarshall beyond bounds of message buffer",
     failure MSGBUF_CANNOT_GROW  "Failed to grow message buffer while marshalling",
-    failure MARSHALL_FAIL       "Failed to marshall arguments into buffer",
+    failure LMP_SERIALIZE       "Failed to serialize LMP message",
+    failure LMP_DESERIALIZE     "Failed to deserialize LMP message",
+    failure LMP_CLEANUP     "Failed to perform LMP cleanup",
     failure RPC_HANDLE          "Failed to handle RPC message",
     failure RCK_NOTIFY          "Failure in rck_notify()",
     failure IPI_NOTIFY          "Failure in ipi_notify()",
@@ -394,9 +405,8 @@ errors libaos LIB_ERR_ {
     failure RING_NO_MSG         "No incoming UMP message",
 
     //RPC
+    failure RPC_INIT        "Failed to initialize RPC",
     failure RPC_LARGE_MSG_WITH_CAP        "Large message cannot have a cap to send",
-    failure RPC_SEND_NUM        "Failure in sending a number",
-    failure RPC_SEND_STR        "Failure in sending a string",
     failure RPC_INVALID_PAYLOAD_SIZE        "Invalid payload size",
     failure RPC_INVALID_MSG        "Invalid RPC msg type",
 
@@ -406,7 +416,6 @@ errors libaos LIB_ERR_ {
     failure BIND_INIT_SEND_EP        "Failure sending local ep for init binding",
     failure BIND_INIT_WAITING        "Failure waiting reply from init for binding",
     failure BIND_INIT_RECV        "Failure receiving for init binding",
-    failure BIND_INIT_NO_NEW_EP        "Got no new ep cap from init",
 
     // IDC binding/export and Monitor client interface
     failure MONITOR_CLIENT_BIND "Error in monitor_client_lmp_bind()",
@@ -423,6 +432,9 @@ errors libaos LIB_ERR_ {
     failure MONITOR_CAP_SEND    "Failed sending capability via monitor",
     failure MONITOR_RPC_BIND    "Error in monitor_rpc_init()",
     failure MONITOR_RPC_NULL    "Monitor RPC client is uninitialized",
+
+    // nameservice
+    failure NAMESERVICE_SET_LISTEN_EP  "Failed to set listening endpoint",
 
     // multihop
     failure BIND_MULTIHOP_REQ   "Failed sending bind_multihop_request to monitor",
@@ -581,6 +593,11 @@ errors monitor MON_ERR_ {
     failure INVOKE_IRQ_SET "Unable to install IRQ vector",
 };
 
+errors nameserver NAMESERVER_ERR_ {
+    failure NAME_CONFLICT   "A service with the same name is already registered",
+    failure NOT_FOUND       "Cannot find the service with the given name",
+};
+
 // errors related to the routing library
 errors routing ROUTE_ERR_ {
     // These are for the old routing library, remove them when old lib is removed
@@ -728,15 +745,6 @@ errors coreboot CORE_BOOT_ERR_ {
     failure INVOKE              "Failed to invoke core",
 };
 
-// errors related to the process list
-errors proc_list PROC_LIST_ERR_ {
-    failure ALLOC                "Failed to alloc proc node",
-    failure NOT_FOUND            "Failed to find proc node with given pid",
-    failure DELETE               "Failed to delete proc node",
-    failure GET_NAME             "Failed to get name of the process",
-    failure OUT_OF_PID           "Ran out of pid",
-};
-
 // errors related to the process manager
 errors proc_mgmt PROC_MGMT_ERR_ {
     failure NOT_MONITOR          "Received monitor-only request from non-monitor domain",
@@ -752,6 +760,10 @@ errors proc_mgmt PROC_MGMT_ERR_ {
     failure DOMAIN_NOT_RUNNING   "Domain is not currently running",
     failure ALREADY_SPANNED      "Domain has already been spanned to the given core",
     failure KILL                 "Failed to kill requested domain",
+
+    failure PID_NOT_FOUND        "Failed to find process with the given pid",
+    failure GET_NAME             "Failed to get name",
+    failure NO_AVAILABLE_PID     "Ran out of pid",
 };
 
 // errors from ELF library

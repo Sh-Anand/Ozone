@@ -92,7 +92,7 @@ void gic_setup(void)
 	gic_avail = true;
 }
 
-void terminal_setup_pl011(void)
+void terminal_setup_lpuart(void)
 {
 	errval_t err;
 	

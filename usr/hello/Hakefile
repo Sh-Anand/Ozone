@@ -11,7 +11,10 @@
 --------------------------------------------------------------------------
 
 [ build application { target = "hello",
-  		              cFiles = [ "hello.c" ],
+  		              cFiles = [
+  		                  "hello.c",
+  		                  "test_data.c"
+  		               ],
                       architectures = allArchitectures
                     }
 ]

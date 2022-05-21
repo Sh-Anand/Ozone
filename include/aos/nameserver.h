@@ -8,22 +8,55 @@
 
 #include <aos/aos.h>
 
+// XXX: is there a more elegant way to expose it only to aos lib and init?
+enum nameservice_rpc_identifier {
+    NAMESERVICE_REGISTER,             // [call] payload: name
+                                      // [return] errval
+
+    NAMESERVICE_REFILL_LMP_ENDPOINT,  // Deprecated
+
+
+    NAMESERVICE_DEREGISTER,           // [call] payload: name
+                                      // [return] errval
+    NAMESERVICE_LOOKUP,               // [call] payload: name
+                                      // [return] err / cap: zeroed urpc_frame, payload: pid
+    NAMESERVICE_ENUMERATE,            // [call] none
+                                      // [return] err / struct enumerate_reply_msg
+    NAMESERVICE_RPC_COUNT
+};
+
+enum ns_notification_identifier {
+    SERVER_BIND_LMP,
+    SERVER_BIND_UMP,
+    KILL_BY_PID,
+};
+
+struct ns_binding_notification {
+    domainid_t pid;
+    char name[0];
+};
+
 typedef void* nameservice_chan_t;
 
-///< handler which is called when a message is received over the registered channel
+/**
+ * @brief handler which is called when a message is received over the registered channel
+ * @note  response will be freed outside if assigned
+ */
 typedef void(nameservice_receive_handler_t)(void *st, 
 										    void *message, size_t bytes,
 										    void **response, size_t *response_bytes,
                                             struct capref tx_cap, struct capref *rx_cap);
 
 /**
- * @brief sends a message back to the client who sent us a message
+ * @brief make an rpc call
  *
  * @param chan opaque handle of the channel
- * @oaram message pointer to the message
+ * @param message pointer to the message
  * @param bytes size of the message in bytes
- * @param response the response message
- * @param response_byts the size of the response
+ * @param response the response message, should be freed outside
+ * @param response_bytes the size of the response
+ * @param tx_cap if not NULL_CAP, the capability to send
+ * @param rx_cap if not NULL_CAP, the slot to receive the return capability
  * 
  * @return error value
  */
@@ -73,9 +106,9 @@ errval_t nameservice_lookup(const char *name, nameservice_chan_t *chan);
  * 
  * @param query     the query
  * @param num 		number of entries in the result array
- * @param result	an array of entries
+ * @param result	an array of entries, should be freed outside (each entry and the whole)
  */
-errval_t nameservice_enumerate(char *query, size_t *num, char **result );
+errval_t nameservice_enumerate(char *query, size_t *num, char ***result);
 
 
 #endif /* INCLUDE_AOS_AOS_NAMESERVICE_H_ */

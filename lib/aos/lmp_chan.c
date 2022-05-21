@@ -105,6 +105,37 @@ errval_t lmp_chan_accept(struct lmp_chan *lc,
 }
 
 /**
+ * \brief Initialise a new LMP channel by creating the local endpoint
+ *
+ * \param lc  Storage for channel state
+ * \param buflen_words Size of incoming buffer, in words
+ */
+errval_t lmp_chan_init_local(struct lmp_chan *lc, size_t buflen_words)
+{
+    errval_t err;
+
+    lmp_chan_init(lc);
+
+    /* allocate a cap slot for the new endpoint cap */
+    err = slot_alloc(&lc->local_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    /* allocate a local endpoint */
+    err = lmp_endpoint_create_in_slot(buflen_words, lc->local_cap,
+                                      &lc->endpoint);
+    if (err_is_fail(err)) {
+        slot_free(lc->local_cap);
+        return err_push(err, LIB_ERR_ENDPOINT_CREATE);
+    }
+
+    /* mark waiting */
+    lc->connstate = LMP_BIND_WAIT;
+    return SYS_ERR_OK;
+}
+
+/**
  * \brief Register an event handler to be notified when messages can be sent
  *
  * In the future, call the closure on the given waitset when it is likely that
