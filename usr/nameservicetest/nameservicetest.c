@@ -167,10 +167,12 @@ static void run_server(void)
     PANIC_IF_FAIL(err, "failed to register...\n");
 
     domainid_t did;
-    debug_printf("spawning test binary '%s'\n", TEST_BINARY);
-    err = aos_rpc_process_spawn(get_init_rpc(), TEST_BINARY " a", disp_get_core_id(),
-                                &did);
-    PANIC_IF_FAIL(err, "failed to spawn test\n");
+    for (int i = 0; i < 4; ++i) {
+        coreid_t core = (disp_get_core_id() + i) % 4;
+        debug_printf("spawning test binary '%s' on core %u\n", TEST_BINARY, core);
+        err = aos_rpc_process_spawn(get_init_rpc(), TEST_BINARY " a", core, &did);
+        PANIC_IF_FAIL(err, "failed to spawn test\n");
+    }
 
     while (1) {
         event_dispatch(get_default_waitset());

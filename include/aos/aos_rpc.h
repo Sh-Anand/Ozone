@@ -83,7 +83,7 @@ struct lmp_helper {
     void *mapped_frame;
 };
 
-errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap);
+errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap, bool no_blocking);
 
 errval_t lmp_try_recv(struct lmp_chan *lc, struct lmp_recv_msg *recv_msg,
                       struct capref *recv_cap);
@@ -190,7 +190,7 @@ errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
                       struct capref *ret_cap, void **ret_buf, size_t *ret_size);
 
 errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref cap, const void *buf, size_t size);
+                       struct capref cap, const void *buf, size_t size, bool no_blocking);
 
 /**
  * Reply a successful RPC call.

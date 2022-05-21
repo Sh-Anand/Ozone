@@ -188,7 +188,8 @@ errval_t ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t id
     return SYS_ERR_OK;
 }
 
-errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap)
+errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap,
+                      bool no_blocking)
 {
     errval_t err;
     while (true) {
@@ -196,7 +197,11 @@ errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref 
                              send_words[1], send_words[2], send_words[3]);
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
-                thread_yield();
+                if (no_blocking) {
+                    return err;  // expose transient error directly
+                } else {
+                    thread_yield();
+                }
             } else {
                 return err_push(err, LIB_ERR_LMP_CHAN_SEND);
             }
@@ -225,7 +230,8 @@ errval_t lmp_try_recv(struct lmp_chan *lc, struct lmp_recv_msg *recv_msg,
 }
 
 static errval_t rpc_lmp_send(struct lmp_chan *lc, rpc_identifier_t identifier,
-                             struct capref cap, const void *buf, size_t size)
+                             struct capref cap, const void *buf, size_t size,
+                             bool no_blocking)
 {
     errval_t err;
     uintptr_t send_words[LMP_MSG_LENGTH];
@@ -238,9 +244,9 @@ static errval_t rpc_lmp_send(struct lmp_chan *lc, rpc_identifier_t identifier,
     }
 
     // Send
-    err = lmp_try_send(lc, send_words, send_cap);
+    err = lmp_try_send(lc, send_words, send_cap, no_blocking);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_CHAN_SEND);
+        return err;  // expose transient error directly
     }
 
     // Clean up
@@ -291,7 +297,7 @@ static errval_t rpc_lmp_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
     THREAD_MUTEX_ENTER_IF(&rpc->mutex, !no_lock)
     {
         // Send
-        err = lmp_try_send(lc, send_words, send_cap);
+        err = lmp_try_send(lc, send_words, send_cap, false);
         if (err_is_fail(err)) {
             THREAD_MUTEX_BREAK;
         }
@@ -411,8 +417,10 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
 
         // Step 3: send the cap through init
         // There must be no way to trigger recursive init RPC call inside
-        err = rpc_lmp_call(get_init_rpc(), RPC_TRANSFER_CAP, call_cap, &uc->pid,
-                           sizeof(uc->pid), NULL, NULL, NULL, true);
+        do {
+            err = rpc_lmp_call(get_init_rpc(), RPC_TRANSFER_CAP, call_cap, &uc->pid,
+                               sizeof(uc->pid), NULL, NULL, NULL, true);
+        } while (lmp_err_is_transient(err));
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_send_cap: cap transfer step 3 fail\n");
             THREAD_MUTEX_BREAK;
@@ -633,11 +641,11 @@ errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
 }
 
 errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref cap, const void *buf, size_t size)
+                       struct capref cap, const void *buf, size_t size, bool no_blocking)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_send(&chan->lc, identifier, cap, buf, size);
+        return rpc_lmp_send(&chan->lc, identifier, cap, buf, size, no_blocking);
     case AOS_CHAN_TYPE_UMP:
         return rpc_ump_send(&chan->uc, identifier, cap, buf, size);
     default:
@@ -648,18 +656,18 @@ errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
 errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
                       size_t size)
 {
-    return aos_chan_send(chan, RPC_ACK, cap, buf, size);
+    return aos_chan_send(chan, RPC_ACK, cap, buf, size, false);
 }
 
 errval_t lmp_put_cap(struct lmp_chan *lc, struct capref cap)
 {
     assert(!capref_is_null(cap));
-    return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0);
+    return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0, false);
 }
 
 errval_t aos_chan_nack(struct aos_chan *chan, errval_t err)
 {
-    return aos_chan_send(chan, RPC_ERR, NULL_CAP, &err, sizeof(errval_t));
+    return aos_chan_send(chan, RPC_ERR, NULL_CAP, &err, sizeof(errval_t), false);
 }
 
 

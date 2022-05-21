@@ -215,12 +215,13 @@ RPC_HANDLER(handle_lookup) {
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_PAGING_UNMAP);
     }
+    // DEBUG_PRINTF("> process %u lookup \"%s\"\n", client->pid, name);
 
     struct program *server = service->program;
     MALLOC_WITH_SIZE(server_reply, struct ns_binding_notification, sizeof(domainid_t) + strlen(name) + 1);
     server_reply->pid = client->pid;
     memcpy(server_reply->name, name, strlen(name) + 1);
-    err = aos_chan_send(&server->notifier, SERVER_BIND_UMP, frame, server_reply, sizeof(domainid_t) + strlen(name) + 1);
+    err = aos_chan_send(&server->notifier, SERVER_BIND_UMP, frame, server_reply, sizeof(domainid_t) + strlen(name) + 1, false);
     if (err_is_fail(err)) {
         return err;
     }
@@ -229,6 +230,8 @@ RPC_HANDLER(handle_lookup) {
     *reply = server->pid;
     *out_cap = frame;
     return SYS_ERR_OK;
+
+    // DEBUG_PRINTF(">> process %u lookup \"%s\"\n", client->pid, name);
 }
 
 // Empty entries are NULL since it's a global variable
@@ -250,9 +253,18 @@ static void init_msg_handler(void *arg) {
     LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
                                 recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
 
-    // Call the handler
-    // FIXME: should not reply
-    LMP_DISPATCH_AND_REPLY_MAY_FAIL(err, chan, NULL, nameserver_bind, recv_cap)
+    // Call the handler, no reply to init
+    void *reply_payload = NULL;
+    size_t reply_size = 0;
+    struct capref reply_cap = NULL_CAP;
+    err = nameserver_bind(NULL, recv_buf, recv_size, &reply_payload, &reply_size,
+                recv_cap, &reply_cap);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "nameserver_bind failed\n");
+    }
+    if (reply_payload != NULL) {
+        free(reply_payload);
+    }
 
     // Deserialization cleanup
     LMP_CLEANUP(err, helper)

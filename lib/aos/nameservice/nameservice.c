@@ -37,10 +37,19 @@ static errval_t ensure_nameserver_chan(void)
 
     // Bind with the nameserver
     struct capref frame;
-    err = aos_rpc_call(get_init_rpc(), RPC_BIND_NAMESERVER, NULL_CAP, NULL, 0, &frame,
-                       NULL, NULL);
-    if (err_is_fail(err)) {
-        goto FAILURE_BIND_NAMESERVER_RPC;
+    while (true) {
+        err = aos_rpc_call(get_init_rpc(), RPC_BIND_NAMESERVER, NULL_CAP, NULL, 0, &frame,
+                           NULL, NULL);
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                thread_yield();
+                continue;
+            } else {
+                goto FAILURE_BIND_NAMESERVER_RPC;
+            }
+        } else {
+            break;
+        }
     }
 
     // The returned frame contains two UMP channels

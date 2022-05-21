@@ -307,6 +307,7 @@ RPC_HANDLER(process_get_all_pids_handler)
                 return err;
             }
         } else if (urpc[core] != NULL) {
+            // FIXME: deadlock if both side make the call at the same time
             err = aos_rpc_call(urpc[core], INTERNAL_RPC_GET_LOCAL_PIDS, NULL_CAP, NULL, 0,
                                NULL, (void **)&msg[core], &msg_size);
             if (err_is_fail(err)) {
@@ -345,9 +346,15 @@ RPC_HANDLER(terminal_getchar_handler)
     if (disp_get_current_core_id() == 0) {
         char c;
         grading_rpc_handler_serial_getchar();
+
+        errval_t err;
+
         dispatcher_handle_t handle = disp_disable();
-        errval_t err = sys_getchar(&c);
+        {
+            err = sys_getchar(&c);
+        }
         disp_enable(handle);
+
         if (err_is_fail(err)) {
             return err;
         }
@@ -426,9 +433,9 @@ RPC_HANDLER(cap_transfer_handler)
             return err;
         }
         assert(chan->type == AOS_CHAN_TYPE_LMP);
-        err = lmp_put_cap(&chan->lc, in_cap);
+        err = lmp_put_cap(&chan->lc, in_cap);  // not blocking
         if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_LMP_PUT_CAP);
+            return err;  // expose transient error to the caller
         }
     } else {
         struct internal_rpc_remote_cap_msg msg;
@@ -445,6 +452,7 @@ RPC_HANDLER(cap_transfer_handler)
         case ObjType_Frame:
         case ObjType_DevFrame:
         case ObjType_RAM:
+            // FIXME: deadlock if both side make the call at the same time
             err = aos_rpc_call(urpc[core], INTERNAL_RPC_REMOTE_CAP_TRANSFER, NULL_CAP,
                                &msg, sizeof(msg), NULL, NULL, NULL);
             if (err_is_fail(err)) {
@@ -504,9 +512,9 @@ RPC_HANDLER(remote_cap_transfer_handler)
         return err;
     }
     assert(chan->type == AOS_CHAN_TYPE_LMP);
-    err = lmp_put_cap(&chan->lc, cap);
+    err = lmp_put_cap(&chan->lc, cap);  // not blocking
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_PUT_CAP);
+        return err;  // expose transient error to the caller
     }
 
     return SYS_ERR_OK;
@@ -556,11 +564,15 @@ RPC_HANDLER(bind_nameserver_handler)
         return err_push(err, LIB_ERR_PAGING_UNMAP);
     }
 
+    // DEBUG_PRINTF("> process %u tries to bind nameserver\n", proc->pid);
+
     if (disp_get_core_id() == 0) {
         assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
-        err = aos_chan_ack(&nameserver_rpc.chan, frame, &proc->pid, sizeof(domainid_t));
+        // Never block, ask the client to retry if needed
+        err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &proc->pid, sizeof(domainid_t), true);
         if (err_is_fail(err)) {
-            return err;
+            cap_destroy(frame);
+            return err;  // expose transient error to the user
         }
     } else {
         struct internal_rpc_remote_cap_msg msg;
@@ -569,9 +581,12 @@ RPC_HANDLER(bind_nameserver_handler)
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_CAP_IDENTIFY);
         }
+        // FIXME: deadlock if both side make the call at the same time
         err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP,
                            &msg, sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
     }
+
+    // DEBUG_PRINTF(">> process %u tries to bind nameserver\n", proc->pid);
 
     *out_cap = frame;
     return err;
@@ -581,6 +596,7 @@ RPC_HANDLER(remote_bind_nameserver_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
 
+    DEBUG_PRINTF("process %u remote bind nameserver\n", msg->pid);
     errval_t err;
 
     struct capref cap;
@@ -598,12 +614,19 @@ RPC_HANDLER(remote_bind_nameserver_handler)
         }
         break;
     default:
-        DEBUG_PRINTF("??? %u, %u\n", msg->pid, msg->cap.type);
         return MON_ERR_CAP_CREATE;
     }
 
     assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
-    return aos_chan_ack(&nameserver_rpc.chan, cap, &msg->pid, sizeof(domainid_t));
+    err = aos_chan_send(&nameserver_rpc.chan, 0, cap, &msg->pid, sizeof(domainid_t), true);
+    if (err_is_fail(err)) {
+        cap_destroy(cap);
+        return err;  // expose transient error to the user
+    }
+
+    // DEBUG_PRINTF(">> process %u remote bind nameserver\n", msg->pid);
+
+    return err;
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
