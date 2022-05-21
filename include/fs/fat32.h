@@ -21,7 +21,7 @@
 //special cluster symbols
 #define CLUSTER_FREE   0x0
 #define CLUSTER_FREE_MASK ~(0b1111 >> 4)
-#define EOC            0x0ffffff8
+#define CLUSTER_EOC            0x0ffffff8
 #define CLUSTER_BAD    0x0ffffff7
 
 //Directory Info
@@ -46,6 +46,7 @@
 #define ATTR_LONG_NAME ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID
 #define DIR_FREE       0xE5
 #define DIR_ALL_FREE   0x0
+#define DIR_SIZE       32
 
 struct Time {
     uint8_t hour, minute, sec;
