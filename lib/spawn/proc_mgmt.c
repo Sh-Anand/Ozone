@@ -2,7 +2,7 @@
 // Created by Zikai Liu on 3/23/22.
 //
 
-#include "proc_mgmt.h"
+#include <spawn/proc_mgmt.h>
 #include <string.h>
 #include <unistd.h>
 
