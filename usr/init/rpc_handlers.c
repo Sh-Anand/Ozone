@@ -431,7 +431,7 @@ RPC_HANDLER(cap_transfer_handler)
             return err_push(err, LIB_ERR_LMP_PUT_CAP);
         }
     } else {
-        struct internal_rpc_remote_cap_transfer_msg msg;
+        struct internal_rpc_remote_cap_msg msg;
         msg.pid = *pid;
 
         // Serialize the cap
@@ -461,8 +461,8 @@ RPC_HANDLER(cap_transfer_handler)
 
 RPC_HANDLER(remote_cap_transfer_handler)
 {
-    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_transfer_msg);
-    assert(msg->pid == disp_get_current_core_id());
+    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
+    assert(spawn_get_core(msg->pid) == disp_get_current_core_id());
 
     errval_t err;
 
@@ -504,7 +504,7 @@ RPC_HANDLER(remote_cap_transfer_handler)
         return err;
     }
     assert(chan->type == AOS_CHAN_TYPE_LMP);
-    err = lmp_put_cap(&chan->lc, in_cap);
+    err = lmp_put_cap(&chan->lc, cap);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_PUT_CAP);
     }
@@ -548,7 +548,7 @@ RPC_HANDLER(bind_nameserver_handler)
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
 
-    // BSP core is responsible for zeroing the URPC frame
+    // Coordinator is responsible for zeroing the URPC frame
     memset(urpc_buffer, 0, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE);
 
     err = paging_unmap(get_current_paging_state(), (void *)urpc_buffer);
@@ -556,14 +556,54 @@ RPC_HANDLER(bind_nameserver_handler)
         return err_push(err, LIB_ERR_PAGING_UNMAP);
     }
 
-    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
-    err = aos_chan_ack(&nameserver_rpc.chan, frame, &proc->pid, sizeof(domainid_t));
-    if (err_is_fail(err)) {
-        return err;
+    if (disp_get_core_id() == 0) {
+        assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
+        err = aos_chan_ack(&nameserver_rpc.chan, frame, &proc->pid, sizeof(domainid_t));
+        if (err_is_fail(err)) {
+            return err;
+        }
+    } else {
+        struct internal_rpc_remote_cap_msg msg;
+        msg.pid = proc->pid;
+        err = cap_direct_identify(frame, &msg.cap);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_CAP_IDENTIFY);
+        }
+        err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP,
+                           &msg, sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
     }
 
     *out_cap = frame;
-    return SYS_ERR_OK;
+    return err;
+}
+
+RPC_HANDLER(remote_bind_nameserver_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
+
+    errval_t err;
+
+    struct capref cap;
+    err = slot_alloc(&cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    switch (msg->cap.type) {
+    case ObjType_Frame:
+        err = frame_forge(cap, msg->cap.u.frame.base, msg->cap.u.frame.bytes,
+                          disp_get_current_core_id());  // XXX: owner?
+        if (err_is_fail(err)) {
+            return err_push(err, MON_ERR_CAP_CREATE);
+        }
+        break;
+    default:
+        DEBUG_PRINTF("??? %u, %u\n", msg->pid, msg->cap.type);
+        return MON_ERR_CAP_CREATE;
+    }
+
+    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
+    return aos_chan_ack(&nameserver_rpc.chan, cap, &msg->pid, sizeof(domainid_t));
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
@@ -581,7 +621,8 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_REGISTER_AS_NAMESERVER] = register_nameserver_hander,
     [RPC_BIND_NAMESERVER] = bind_nameserver_handler,
     [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
-    [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
     [INTERNAL_RPC_REMOTE_CAP_TRANSFER] = remote_cap_transfer_handler,
+    [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
+    [INTERNAL_RPC_REMOTE_BIND_NAMESERVER] = remote_bind_nameserver_handler,
     [INTERNAL_RPC_GET_LOCAL_PIDS] = get_local_pids_handler,
 };

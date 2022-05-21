@@ -653,6 +653,7 @@ errval_t aos_chan_ack(struct aos_chan *chan, struct capref cap, const void *buf,
 
 errval_t lmp_put_cap(struct lmp_chan *lc, struct capref cap)
 {
+    assert(!capref_is_null(cap));
     return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0);
 }
 

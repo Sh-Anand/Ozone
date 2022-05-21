@@ -55,6 +55,8 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
         return LIB_ERR_MALLOC_FAIL;                                                      \
     }
 
+#define MALLOC_EXACT_SIZE(var, type) MALLOC_WITH_SIZE(var, type, sizeof(type))
+
 #define MALLOC_OUT_MSG_WITH_SIZE(var, type, size)                                        \
     MALLOC_WITH_SIZE(var, type, size)                                                    \
     *out_payload = var;                                                                  \

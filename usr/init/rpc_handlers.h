@@ -9,8 +9,9 @@
 
 enum internal_rpc_msg_type {
     INTERNAL_RPC_BIND_CORE_URPC = RPC_MSG_COUNT + 1,
-    INTERNAL_RPC_REMOTE_RAM_REQUEST,
     INTERNAL_RPC_REMOTE_CAP_TRANSFER,
+    INTERNAL_RPC_REMOTE_RAM_REQUEST,
+    INTERNAL_RPC_REMOTE_BIND_NAMESERVER,
     INTERNAL_RPC_GET_LOCAL_PIDS,
     INTERNAL_RPC_MSG_COUNT
 };
@@ -21,7 +22,7 @@ struct internal_rpc_bind_core_urpc_msg {
     bool listener_first;
 };
 
-struct internal_rpc_remote_cap_transfer_msg {
+struct internal_rpc_remote_cap_msg {
     domainid_t pid;
     struct capability cap;
 };
