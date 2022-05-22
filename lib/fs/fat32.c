@@ -560,7 +560,7 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
 //given current directory and relative path, find and return dirent
 static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool CREATE_IF_NOT_EXIST, uint8_t Attr, struct fat32_dirent **retent) {
     errval_t err;
-        
+
     bool created = false;
     while(*path != '\0') {
 
@@ -569,12 +569,13 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
 
         int i = 0;
         while(path[i] != '\0' && path[i] != FS_PATH_SEP) i++;
-        char *next_dir_name = malloc(i);
+        char *next_dir_name = malloc(i+1);
         memcpy(next_dir_name, path, i);
+        next_dir_name[i] = '\0';
         path += i;
         if(*path != '\0')
             path ++;
-        
+
         struct fat32_dirent *dir;
         err = find_in_directory(curr, next_dir_name, false, &dir, NULL, NULL, NULL);
         if(err_is_fail(err)) {
@@ -621,7 +622,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
 static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, int ATTR, errval_t ERR) {
     errval_t err;
     struct fat32_dirent *dir;
-    CHECK_ERR_PUSH(find_dirent(mount, path, false, 0, &dir), FS_ERR_OPEN);
+    CHECK_ERR_PUSH(find_dirent(mount, path, false, ATTR, &dir), FS_ERR_OPEN);
     
     if(!(dir->Attr & ATTR))
         return ERR;
@@ -656,11 +657,26 @@ errval_t fat32_init(void) {
     return SYS_ERR_OK; 
 }
 
+static errval_t sector_from_cluster_offset(int cluster, int offset, int *retsector, int *retoffset) {
+    errval_t err;
+    if(offset > BytsPerSec * SecPerClus) {
+        offset -= BytsPerSec * SecPerClus;
+        int next_cluster;
+        CHECK_ERR(get_next_cluster(cluster, &next_cluster), "");
+        return sector_from_cluster_offset(next_cluster, offset, retsector, retoffset);
+    }
+
+    *retsector = FIRST_SECTOR_OF_CLUSTER(cluster) + (offset/BytsPerSec);
+    *retoffset = offset % BytsPerSec;
+
+    return SYS_ERR_OK;
+}
+
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
     errval_t err;
 
     struct fat32_handle *handle;
-    CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE | ATTR_LONG_NAME, FS_ERR_NOTFILE), "failed to open file");
+    CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE, FS_ERR_NOTFILE), "failed to open file");
     handle->isdir = false;
     *rethandle = handle;
 
@@ -678,47 +694,6 @@ errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
     return SYS_ERR_OK;
 }
 
-static errval_t sector_from_cluster_offset(int cluster, int offset, int *retsector, int *retoffset) {
-    errval_t err;
-    if(offset > BytsPerSec * SecPerClus) {
-        offset -= BytsPerSec * SecPerClus;
-        int next_cluster;
-        CHECK_ERR(get_next_cluster(cluster, &next_cluster), "");
-        return sector_from_cluster_offset(next_cluster, offset, retsector, retoffset);
-    }
-
-    *retsector = FIRST_SECTOR_OF_CLUSTER(cluster) + (offset/BytsPerSec);
-    *retoffset = offset % BytsPerSec;
-
-    return SYS_ERR_OK;
-}
-
-errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *bytes_read) {
-    errval_t err;
-
-    struct fat32_handle *fhandle = handle;
-    //read first block
-    uint8_t data[SDHC_BLOCK_SIZE];
-
-    size_t start_bytes = bytes;
-    while(bytes != 0 && fhandle->pos != fhandle->dirent->size) {
-        //we read every iteration, because we either read a new sector, or we terminate
-        int sector, offset;
-        CHECK_ERR(sector_from_cluster_offset(fhandle->dirent->FstCluster, fhandle->pos, &sector, &offset), "");
-        CHECK_ERR(sd_read_sector(sector, data), "bad read");
-
-        size_t cpy_bytes = MIN(SDHC_BLOCK_SIZE - offset, bytes);
-        memcpy(buffer, data + offset, cpy_bytes);
-        buffer += cpy_bytes;
-        fhandle->pos += cpy_bytes;
-        bytes -= cpy_bytes;
-    }
-
-    if(bytes_read != NULL)
-        *bytes_read = start_bytes - bytes;
-    
-    return SYS_ERR_OK;
-}
 
 errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_fileinfo *info) {
     errval_t err;
@@ -806,5 +781,56 @@ errval_t fat32_mkdir(const char *path) {
     struct fat32_dirent *h;
     CHECK_ERR(find_dirent(mount, path, true, ATTR_DIRECTORY, &h), "mkdir failed");
 
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_create(const char *path, fat32_handle_t *rethandle) {
+    errval_t err;
+
+    struct fat32_dirent *ent;
+    CHECK_ERR(find_dirent(mount, path, true, ATTR_ARCHIVE, &ent), "create failed");
+
+    struct fat32_handle *h = malloc(sizeof(struct fat32_handle)); 
+    h->dirent = ent;
+    h->isdir = false;
+    h->path = malloc(strlen(path));
+    memcpy(h->path, path, strlen(path));
+    h->pos = 0;
+    *rethandle = h;
+
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *bytes_read) {
+    errval_t err;
+
+    struct fat32_handle *fhandle = handle;
+    //read first block
+    uint8_t data[SDHC_BLOCK_SIZE];
+
+    size_t start_bytes = bytes;
+    while(bytes != 0 && fhandle->pos != fhandle->dirent->size) {
+        //we read every iteration, because we either read a new sector, or we terminate
+        int sector, offset;
+        CHECK_ERR(sector_from_cluster_offset(fhandle->dirent->FstCluster, fhandle->pos, &sector, &offset), "");
+        CHECK_ERR(sd_read_sector(sector, data), "bad read");
+
+        size_t cpy_bytes = MIN(SDHC_BLOCK_SIZE - offset, bytes);
+        memcpy(buffer, data + offset, cpy_bytes);
+        buffer += cpy_bytes;
+        fhandle->pos += cpy_bytes;
+        bytes -= cpy_bytes;
+    }
+
+    if(bytes_read != NULL)
+        *bytes_read = start_bytes - bytes;
+    
+    if(start_bytes == 0)
+        return FS_ERR_EOF;
+    
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, size_t *bytes_written) {
     return SYS_ERR_OK;
 }

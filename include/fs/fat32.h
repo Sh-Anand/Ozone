@@ -98,14 +98,14 @@ typedef uint32_t FAT_Entry;
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle);
 
-errval_t fat32_create(void *st, const char *path, fat32_handle_t *rethandle);
+errval_t fat32_create(const char *path, fat32_handle_t *rethandle);
 
 errval_t fat32_remove(void *st, const char *path);
 
 errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes,
                     size_t *bytes_read);
 
-errval_t fat32_write(void *st, fat32_handle_t handle, const void *buffer,
+errval_t fat32_write(fat32_handle_t handle, const void *buffer,
                      size_t bytes, size_t *bytes_written);
 
 errval_t fat32_truncate(void *st, fat32_handle_t handle, size_t bytes);
