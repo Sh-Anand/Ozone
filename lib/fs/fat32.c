@@ -67,6 +67,76 @@ void set_sd(struct sdhc_s *sdh) {
     sd = sdh;
 }
 
+static void shortname_to_name(char *shortname, char **retname) {
+    char *name = calloc(1, 12);
+    int i = 0, k = 0;
+    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
+    i = 8;
+    if(shortname[i] != 0x20) name[k++] = '.';
+    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
+    name[k] = '\0'; 
+    *retname = name;
+}
+
+static void name_to_shortname(char *name, char *shortname) {
+    memset(shortname, ' ', 11);
+    if(name[0] == '.') {
+        shortname[0] = '.';
+        if(name[1] != '\0' && name[1] == '.')
+            shortname[1] = '.';
+        return;
+    }
+    uint32_t lenf, lenl;
+    char *split = strchr(name, '.');
+    
+    if (split == NULL) {
+        lenl = strnlen(name, 8);
+        lenf = 0;
+    } 
+    else {
+        lenl = split - name;
+        split++;
+        lenf = strnlen(split, 3);
+    }
+    for (int i = 0; i < lenl; i++) {
+        shortname[i] = toupper(name[i]);
+    }
+    for (int i = 0; i < lenf; i++) {
+        shortname[8+i] = toupper(split[i]);
+    }
+}
+
+static bool strisalnum(char *name, int len) {
+    for(int i=0;i<len;i++)
+        if(!isalnum(name[i]))
+            return false;
+    
+    return true;
+}
+static bool valid_shortname(char *name) {
+    int len = strlen(name);
+    if(len > 12 || len == 0)
+        return false;
+    if(name[0] == '.' || isdigit(name[0]))
+        return false;
+    char *dot_pos = strchr(name, '.');
+    if(dot_pos == NULL) {
+        if(len > 8 || !strisalnum(name, len))
+            return false;
+    }
+    else {
+        int lenfirst = dot_pos - name;
+        if(lenfirst > 8)
+            return false;
+        int lenext = len - (dot_pos - name) - 1;
+        if(lenext > 3)
+            return false;
+        if(!strisalnum(name, lenfirst) && !strisalnum(dot_pos+1, lenext))
+            return false;
+    }    
+    return true;
+}
+
 static errval_t get_no_cache_frame(int size, lpaddr_t *paddr, lpaddr_t *vaddr, struct capref *retframe) {
     errval_t err;
 
@@ -161,19 +231,19 @@ static void check_set_bpb_metadata(uint8_t *bpb) {
     root_directory->size = -1;
     root_directory->is_dir = true;
 
-    DEBUG_PRINTF("BytsPerSec : %d\n", BytsPerSec);
-    DEBUG_PRINTF("SecPerClus : %d\n", SecPerClus);
-    DEBUG_PRINTF("RsvdSecCnt : %d\n", RsvdSecCnt);
-    DEBUG_PRINTF("RootEntCnt : %d\n", RootEntCnt);
-    DEBUG_PRINTF("RootClus : %d\n", RootClus);
-    DEBUG_PRINTF("TotSec32 : %d\n", TotSec32);
-    DEBUG_PRINTF("TotalClusters : %d\n", TotalClusters);
-    DEBUG_PRINTF("FATSz32 : %d\n", FATSz32);
-    DEBUG_PRINTF("NumFATs : %d\n", NumFATs);
-    DEBUG_PRINTF("FirstDataSector : %d\n", FirstDataSector);
-    DEBUG_PRINTF("RootSector : %d\n", RootSector);
-    DEBUG_PRINTF("RootFATSector : %d\n", FAT_SECTOR(RootClus));
-    DEBUG_PRINTF("RootFATOffset : %d\n", FAT_OFFSET(RootClus));
+    // DEBUG_PRINTF("BytsPerSec : %d\n", BytsPerSec);
+    // DEBUG_PRINTF("SecPerClus : %d\n", SecPerClus);
+    // DEBUG_PRINTF("RsvdSecCnt : %d\n", RsvdSecCnt);
+    // DEBUG_PRINTF("RootEntCnt : %d\n", RootEntCnt);
+    // DEBUG_PRINTF("RootClus : %d\n", RootClus);
+    // DEBUG_PRINTF("TotSec32 : %d\n", TotSec32);
+    // DEBUG_PRINTF("TotalClusters : %d\n", TotalClusters);
+    // DEBUG_PRINTF("FATSz32 : %d\n", FATSz32);
+    // DEBUG_PRINTF("NumFATs : %d\n", NumFATs);
+    // DEBUG_PRINTF("FirstDataSector : %d\n", FirstDataSector);
+    // DEBUG_PRINTF("RootSector : %d\n", RootSector);
+    // DEBUG_PRINTF("RootFATSector : %d\n", FAT_SECTOR(RootClus));
+    // DEBUG_PRINTF("RootFATOffset : %d\n", FAT_OFFSET(RootClus));
 }
 
 static errval_t refill_free_clusters(void) {
@@ -226,39 +296,6 @@ static errval_t initialize_free_clusters(void) {
     return SYS_ERR_OK;
 }
 
-static void shortname_to_name(char *shortname, char **retname) {
-    char *name = calloc(1, 12);
-    int i = 0, k = 0;
-    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
-    i = 8;
-    if(shortname[i] != 0x20) name[k++] = '.';
-    while(i < strlen(shortname) && shortname[i] != 0x20) name[k++] = shortname[i++];
-    name[k] = '\0'; 
-    *retname = name;
-}
-
-static void name_to_shortname(char *name, char *shortname) {
-    memset(shortname, ' ', 11);
-    uint32_t lenf, lenl;
-    char *split = strchr(name, '.');
-    
-    if (split == NULL) {
-        lenl = strnlen(name, 8);
-        lenf = 0;
-    } 
-    else {
-        lenl = split - name;
-        split++;
-        lenf = strnlen(split, 3);
-    }
-    for (int i = 0; i < lenl; i++) {
-        shortname[i] = toupper(name[i]);
-    }
-    for (int i = 0; i < lenf; i++) {
-        shortname[8+i] = toupper(split[i]);
-    }
-}
-
 static errval_t get_next_cluster(int cluster, int *next_cluster) {
     errval_t err;
     uint8_t FAT_Sector[SDHC_BLOCK_SIZE];
@@ -288,7 +325,7 @@ static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, int
         dirent->is_dir = false;
 
     uint16_t cluster_high = *(uint16_t *) (dir + DIR_FST_CLUSTER_HIGH), cluster_low = *(uint16_t *) (dir + DIR_FST_CLUSTER_LOW);
-    dirent->FstCluster = (cluster_high << 2) + cluster_low;
+    dirent->FstCluster = (cluster_high << 16) + cluster_low;
 
     dirent->parent = parent;
     dirent->size = *(uint32_t *) (dir + DIR_FILE_SIZE);
@@ -311,8 +348,9 @@ static void marshall_directory_entry(struct fat32_dirent *dir, uint8_t *buff) {
 
     memcpy(buff + DIR_ATTR, &dir->Attr, 1);
 
-    uint16_t fst_cluster_high = dir->FstCluster >> 2;
-    uint16_t fst_cluster_low = dir->FstCluster & 0b0011;
+    uint16_t fst_cluster_high = dir->FstCluster >> 16;
+    uint16_t mask = ~0;
+    uint16_t fst_cluster_low = dir->FstCluster & mask;
     memcpy(buff + DIR_FST_CLUSTER_HIGH, &fst_cluster_high, 2);
     memcpy(buff + DIR_FST_CLUSTER_LOW, &fst_cluster_low, 2);
 
@@ -337,7 +375,6 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
     int cluster = dir->FstCluster;
 
     if((cluster & CLUSTER_FREE_MASK) == CLUSTER_FREE) {
-        DEBUG_PRINTF("EMPTY CLUSTER FOUND\n");
         if(retcluster)
             *retcluster = CLUSTER_FREE;
         return FS_ERR_NOTFOUND;
@@ -358,18 +395,15 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
                         *retoffset = i;
                         if(retcluster != NULL)
                             *retcluster = cluster;
-                        DEBUG_PRINTF("RETURNING EMPTY %d, %d, %d\n", *retsector, *retoffset, *retcluster);
                         return SYS_ERR_OK;
                     }
                 }
                 else {
                     if(sector_data[i] == DIR_ALL_FREE) {
-                        DEBUG_PRINTF("FOUND A 0 at %d\n", i);
                         return FS_ERR_NOTFOUND;
                     }
                     struct fat32_dirent *dirent;
                     parse_directory_entry(sector_data + i, dir, start_sector + sector, i, &dirent);
-                    DEBUG_PRINTF("FOUND %s at %d\n", dirent->name, i);
                     if(strcmp(dirent->name, name) == 0) {
                         *retdir = dirent;
                         if(retsector != NULL)
@@ -429,29 +463,27 @@ static errval_t write_to_FAT(int cluster, uint32_t value) {
 }
 
 //REQUIRES last_cluster to be dir's final cluster, otherwise function will break
+//if last_cluster is -1, skip modifying the existing directory entry
 static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_cluster, int *retcluster) {
     errval_t err;
 
-    DEBUG_PRINTF("WE ARE EXTENDING at %d!\n", last_cluster);
-
     CHECK_ERR(allocate_cluster(retcluster), "");
 
-    if(last_cluster != 0) {
+    if(dir->FstCluster == 0)
+        dir->FstCluster = *retcluster;
+
+    if(last_cluster >= 0) {
         //write newly allocated cluster to FAT of previous last cluster
         CHECK_ERR(write_to_FAT(last_cluster, *retcluster), "failed to write new cluster to FAT of old cluster");
     }
-    else {
-        DEBUG_PRINTF("MAKING A NEW CLUSTER FOR AN EMPTY DIR : %s at sector %d, offset %d\n", dir->name, dir->sector, dir->sector_offset);
+    else if(last_cluster == 0) {
         //make newly allocated cluster the FST cluster of dir
         assert(dir->FstCluster == 0); //sanity check
-        dir->FstCluster = *retcluster;
         //write back to the sector of this dirent
-        DEBUG_PRINTF("ALLOCATED CLUSTER : %d\n", dir->FstCluster);
         uint8_t dir_data[512];
         marshall_directory_entry(dir, dir_data + dir->sector_offset);
         struct fat32_dirent *temp;
         parse_directory_entry(dir_data + dir->sector_offset, NULL, 0, 0, &temp);
-        DEBUG_PRINTF("CLUSTER SANITY : %d\n", temp->FstCluster);
         assert(dir->FstCluster == temp->FstCluster);
         CHECK_ERR(sd_write_sector(dir->sector, dir_data), "");
     }
@@ -463,15 +495,47 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
     return SYS_ERR_OK;
 }
 
+static errval_t create_new_directory(struct fat32_dirent *dir) {
+    errval_t err;
+
+    int cluster;
+    CHECK_ERR(extend_dirent_by_one_cluster(dir, -1, &cluster), "extension failed");
+    int sector = FIRST_SECTOR_OF_CLUSTER(cluster);
+    uint8_t data[SDHC_BLOCK_SIZE];
+    memset(data, 0, SDHC_BLOCK_SIZE);
+    //create . dir
+    struct fat32_dirent *dot;
+    create_new_empty_dirent(dir->parent, ".", true, ATTR_DIRECTORY, &dot);
+    dot->FstCluster = dir->FstCluster;
+    struct fat32_dirent *dotdot;
+    assert(dir->parent != NULL);
+    create_new_empty_dirent(dir->parent->parent, "..", true, ATTR_DIRECTORY, &dotdot);
+    dotdot->FstCluster = dir->parent->parent == NULL ? 0 : dir->parent->FstCluster; //if root, set 0
+
+    marshall_directory_entry(dot, data);
+    marshall_directory_entry(dotdot, data + 32);
+    
+    
+    CHECK_ERR(sd_write_sector(sector, data), "");
+
+    return SYS_ERR_OK;
+}
+
 static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool is_dir, int Attr, struct fat32_dirent **retent) {
     errval_t err;
 
+    if(!valid_shortname(name)) {
+        return FS_ERR_ILLEGAL_NAME;
+    }
     struct fat32_dirent *dir;
     create_new_empty_dirent(curr, name, is_dir, Attr, &dir);
 
+    if(Attr == ATTR_DIRECTORY) {
+        CHECK_ERR(create_new_directory(dir), "Failed to create new directory");
+    }
+
     int sector,offset,cluster;   
     err = find_in_directory(curr, name, true, NULL, &sector, &offset, &cluster);
-    // DEBUG_PRINTF("FOUND EMPTY SPACE IN %d, %d, %d\n", sector, offset, cluster);
 
     if(err == FS_ERR_NOTFOUND) {
         int next_cluster; 
@@ -499,8 +563,6 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
         
     bool created = false;
     while(*path != '\0') {
-        DEBUG_PRINTF("At path %s\n", path);
-        DEBUG_PRINTF("Parent : %s\n", curr->name);
 
         if(!curr->is_dir)
             return FS_ERR_NOTDIR;
@@ -517,7 +579,6 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
         err = find_in_directory(curr, next_dir_name, false, &dir, NULL, NULL, NULL);
         if(err_is_fail(err)) {
             if((*path == '\0') && CREATE_IF_NOT_EXIST && err == FS_ERR_NOTFOUND) {
-                DEBUG_PRINTF("IN DIRECTORY %s, creating DIRECTORY %s\n", curr->name, next_dir_name);
                 CHECK_ERR(create_dirent_in_dir(curr, next_dir_name, true, Attr , &dir), "failed to create a new directory entry");
                 created = true;
             }
@@ -663,15 +724,16 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
     errval_t err;
     struct fat32_handle *handle = inhandle;
     if(!handle->isdir)
-        return FS_ERR_NOTDIR;
-    
+        return FS_ERR_NOTDIR;    
+
     int sector,offset;
     uint8_t dir_block[SDHC_BLOCK_SIZE];
     CHECK_ERR(sector_from_cluster_offset(handle->dirent->FstCluster, handle->pos * 32, &sector, &offset), "");
     CHECK_ERR(sd_read_sector(sector, dir_block), "bad read");
 
-    if(dir_block[offset] == DIR_ALL_FREE)
+    if(dir_block[offset] == DIR_ALL_FREE) {
         return FS_ERR_INDEX_BOUNDS;
+    }
     else if(dir_block[offset] == DIR_FREE) {
         handle->pos++;
         return fat32_dir_read_next(inhandle, retname, info);
@@ -679,7 +741,6 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
 
     struct fat32_dirent *dir;
     parse_directory_entry(dir_block + offset, handle->dirent, sector, offset, &dir);
-
     *retname = dir->name;
     info->size = dir->size;
     info->type = dir->is_dir ? FS_DIRECTORY : FS_FILE;
@@ -747,33 +808,3 @@ errval_t fat32_mkdir(const char *path) {
 
     return SYS_ERR_OK;
 }
-
-// static bool strisalnum(char *name, int len) {
-//     for(int i=0;i<len;i++)
-//         if(!isalnum(name[i]))
-//             return false;
-    
-//     return true;
-// }
-// static bool valid_shortname(char *name) {
-//     int len = strlen(name);
-//     if(len > 12 || len == 0)
-//         return false;
-//     if(name[0] == '.' || isdigit(name[0]))
-//         return false;
-//     char *dot_pos = strchr(name, '.');
-//     if(dot_pos == NULL)
-//         if(len > 8 || !strisalnum(name, len))
-//             return false;
-//     else {
-//         int lenfirst = dot_pos - name;
-//         if(lenfirst > 8)
-//             return false;
-//         int lenext = len - (dot_pos - name) - 1;
-//         if(lenext > 3)
-//             return false;
-//         if(!strisalnum(name, lenfirst) && !strisalnum(dot_pos+1, lenext))
-//             return false;
-//     }    
-//     return true;
-// }
