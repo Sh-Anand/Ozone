@@ -272,7 +272,7 @@ static errval_t get_next_cluster(int cluster, int *next_cluster) {
 
 //given a 32 byte directory entry, extracts info out of it
 //TODO : get file times
-static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, struct fat32_dirent **retent) {
+static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, int sector, int offset, struct fat32_dirent **retent) {
 
     struct fat32_dirent *dirent = malloc(sizeof(struct fat32_dirent));
     
@@ -293,6 +293,9 @@ static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, str
     dirent->parent = parent;
     dirent->size = *(uint32_t *) (dir + DIR_FILE_SIZE);
 
+    dirent->sector = sector;
+    dirent->sector_offset = offset;
+
     *retent = dirent;
 }
 
@@ -303,7 +306,7 @@ static void marshall_directory_entry(struct fat32_dirent *dir, uint8_t *buff) {
     
     char shortname[11];
     name_to_shortname(dir->name, shortname);
-    DEBUG_PRINTF("Name :%s to shortname: %s", dir->name, shortname);
+
     memcpy(buff, shortname, DIR_NAME_SZ);
 
     memcpy(buff + DIR_ATTR, &dir->Attr, 1);
@@ -333,8 +336,12 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
     errval_t err;
     int cluster = dir->FstCluster;
 
-    if((cluster & CLUSTER_FREE_MASK) == CLUSTER_FREE)
+    if((cluster & CLUSTER_FREE_MASK) == CLUSTER_FREE) {
+        DEBUG_PRINTF("EMPTY CLUSTER FOUND\n");
+        if(retcluster)
+            *retcluster = CLUSTER_FREE;
         return FS_ERR_NOTFOUND;
+    }
 
     while(cluster != CLUSTER_EOC) {
         if(cluster == CLUSTER_BAD)
@@ -351,6 +358,7 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
                         *retoffset = i;
                         if(retcluster != NULL)
                             *retcluster = cluster;
+                        DEBUG_PRINTF("RETURNING EMPTY %d, %d, %d\n", *retsector, *retoffset, *retcluster);
                         return SYS_ERR_OK;
                     }
                 }
@@ -360,7 +368,7 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
                         return FS_ERR_NOTFOUND;
                     }
                     struct fat32_dirent *dirent;
-                    parse_directory_entry(sector_data + i, dir, &dirent);
+                    parse_directory_entry(sector_data + i, dir, start_sector + sector, i, &dirent);
                     DEBUG_PRINTF("FOUND %s at %d\n", dirent->name, i);
                     if(strcmp(dirent->name, name) == 0) {
                         *retdir = dirent;
@@ -424,6 +432,8 @@ static errval_t write_to_FAT(int cluster, uint32_t value) {
 static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_cluster, int *retcluster) {
     errval_t err;
 
+    DEBUG_PRINTF("WE ARE EXTENDING at %d!\n", last_cluster);
+
     CHECK_ERR(allocate_cluster(retcluster), "");
 
     if(last_cluster != 0) {
@@ -431,9 +441,19 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
         CHECK_ERR(write_to_FAT(last_cluster, *retcluster), "failed to write new cluster to FAT of old cluster");
     }
     else {
+        DEBUG_PRINTF("MAKING A NEW CLUSTER FOR AN EMPTY DIR : %s at sector %d, offset %d\n", dir->name, dir->sector, dir->sector_offset);
         //make newly allocated cluster the FST cluster of dir
         assert(dir->FstCluster == 0); //sanity check
         dir->FstCluster = *retcluster;
+        //write back to the sector of this dirent
+        DEBUG_PRINTF("ALLOCATED CLUSTER : %d\n", dir->FstCluster);
+        uint8_t dir_data[512];
+        marshall_directory_entry(dir, dir_data + dir->sector_offset);
+        struct fat32_dirent *temp;
+        parse_directory_entry(dir_data + dir->sector_offset, NULL, 0, 0, &temp);
+        DEBUG_PRINTF("CLUSTER SANITY : %d\n", temp->FstCluster);
+        assert(dir->FstCluster == temp->FstCluster);
+        CHECK_ERR(sd_write_sector(dir->sector, dir_data), "");
     }
 
     //write EOC to newly allocated cluster
@@ -451,7 +471,7 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
 
     int sector,offset,cluster;   
     err = find_in_directory(curr, name, true, NULL, &sector, &offset, &cluster);
-    DEBUG_PRINTF("FOUND EMPTY SPACE IN %d, %d, %d\n", sector, offset, cluster);
+    // DEBUG_PRINTF("FOUND EMPTY SPACE IN %d, %d, %d\n", sector, offset, cluster);
 
     if(err == FS_ERR_NOTFOUND) {
         int next_cluster; 
@@ -658,7 +678,7 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
     }
 
     struct fat32_dirent *dir;
-    parse_directory_entry(dir_block + offset, handle->dirent, &dir);
+    parse_directory_entry(dir_block + offset, handle->dirent, sector, offset, &dir);
 
     *retname = dir->name;
     info->size = dir->size;

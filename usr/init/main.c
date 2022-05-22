@@ -462,44 +462,52 @@ static errval_t init_sd(void) {
     if(err_is_fail(err))
         DEBUG_ERR(err, "FAT INIT FAILED");
 
-    // fat32_handle_t handle;
-    // err = fat32_opendir("/HELLO/", &handle);
+    fat32_handle_t handle;
+    err = fat32_opendir("/HELLO/", &handle);
     
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to open hello");
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open hello");
 
-    // err = fat32_closedir(handle);
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to close");
+    err = fat32_closedir(handle);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to close");
 
-    // fat32_handle_t fhandle;
-    // err = fat32_open("/HELLO/WOW.TXT", &fhandle);
+    fat32_handle_t fhandle;
+    err = fat32_open("/HELLO/WOW.TXT", &fhandle);
 
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to open wow.txt");
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open wow.txt");
 
-    // char data[2];
-    // err = fat32_read(fhandle, data, 2, NULL);
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to read bytes");
-    // DEBUG_PRINTF("Read : %s\n", data);
+    char data[2];
+    err = fat32_read(fhandle, data, 2, NULL);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to read bytes");
+    DEBUG_PRINTF("Read : %s\n", data);
 
-    // err = fat32_seek(fhandle, FS_SEEK_CUR, 3);
-    // err = fat32_read(fhandle, data, 3, NULL);
-    // DEBUG_PRINTF("Read : %s\n", data);
+    err = fat32_seek(fhandle, FS_SEEK_CUR, 3);
+    err = fat32_read(fhandle, data, 3, NULL);
+    DEBUG_PRINTF("Read : %s\n", data);
 
-    // err = fat32_close(fhandle);
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to close");
+    err = fat32_close(fhandle);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to close");
 
-    // err = fat32_mkdir("/TROUT");
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to mkdir");
+    err = fat32_mkdir("/TROUT");
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to mkdir");
 
-    // fat32_handle_t h;
-    // err = fat32_opendir("/TROUT", &h);
-    // if(err_is_fail(err))
-    //     DEBUG_ERR(err, "failed to open TROUT");
+    fat32_handle_t h;
+    err = fat32_opendir("/TROUT", &h);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open TROUT");
+
+    err = fat32_mkdir("/TROUT/FIXED");
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open TROUT");
+
+    err = fat32_opendir("/TROUT/FIXED", &h);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "failed to open TROUT");
 
     return SYS_ERR_OK;
 }

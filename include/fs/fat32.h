@@ -77,7 +77,7 @@ struct fat32_dirent
 
     bool is_dir;                    ///< flag indicationg this is a dir
 
-    // int currCluster, currClusterOffset;
+    int sector, sector_offset;
 };
 
 /**
