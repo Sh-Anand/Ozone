@@ -16,6 +16,7 @@
 #include <stdlib.h>
 
 #include <aos/aos.h>
+#include <aos/nameserver.h>
 #include <aos/morecore.h>
 #include <aos/coreboot.h>
 #include <aos/paging.h>
@@ -329,6 +330,19 @@ static errval_t start_nameserver(void) {
     return SYS_ERR_OK;
 }
 
+static errval_t start_terminal_server(void)
+{
+    errval_t err;
+    struct spawninfo si;
+    domainid_t pid;
+    err = spawn_load_by_name("terminal", &si, &pid);
+    if (err_is_fail(err)) {
+        return err_push(err, SPAWN_ERR_LOAD);
+    }
+	
+    return SYS_ERR_OK;
+}
+
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -394,6 +408,31 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "failed to start nameserver");
         exit(EXIT_FAILURE);
     }
+			
+	err = start_terminal_server();
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "failed to start terminal server");
+		exit(EXIT_FAILURE);
+	}
+	
+	// wait for a while
+	for (int i = 0; i < 12; i++) event_dispatch(get_default_waitset()); // TODO: this is not a good solution, but for now it works
+	
+	nameservice_chan_t terminal_channel;
+	do {
+		DEBUG_PRINTF("Looking up terminal server...\n");
+		err = nameservice_lookup("terminal_server", &terminal_channel);
+		DEBUG_PRINTF("Waiting for lookup (err: %d)!\n", err);
+		event_dispatch(get_default_waitset()); // wait for the lookup to succeed
+	} while (err_is_fail(err));
+	
+	DEBUG_PRINTF("Lookup succeeded!\n");
+	
+	nameservice_rpc(terminal_channel, "A", 1, NULL, NULL, NULL_CAP, NULL_CAP);
+	//nameservice_rpc(terminal_channel, "B", 1, NULL, NULL, NULL_CAP, NULL_CAP);
+	//nameservice_rpc(terminal_channel, "C", 1, NULL, NULL, NULL_CAP, NULL_CAP);
+	
+	DEBUG_PRINTF("Messages Sent to terminal server!\n");
 
     // Grading
     grading_test_late();
@@ -603,8 +642,8 @@ int main(int argc, char *argv[])
     case PI_PLATFORM_IMX8X:
         platform = "IMX8X";
 		// Since printing is very important, setup the terminal here already (only for core 0)
-		// TODO: before all else: setup rpc terminal channel (for now init rpc channel)
 		if (my_core_id == 0) {
+			
 			struct capref dev_cnode = {
 				.cnode = {
 					.croot = CPTR_ROOTCN,
@@ -642,6 +681,8 @@ int main(int argc, char *argv[])
 			err = cap_retype(dev_cap_gic, dev_cnode, IMX8X_GIC_DIST_BASE - cap.u.devframe.base, ObjType_DevFrame, IMX8X_GIC_DIST_SIZE, 1);
 			gic_setup();
 			terminal_setup_lpuart();
+			
+			
 		}
         break;
     default:
