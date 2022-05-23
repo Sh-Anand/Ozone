@@ -507,7 +507,7 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
     }
     else if(last_cluster == 0) {
         //write back to the sector of this dirent
-        uint8_t dir_data[512];
+        uint8_t dir_data[SDHC_BLOCK_SIZE];
         CHECK_ERR(sd_read_sector(dir->sector, dir_data), "");
         assert(dir->FstCluster == *retcluster);
         marshall_directory_entry(dir, dir_data + dir->sector_offset);
@@ -655,11 +655,91 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
     
     struct fat32_handle *handle = malloc(sizeof(struct fat32_handle));
     handle->dirent = dir;
-    handle->path = malloc(strlen(path));
+    handle->path = malloc(strlen(path) + 1);
     strncpy(handle->path, path, strlen(path));
+    handle->path[strlen(path)] = '\0';
     handle->pos = 0;
 
     *rethandle = handle;
+
+    return SYS_ERR_OK;
+}
+
+//WATCH OUT, THIS FUNCTION WILL SPIT OUT NONSENSE IF CLUSTER DOESNT BELONG TO A directory
+//offset is directory number, and NOT directory number * 32
+static errval_t is_last_dirent(int cluster, int offset, bool *ret) {
+    
+    errval_t err;
+
+    //we want the next one
+    offset++;
+
+    int sector, offset_into_sector;
+    uint8_t data[SDHC_BLOCK_SIZE];
+    while(true) {
+      err = sector_from_cluster_offset(cluster, offset * 32, &sector, &offset_into_sector);
+      if(err_is_fail(err)) {
+          if(err == FS_ERR_INDEX_BOUNDS) {
+              *ret = true;
+              return SYS_ERR_OK;
+          }
+          else
+            return err;
+      }
+      CHECK_ERR(sd_read_sector(sector, data), "");
+      for(; offset_into_sector < SDHC_BLOCK_SIZE; offset_into_sector += 32) {
+          if(data[offset_into_sector] == DIR_ALL_FREE) {
+              *ret = true;
+              return SYS_ERR_OK;
+          }
+          else if(data[offset_into_sector] != DIR_FREE) {
+              *ret = false;
+              return SYS_ERR_OK;
+          }
+          offset++;
+      }
+    }
+
+    return FS_ERR_IMPOSSIBLE;
+}
+
+//frees the entire cluster chain starting at cluster
+static errval_t burn_cluster_chain(int cluster) {
+    errval_t err;
+    while(cluster != CLUSTER_EOC && cluster != CLUSTER_FREE) {
+        CHECK_ERR(write_to_FAT(cluster, 0), "");
+        push_back(free_clusters, cluster);
+        get_next_cluster(cluster, &cluster);
+    }
+    return SYS_ERR_OK;
+}
+
+static errval_t delete_dirent(struct fat32_dirent *dir) {
+    errval_t err;
+
+    //cannot delete root directory
+    if(dir->parent == NULL)
+        return FS_ERR_ROOT_DELETE;
+
+    if(dir->is_dir) {
+        bool is_last;
+        CHECK_ERR(is_last_dirent(dir->FstCluster, 1, &is_last), "");
+        if(!is_last)
+            return FS_ERR_NOTEMPTY;
+    }
+
+    CHECK_ERR(burn_cluster_chain(dir->FstCluster), "");
+
+    //check if dir is the last directory entry of the directory we are deleting it from
+    int parent_sector = FIRST_SECTOR_OF_CLUSTER(dir->parent->FstCluster);
+    int offset = (dir->sector + dir->sector_offset - parent_sector)/32;
+    bool is_last_in_parent;
+    CHECK_ERR(is_last_dirent(dir->parent->FstCluster, offset, &is_last_in_parent), "");
+
+    uint8_t data[SDHC_BLOCK_SIZE];
+    CHECK_ERR(sd_read_sector(dir->sector, data), "");
+    data[dir->sector_offset] = is_last_in_parent ? DIR_ALL_FREE : DIR_FREE;
+    CHECK_ERR(sd_write_sector(dir->sector, data), "");
 
     return SYS_ERR_OK;
 }
@@ -700,6 +780,7 @@ errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_DIRECTORY, FS_ERR_NOTDIR), "failed to open dir");
     handle->isdir = true;
+    handle->pos = 2;
     *rethandle = handle;
 
     return SYS_ERR_OK;
@@ -804,8 +885,9 @@ errval_t fat32_create(const char *path, fat32_handle_t *rethandle) {
     struct fat32_handle *h = malloc(sizeof(struct fat32_handle)); 
     h->dirent = ent;
     h->isdir = false;
-    h->path = malloc(strlen(path));
-    memcpy(h->path, path, strlen(path));
+    h->path = malloc(strlen(path) + 1);
+    strncpy(h->path, path, strlen(path));
+    h->path[strlen(path)] = '\0';
     h->pos = 0;
     *rethandle = h;
 
@@ -847,7 +929,7 @@ errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, si
 
     struct fat32_handle *fhandle = handle;
 
-    uint8_t data[512];
+    uint8_t data[SDHC_BLOCK_SIZE];
     size_t start_bytes = bytes;
     while(bytes != 0) {
         //we read every iteration, because we either read a new sector, or we terminate
@@ -895,5 +977,25 @@ errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, si
     if(start_bytes == bytes)
         return FS_ERR_EOF;
     
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_rmdir(const char *path) {
+    errval_t err;
+    struct fat32_dirent *dir;
+    CHECK_ERR(find_dirent(mount, path, false, ATTR_DIRECTORY, &dir), "");
+
+    CHECK_ERR_PUSH(delete_dirent(dir), FS_ERR_DELETE_DIR);
+
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_remove(const char *path) {
+    errval_t err;
+    struct fat32_dirent *dir;
+    CHECK_ERR(find_dirent(mount, path, false, ATTR_ARCHIVE, &dir), "");
+
+    CHECK_ERR_PUSH(delete_dirent(dir), FS_ERR_DELETE_DIR);
+
     return SYS_ERR_OK;
 }

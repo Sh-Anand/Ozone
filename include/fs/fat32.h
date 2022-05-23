@@ -77,7 +77,8 @@ struct fat32_dirent
 
     bool is_dir;                    ///< flag indicationg this is a dir
 
-    int sector, sector_offset;
+    int sector, sector_offset;      ///< sector in drive and offset into sector that this dirent is in
+
 };
 
 /**
@@ -98,9 +99,10 @@ typedef uint32_t FAT_Entry;
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle);
 
+//NOTE! DO NOT USE THE HNADLE PROVIDED BY FAT32_CREATE, THERE IS SOME WEIRD ERROR WITH THAT ONE. REOPEN FILE WITH FAT32_OPEN
 errval_t fat32_create(const char *path, fat32_handle_t *rethandle);
 
-errval_t fat32_remove(void *st, const char *path);
+errval_t fat32_remove(const char *path);
 
 errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes,
                     size_t *bytes_read);

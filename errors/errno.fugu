@@ -1003,6 +1003,10 @@ errors fs FS_ERR_ {
     failure BAD_CLUSTER         "Bad cluster found",
     failure ILLEGAL_NAME        "Given name is not a shortname",
     failure EOF                 "Reached end of file",
+    failure IMPOSSIBLE          "This should not happen",
+    failure ROOT_DELETE         "Cannot delete root directory",
+    failure DELETE_DIR          "failed to delete directory",
+    failure DELETE_FILE         "failed to delete file",
 };
 
 // errors in the vfs library
