@@ -415,23 +415,6 @@ static int bsp_main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	
-	// wait for a while
-	for (int i = 0; i < 12; i++) event_dispatch(get_default_waitset()); // TODO: this is not a good solution, but for now it works
-	
-	nameservice_chan_t terminal_channel;
-	do {
-		DEBUG_PRINTF("Looking up terminal server...\n");
-		err = nameservice_lookup("terminal_server", &terminal_channel);
-		DEBUG_PRINTF("Waiting for lookup (err: %d)!\n", err);
-		event_dispatch(get_default_waitset()); // wait for the lookup to succeed
-	} while (err_is_fail(err));
-	
-	DEBUG_PRINTF("Lookup succeeded!\n");
-	
-	nameservice_rpc(terminal_channel, "A", 1, NULL, NULL, NULL_CAP, NULL_CAP);
-	//nameservice_rpc(terminal_channel, "B", 1, NULL, NULL, NULL_CAP, NULL_CAP);
-	//nameservice_rpc(terminal_channel, "C", 1, NULL, NULL, NULL_CAP, NULL_CAP);
-	
 	DEBUG_PRINTF("Messages Sent to terminal server!\n");
 
     // Grading

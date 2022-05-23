@@ -49,7 +49,6 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
     struct capref ret_cap = NULL_CAP;
     void *ret_buf = NULL;
     size_t ret_size = 0;
-	DEBUG_PRINTF("CANNOT BE NULL: %p\n", &ns_rpc);
     err = aos_rpc_call(&ns_rpc, NAMESERVICE_LOOKUP, NULL_CAP, name, strlen(name) + 1,
                        &ret_cap, &ret_buf, &ret_size);
     if (err_is_fail(err)) {

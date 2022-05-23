@@ -185,9 +185,7 @@ errval_t nameservice_deregister(const char *name)
 errval_t nameservice_lookup(const char *name, nameservice_chan_t *nschan)
 {
     errval_t err;
-	DEBUG_PRINTF("nameservice_lookup enter\n");
     ENSURE_NAMESERVER_CHAN;
-	DEBUG_PRINTF("nameservice_lookup exit\n");
     return client_lookup_service(name, (struct client_side_chan **)nschan);
 }
 
