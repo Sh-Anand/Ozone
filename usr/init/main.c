@@ -462,13 +462,12 @@ static errval_t init_sd(void) {
     if(err_is_fail(err))
         DEBUG_ERR(err, "FAT INIT FAILED");
 
+    fat32_handle_t h;
+    
     // err = fat32_mkdir("/TROUT");
     // if(err_is_fail(err))
     //     DEBUG_ERR(err, "failed to mkdir");
     
-    // DEBUG_PRINTF("MADE TROUT\n");
-
-    fat32_handle_t h;
     // err = fat32_opendir("/TROUT", &h);
     // if(err_is_fail(err))
     //     DEBUG_ERR(err, "failed to open TROUT");
@@ -504,15 +503,28 @@ static errval_t init_sd(void) {
     //     DEBUG_ERR(err, "failed to find file in TROUT/FIXED");
     // DEBUG_PRINTF("next file : %s\n",name);
 
-    err = fat32_open("/TROUT/FUNNY.TXT", &h);
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "failed to find file in TROUT");
+    // err = fat32_create("/TROUT/FUNNY.TXT", &h);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to create file in TROUT");
 
-    fat32_close(h);
+    // err = fat32_open("/TROUT/FUNNY.TXT", &h);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to find file in TROUT");
 
-    err = fat32_create("/TROUT/FUNNY.TXT", &h);
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "failed to create file in TROUT");
+    // fat32_close(h);
+
+    // char *msg = "hello funny man!";
+    // err = fat32_write(h, msg, strlen(msg), NULL);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to write msg into FUNNY");
+
+    // char msg[17];
+    // err = fat32_read(h, msg, 16, NULL);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "failed to read msg from FUNNY");
+    // msg[16] = '\0';
+
+    // DEBUG_PRINTF("READ : %s\n", msg);
 
     return SYS_ERR_OK;
 }

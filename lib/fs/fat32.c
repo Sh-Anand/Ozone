@@ -307,6 +307,48 @@ static errval_t get_next_cluster(int cluster, int *next_cluster) {
     return SYS_ERR_OK;
 }
 
+static errval_t get_last_cluster(int cluster, int *last_cluster) {
+    errval_t err;
+
+    while(cluster != CLUSTER_FREE && cluster != CLUSTER_EOC) {
+        CHECK_ERR(get_next_cluster(cluster, &cluster), "");
+    }
+
+    *last_cluster = cluster;
+    return SYS_ERR_OK;
+}
+
+static errval_t allocate_cluster(int *retclus) {
+    errval_t err;
+    if(free_clusters->size == 0) {
+        CHECK_ERR_PUSH(refill_free_clusters(), FS_ERR_DISK_FULL);
+    }
+
+    *retclus = pop_front(free_clusters);
+    assert(*retclus >= 2);
+
+    return SYS_ERR_OK;
+}
+
+static errval_t sector_from_cluster_offset(int cluster, int offset, int *retsector, int *retoffset) {
+    if((cluster == CLUSTER_FREE) || (cluster == CLUSTER_EOC))
+        return FS_ERR_INDEX_BOUNDS;
+    
+    errval_t err;
+    
+    if(offset > BytsPerSec * SecPerClus) {
+        offset -= BytsPerSec * SecPerClus;
+        int next_cluster;
+        CHECK_ERR(get_next_cluster(cluster, &next_cluster), "");
+        return sector_from_cluster_offset(next_cluster, offset, retsector, retoffset);
+    }
+
+    *retsector = FIRST_SECTOR_OF_CLUSTER(cluster) + (offset/BytsPerSec);
+    *retoffset = offset % BytsPerSec;
+
+    return SYS_ERR_OK;
+}
+
 //given a 32 byte directory entry, extracts info out of it
 //TODO : get file times
 static void parse_directory_entry(uint8_t *dir, struct fat32_dirent *parent, int sector, int offset, struct fat32_dirent **retent) {
@@ -349,8 +391,7 @@ static void marshall_directory_entry(struct fat32_dirent *dir, uint8_t *buff) {
     memcpy(buff + DIR_ATTR, &dir->Attr, 1);
 
     uint16_t fst_cluster_high = dir->FstCluster >> 16;
-    uint16_t mask = ~0;
-    uint16_t fst_cluster_low = dir->FstCluster & mask;
+    uint16_t fst_cluster_low = dir->FstCluster & (0b1111111111111111);
     memcpy(buff + DIR_FST_CLUSTER_HIGH, &fst_cluster_high, 2);
     memcpy(buff + DIR_FST_CLUSTER_LOW, &fst_cluster_low, 2);
 
@@ -424,18 +465,6 @@ static errval_t find_in_directory(struct fat32_dirent *dir, const char *name, bo
     return FS_ERR_NOTFOUND;
 }
 
-static errval_t allocate_cluster(int *retclus) {
-    errval_t err;
-    if(free_clusters->size == 0) {
-        CHECK_ERR_PUSH(refill_free_clusters(), FS_ERR_DISK_FULL);
-    }
-
-    *retclus = pop_front(free_clusters);
-    assert(*retclus >= 2);
-
-    return SYS_ERR_OK;
-}
-
 static void create_new_empty_dirent(struct fat32_dirent *parent, char *name, bool is_dir, int Attr, struct fat32_dirent **retent) {
     struct fat32_dirent *ent = malloc(sizeof(struct fat32_dirent));
     ent->size = 0;
@@ -472,19 +501,16 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
     if(dir->FstCluster == 0)
         dir->FstCluster = *retcluster;
 
-    if(last_cluster >= 0) {
+    if(last_cluster > 0) {
         //write newly allocated cluster to FAT of previous last cluster
         CHECK_ERR(write_to_FAT(last_cluster, *retcluster), "failed to write new cluster to FAT of old cluster");
     }
     else if(last_cluster == 0) {
-        //make newly allocated cluster the FST cluster of dir
-        assert(dir->FstCluster == 0); //sanity check
         //write back to the sector of this dirent
         uint8_t dir_data[512];
+        CHECK_ERR(sd_read_sector(dir->sector, dir_data), "");
+        assert(dir->FstCluster == *retcluster);
         marshall_directory_entry(dir, dir_data + dir->sector_offset);
-        struct fat32_dirent *temp;
-        parse_directory_entry(dir_data + dir->sector_offset, NULL, 0, 0, &temp);
-        assert(dir->FstCluster == temp->FstCluster);
         CHECK_ERR(sd_write_sector(dir->sector, dir_data), "");
     }
 
@@ -657,21 +683,6 @@ errval_t fat32_init(void) {
     return SYS_ERR_OK; 
 }
 
-static errval_t sector_from_cluster_offset(int cluster, int offset, int *retsector, int *retoffset) {
-    errval_t err;
-    if(offset > BytsPerSec * SecPerClus) {
-        offset -= BytsPerSec * SecPerClus;
-        int next_cluster;
-        CHECK_ERR(get_next_cluster(cluster, &next_cluster), "");
-        return sector_from_cluster_offset(next_cluster, offset, retsector, retoffset);
-    }
-
-    *retsector = FIRST_SECTOR_OF_CLUSTER(cluster) + (offset/BytsPerSec);
-    *retoffset = offset % BytsPerSec;
-
-    return SYS_ERR_OK;
-}
-
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
     errval_t err;
 
@@ -825,12 +836,64 @@ errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *b
     if(bytes_read != NULL)
         *bytes_read = start_bytes - bytes;
     
-    if(start_bytes == 0)
+    if(start_bytes == bytes)
         return FS_ERR_EOF;
     
     return SYS_ERR_OK;
 }
 
 errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, size_t *bytes_written) {
+    errval_t err;
+
+    struct fat32_handle *fhandle = handle;
+
+    uint8_t data[512];
+    size_t start_bytes = bytes;
+    while(bytes != 0) {
+        //we read every iteration, because we either read a new sector, or we terminate
+        int sector, offset;
+        
+        err = sector_from_cluster_offset(fhandle->dirent->FstCluster, fhandle->pos, &sector, &offset);
+        if(err_is_fail(err)) {
+            if(err == FS_ERR_INDEX_BOUNDS) {
+                //out of space, extend the file, write to bytes in case we throw an error
+                if(bytes_written)
+                    *bytes_written = start_bytes - bytes;
+
+                int last_cluster;
+                CHECK_ERR(get_last_cluster(fhandle->dirent->FstCluster, &last_cluster), "");
+                CHECK_ERR(extend_dirent_by_one_cluster(fhandle->dirent, last_cluster, &last_cluster), "");
+                sector = FIRST_SECTOR_OF_CLUSTER(last_cluster);
+                offset = 0;
+            }
+            else
+                return err;
+        }
+
+        size_t cpy_bytes = MIN(SDHC_BLOCK_SIZE - offset, bytes);
+        if(cpy_bytes != SDHC_BLOCK_SIZE)
+            CHECK_ERR(sd_read_sector(sector, data), "bad read");
+
+        memcpy(data + offset, buffer, cpy_bytes);
+        CHECK_ERR(sd_write_sector(sector, data), "bad write");
+        buffer += cpy_bytes;
+        fhandle->pos += cpy_bytes;
+        bytes -= cpy_bytes;
+    }
+
+    //write new size back to dirent
+    if(start_bytes - bytes > 0) {
+        fhandle->dirent->size += (start_bytes - bytes);
+        CHECK_ERR(sd_read_sector(fhandle->dirent->sector, data), "");
+        marshall_directory_entry(fhandle->dirent, data + fhandle->dirent->sector_offset);
+        CHECK_ERR(sd_write_sector(fhandle->dirent->sector, data), "");
+    }
+
+    if(bytes_written)
+        *bytes_written = start_bytes - bytes;
+    
+    if(start_bytes == bytes)
+        return FS_ERR_EOF;
+    
     return SYS_ERR_OK;
 }
