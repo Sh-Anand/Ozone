@@ -24,7 +24,7 @@ static errval_t create_chan(domainid_t pid, struct client_side_chan **ret)
     if (chan == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
-    chan->rpc.chan.type = AOS_CHAN_TYPE_UNKNOWN;
+    aos_rpc_init(&chan->rpc);
     chan->pid = pid;
     LIST_INSERT_HEAD(&chans, chan, link);
     *ret = chan;
