@@ -18,6 +18,8 @@ extern size_t (*local_terminal_read_function)(char*, size_t);
 
 extern spinlock_t* global_print_lock;
 
+#define DEBUG_RPC_HANDLERS 1
+
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
  *
@@ -215,8 +217,10 @@ RPC_HANDLER(remote_ram_request_handler)
     CAST_IN_MSG_EXACT_SIZE(ram_msg, struct aos_rpc_msg_ram);
     errval_t err;
 
-    DEBUG_PRINTF("received remote RAM request, size = 0x%lx, alignment = 0x%lx\n",
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> received remote RAM request, size = 0x%lx, alignment = 0x%lx\n",
                  ram_msg->size, ram_msg->alignment);
+#endif
 
     // Allocate RAM locally
     struct capref cap;
@@ -233,7 +237,10 @@ RPC_HANDLER(remote_ram_request_handler)
     }
     assert(c.type == ObjType_RAM);
 
-    DEBUG_PRINTF("giving out RAM 0x%lx/0x%lx\n", c.u.ram.base, c.u.ram.bytes);
+
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< giving out RAM 0x%lx/0x%lx\n", c.u.ram.base, c.u.ram.bytes);
+#endif
 
     MALLOC_OUT_MSG(reply, struct RAM);
     reply->base = c.u.ram.base;
@@ -335,6 +342,7 @@ RPC_HANDLER(process_get_all_pids_handler)
             if (err_is_fail(err)) {
                 return err;
             }
+            msg[core]->count = 0;
         } else {
             continue;  // core not booted
         }
@@ -442,8 +450,10 @@ RPC_HANDLER(bind_core_urpc_handler)
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_bind_core_urpc_msg);
     errval_t err;
 
-    DEBUG_PRINTF("setup urpc binding with core %u (listener_first = %u)\n", msg->core,
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> setup urpc binding with core %u (listener_first = %u)\n", msg->core,
                  msg->listener_first);
+#endif
 
     // Forge frame
     assert(msg->frame.bytes == (UMP_CHAN_SHARED_FRAME_SIZE * 2));
@@ -472,13 +482,24 @@ RPC_HANDLER(bind_core_urpc_handler)
         return err;
     }
 
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< setup urpc binding with core %u done\n", msg->core);
+#endif
+
+
     return SYS_ERR_OK;
 }
 
 RPC_HANDLER(cap_transfer_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
-    assert(!capref_is_null(in_cap));
+    if (capref_is_null(in_cap)) {
+        return MON_ERR_CAP_SEND;
+    }
+
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> transfer cap to %u\n", *pid);
+#endif
 
     errval_t err;
 
@@ -521,12 +542,20 @@ RPC_HANDLER(cap_transfer_handler)
         }
     }
 
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< transfer cap to %u done\n", *pid);
+#endif
+
     return SYS_ERR_OK;
 }
 
 RPC_HANDLER(remote_cap_transfer_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> received cap to %u\n", msg->pid);
+#endif
+
     assert(spawn_get_core(msg->pid) == disp_get_current_core_id());
 
     errval_t err;
@@ -574,13 +603,20 @@ RPC_HANDLER(remote_cap_transfer_handler)
         return err;  // expose transient error to the caller
     }
 
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< put cap to %u done\n", msg->pid);
+#endif
+
     return SYS_ERR_OK;
 }
 
 RPC_HANDLER(register_nameserver_hander)
 {
     struct proc_node *proc = arg;
-    DEBUG_PRINTF("nameserver registers as %u\n", proc->pid);
+
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> nameserver registers as %u\n", proc->pid);
+#endif
 
     errval_t err;
     assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_UNKNOWN);
@@ -590,6 +626,11 @@ RPC_HANDLER(register_nameserver_hander)
     }
 
     *out_cap = nameserver_rpc.chan.lc.local_cap;
+
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< nameserver registered\n");
+#endif
+
     return SYS_ERR_OK;
 }
 
@@ -597,7 +638,9 @@ RPC_HANDLER(bind_nameserver_handler)
 {
     struct proc_node *proc = arg;
 
-    DEBUG_PRINTF("process %u tries to bind nameserver\n", proc->pid);
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> process %u tries to bind nameserver\n", proc->pid);
+#endif
 
     errval_t err;
     struct capref frame;
@@ -621,14 +664,15 @@ RPC_HANDLER(bind_nameserver_handler)
         return err_push(err, LIB_ERR_PAGING_UNMAP);
     }
 
-    // DEBUG_PRINTF("> process %u tries to bind nameserver\n", proc->pid);
-
     if (disp_get_core_id() == 0) {
         assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
         // Never block, ask the client to retry if needed
         err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &proc->pid, sizeof(domainid_t), true);
         if (err_is_fail(err)) {
             cap_destroy(frame);
+#if DEBUG_RPC_HANDLERS
+            DEBUG_PRINTF("< process %u failed to bind nameserver, let it retry\n", proc->pid);
+#endif
             return err;  // expose transient error to the user
         }
     } else {
@@ -643,7 +687,9 @@ RPC_HANDLER(bind_nameserver_handler)
                            &msg, sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
     }
 
-    // DEBUG_PRINTF(">> process %u tries to bind nameserver\n", proc->pid);
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> process %u bound to nameserver\n", proc->pid);
+#endif
 
     *out_cap = frame;
     return err;
@@ -653,7 +699,9 @@ RPC_HANDLER(remote_bind_nameserver_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
 
-    DEBUG_PRINTF("process %u remote bind nameserver\n", msg->pid);
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("> process %u bind nameserver (remote)\n", msg->pid);
+#endif
     errval_t err;
 
     struct capref cap;
@@ -678,10 +726,15 @@ RPC_HANDLER(remote_bind_nameserver_handler)
     err = aos_chan_send(&nameserver_rpc.chan, 0, cap, &msg->pid, sizeof(domainid_t), true);
     if (err_is_fail(err)) {
         cap_destroy(cap);
+#if DEBUG_RPC_HANDLERS
+        DEBUG_PRINTF("< process %u failed to bind nameserver (remote), let it retry\n", msg->pid);
+#endif
         return err;  // expose transient error to the user
     }
 
-    // DEBUG_PRINTF(">> process %u remote bind nameserver\n", msg->pid);
+#if DEBUG_RPC_HANDLERS
+    DEBUG_PRINTF("< process %u bound nameserver (remote)\n", msg->pid);
+#endif
 
     return err;
 }

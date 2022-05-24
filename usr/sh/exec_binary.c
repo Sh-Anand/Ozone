@@ -21,7 +21,7 @@ void exec_binary(struct shell_env *env)
 	printf("Started process: %x\n", pid);
 	
 	// crude way of blocking shell until child exists
-	uint8_t child_running;
+	/*uint8_t child_running;
 	domainid_t *all_pids;
 	size_t n_pids;
 	char pidstr[1024];
@@ -39,7 +39,7 @@ void exec_binary(struct shell_env *env)
 			//event_dispatch(get_default_waitset());
 			thread_yield();
 		}
-	} while (child_running);
+	} while (child_running);*/
 	
 	printf("Shell resuming...\n");
 }
