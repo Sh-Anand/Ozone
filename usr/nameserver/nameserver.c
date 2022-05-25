@@ -278,19 +278,39 @@ int main(int argc, char *argv[])
 {
     errval_t err;
 
-    err = aos_chan_lmp_init_local(&init_listener, 32);
+    struct capref init_listener_ep = {
+        .cnode = cnode_task,
+        .slot = TASKCN_SLOTS_FREE
+    };
+
+    if (capref_is_null(init_listener_ep)) {
+        DEBUG_PRINTF("init does not provide listener ep\n");
+        exit(EXIT_FAILURE);
+    }
+
+    err = aos_chan_lmp_accept(&init_listener, 32, init_listener_ep);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to init init_listener\n");
         exit(EXIT_FAILURE);
     }
 
-    err = aos_rpc_call(get_init_rpc(), RPC_REGISTER_AS_NAMESERVER, init_listener.lc.local_cap, NULL, 0, &init_listener.lc.remote_cap, NULL, 0);
+    err = aos_chan_send(&init_listener, 0, init_listener.lc.local_cap, NULL, 0, false);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to register as the nameserver\n");
         exit(EXIT_FAILURE);
     }
-    assert(!capref_is_null(init_listener.lc.remote_cap));
-    init_listener.lc.connstate = LMP_CONNECTED;
+
+    struct lmp_recv_msg ack_msg = LMP_RECV_MSG_INIT;
+    err = lmp_try_recv(&init_listener.lc, &ack_msg, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to receive ack from init\n");
+        exit(EXIT_FAILURE);
+    }
+    if (*((rpc_identifier_t*) ack_msg.words) != RPC_ACK) {
+        err = *((errval_t *) (((uint8_t *) ack_msg.words) + sizeof(rpc_identifier_t)));
+        DEBUG_ERR(err, "nack from init\n");
+        exit(EXIT_FAILURE);
+    }
 
     err = lmp_chan_alloc_recv_slot(&init_listener.lc);
     if (err_is_fail(err)) {
