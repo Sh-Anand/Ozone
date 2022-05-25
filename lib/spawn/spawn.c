@@ -316,8 +316,7 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
     };
     err = cap_copy(child_argspace_slot, argpage);
     if (err_is_fail(err)) {
-        // XXX: no corresponding err or doing the wrong thing?
-        return err_push(err, SPAWN_ERR_COPY_ARGCN);
+        return err_push(err, LIB_ERR_CAP_COPY);
     }
 
     return SYS_ERR_OK;
@@ -422,6 +421,17 @@ static errval_t setup_cspace(struct spawninfo *si)
         return err_push(err, SPAWN_ERR_CREATE_PAGECN);
     }
 
+    if (!capref_is_null(si->cap_to_transfer)) {
+        struct capref child_user_cap_slot = {
+            .cnode = si->taskcn,
+            .slot = TASKCN_SLOTS_FREE,
+        };
+        err = cap_copy(child_user_cap_slot, si->cap_to_transfer);
+        if (err_is_fail(err)) {
+            return err_push(err, LIB_ERR_CAP_COPY);
+        }
+    }
+
     return SYS_ERR_OK;
 }
 
@@ -522,7 +532,7 @@ static errval_t setup_elf(struct spawninfo *si)
  * \return Either SYS_ERR_OK if no error occured or an error
  * indicating what went wrong otherwise.
  */
-errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_t *pid)
+errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
 {
     // - Get the module from the multiboot image
     //   and map it (take a look at multiboot.c)
@@ -535,6 +545,8 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
 
     assert(si != NULL);
     assert(pid != NULL);
+
+    si->cap_to_transfer = cap_to_transfer;
 
     si->binary_name = argv[0];
     // Temporary, will be set to persisting string in setup_dispatcher
@@ -611,6 +623,9 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
     return SYS_ERR_OK;
 }
 
+errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_t *pid) {
+    return spawn_load_argv_with_cap(argc, argv, NULL_CAP, si, pid);
+}
 
 /**
  * \brief Spawn a new dispatcher executing 'binary_name'
@@ -624,7 +639,7 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
  * \return Either SYS_ERR_OK if no error occured or an error
  * indicating what went wrong otherwise.
  */
-errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid)
+errval_t spawn_load_by_name_with_cap(char *binary_name, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
 {
     struct mem_region *module = multiboot_find_module(bi, binary_name);
     if (module == NULL) {
@@ -637,20 +652,28 @@ errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t 
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
 
-    return spawn_load_cmdline(opts, si, pid);
+    return spawn_load_cmdline_with_cap(opts, cap_to_transfer, si, pid);
 }
 
-errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid)
+errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid) {
+    return spawn_load_by_name_with_cap(binary_name, NULL_CAP, si, pid);
+}
+
+errval_t spawn_load_cmdline_with_cap(const char *cmdline, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
 {
     int argc = 0;
     char *buf;
     char **argv = make_argv(cmdline, &argc, &buf);
 
-    errval_t err = spawn_load_argv(argc, argv, si, pid);
+    errval_t err = spawn_load_argv_with_cap(argc, argv, cap_to_transfer, si, pid);
     // Fall through on either success or failure
     free(argv);
     free(buf);
     return err;
+}
+
+errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid) {
+    return spawn_load_cmdline_with_cap(cmdline, NULL_CAP, si, pid);
 }
 
 void spawn_init(void (*handler)(void *)) {

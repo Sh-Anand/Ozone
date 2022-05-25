@@ -522,17 +522,6 @@ RPC_HANDLER(remote_cap_transfer_handler)
 
 RPC_HANDLER(register_nameserver_hander)
 {
-    struct proc_node *proc = arg;
-    DEBUG_PRINTF("nameserver registers as %u\n", proc->pid);
-
-    errval_t err;
-    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_UNKNOWN);
-    err = aos_chan_lmp_accept(&nameserver_rpc.chan, 32, in_cap);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
-    }
-
-    *out_cap = nameserver_rpc.chan.lc.local_cap;
     return SYS_ERR_OK;
 }
 
@@ -567,9 +556,16 @@ RPC_HANDLER(bind_nameserver_handler)
     // DEBUG_PRINTF("> process %u tries to bind nameserver\n", proc->pid);
 
     if (disp_get_core_id() == 0) {
+
+        if (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
+            DEBUG_PRINTF("nameserver not online yet\n");
+            return SYS_ERR_LMP_TARGET_DISABLED;  // XXX: return a better retry flag
+        }
+
         assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
         // Never block, ask the client to retry if needed
-        err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &proc->pid, sizeof(domainid_t), true);
+        err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &proc->pid,
+                            sizeof(domainid_t), true);
         if (err_is_fail(err)) {
             cap_destroy(frame);
             return err;  // expose transient error to the user
@@ -582,8 +578,9 @@ RPC_HANDLER(bind_nameserver_handler)
             return err_push(err, LIB_ERR_CAP_IDENTIFY);
         }
         // FIXME: deadlock if both side make the call at the same time
-        err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP,
-                           &msg, sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
+        err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP, &msg,
+                           sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
+        // TODO: delete urpc frame
     }
 
     // DEBUG_PRINTF(">> process %u tries to bind nameserver\n", proc->pid);

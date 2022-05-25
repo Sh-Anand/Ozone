@@ -44,6 +44,8 @@ struct spawninfo {
     struct capref dispatcher_cap_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
 
+    struct capref cap_to_transfer;
+
     struct proc_node *proc;
     struct aos_chan *chan;  // should be AOS_CHAN_TYPE_LMP
     struct lmp_chan *lc;    // &chan.lc, helper when added when doing the refactor
@@ -69,10 +71,16 @@ errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count);
 // Start a child process using the multiboot command line. Fills in si.
 errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid);
 
+errval_t spawn_load_by_name_with_cap(char *binary_name, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid);
+
 // Start a child process using the input command line. Fills in si.
 errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid);
 
+errval_t spawn_load_cmdline_with_cap(const char *cmdline, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid);
+
 // Start a child with an explicit command line. Fills in si.
 errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_t *pid);
+
+errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid);
 
 #endif /* _INIT_SPAWN_H_ */
