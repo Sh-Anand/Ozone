@@ -732,6 +732,17 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 }
 
 
+errval_t aos_rpc_serial_aquire(struct aos_rpc *rpc)
+{
+	return aos_rpc_call(rpc, RPC_TERMINAL_AQUIRE, NULL_CAP, NULL, 0, NULL, NULL, NULL);
+}
+
+errval_t aos_rpc_serial_release(struct aos_rpc *rpc)
+{
+	return aos_rpc_call(rpc, RPC_TERMINAL_RELEASE, NULL_CAP, NULL, 0, NULL, NULL, NULL);
+}
+
+
 errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 {
     errval_t err;
