@@ -341,7 +341,15 @@ static void server_ump_handler(void *arg)
     void *reply_payload = NULL;
     size_t reply_size = 0;
     struct capref reply_cap = NULL_CAP;
-    chan->recv_handler(chan->st, recv_buf, recv_size, &reply_payload, &reply_size, recv_cap, &reply_cap);
+
+    // XXX: trick to pass PID to the handler over the end of recv_buf
+    void *new_recv_buf = malloc(recv_size + sizeof(domainid_t));
+    memcpy(new_recv_buf, recv_buf, recv_size);
+    CAST_DEREF(domainid_t, new_recv_buf, recv_size) = chan->pid;
+
+    chan->recv_handler(chan->st, new_recv_buf, recv_size, &reply_payload, &reply_size, recv_cap, &reply_cap);
+
+    free(new_recv_buf);
 
     err = aos_chan_ack(&chan->chan, reply_cap, reply_payload, reply_size);
     if (err_is_fail(err)) {

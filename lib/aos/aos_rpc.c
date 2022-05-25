@@ -26,10 +26,6 @@ STATIC_ASSERT(LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE
                   <= (1 << (sizeof(lmp_single_msg_size_t) * 8)),
               "lmp_single_msg_size_t too small");
 
-#define OFFSET(ptr, offset_in_byte) ((uint8_t *)(ptr) + (offset_in_byte))
-
-#define CAST_DEREF(type, ptr, offset_in_byte) (*((type *)OFFSET(ptr, offset_in_byte)))
-
 errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const void *buf,
                        size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
                        struct capref *ret_cap, struct lmp_helper *helper)

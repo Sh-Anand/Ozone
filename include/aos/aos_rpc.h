@@ -83,6 +83,10 @@ struct lmp_helper {
     void *mapped_frame;
 };
 
+#define OFFSET(ptr, offset_in_byte) ((uint8_t *)(ptr) + (offset_in_byte))
+
+#define CAST_DEREF(type, ptr, offset_in_byte) (*((type *)OFFSET(ptr, offset_in_byte)))
+
 errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap, bool no_blocking);
 
 errval_t lmp_try_recv(struct lmp_chan *lc, struct lmp_recv_msg *recv_msg,
