@@ -316,16 +316,71 @@ static errval_t boot_core(coreid_t core)
     return SYS_ERR_OK;
 }
 
+static void lmp_one_time_binding_handler(void *arg)
+{
+    errval_t err;
+    struct aos_chan *chan = arg;
+    assert(chan->type == AOS_CHAN_TYPE_LMP);
+    struct lmp_chan *lc = &chan->lc;
+
+    // Receive the message and cap, refill the recv slot, deserialize
+    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type, recv_buf,
+                                recv_size, helper, DONE, FAILURE)
+
+    // If the channel is not setup yet, set it up
+    if (lc->connstate == LMP_BIND_WAIT) {
+        LMP_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
+
+        // Ack
+        err = aos_chan_ack(chan, NULL_CAP, NULL, 0);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "rpc_lmp_handler (binding): aos_chan_ack failed\n");
+            goto FAILURE;
+        }
+
+        assert(lc->connstate == LMP_CONNECTED);
+        DEBUG_PRINTF("nameserver registered\n");
+        goto DONE;
+    }
+
+    // Deserialization cleanup
+    LMP_CLEANUP(err, helper)
+
+FAILURE:
+DONE:
+    // Do not re-register
+    return;
+}
+
 static errval_t start_nameserver(void) {
     errval_t err;
+
+    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_UNKNOWN);
+    err = aos_chan_lmp_init_local(&nameserver_rpc.chan, 32);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_CHAN_INIT_LOCAL);
+    }
+    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
+
+    err = lmp_chan_alloc_recv_slot(&nameserver_rpc.chan.lc);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    assert(nameserver_rpc.chan.lc.connstate == LMP_BIND_WAIT);
+    err = lmp_chan_register_recv(&nameserver_rpc.chan.lc, get_default_waitset(), MKCLOSURE(lmp_one_time_binding_handler, &nameserver_rpc.chan));
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
+    }
+
     struct spawninfo si;
     domainid_t pid;
-    err = spawn_load_by_name("nameserver", &si, &pid);
+    assert(!capref_is_null(nameserver_rpc.chan.lc.local_cap));
+    err = spawn_load_by_name_with_cap("nameserver", nameserver_rpc.chan.lc.local_cap, &si, &pid);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_LOAD);
     }
 
-    aos_rpc_init(&nameserver_rpc);
     return SYS_ERR_OK;
 }
 
