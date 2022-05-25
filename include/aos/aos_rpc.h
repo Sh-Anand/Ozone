@@ -45,8 +45,6 @@ enum rpc_identifier {
     RPC_PROCESS_SPAWN,
     RPC_PROCESS_GET_NAME,
     RPC_PROCESS_GET_ALL_PIDS,
-	RPC_TERMINAL_AQUIRE,
-	RPC_TERMINAL_RELEASE,
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
 	RPC_TERMINAL_GETS,
@@ -239,9 +237,6 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string);
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t bytes, size_t alignment,
                              struct capref *retcap, size_t *ret_bytes);
 
-
-errval_t aos_rpc_serial_aquire(struct aos_rpc *chan);
-errval_t aos_rpc_serial_release(struct aos_rpc *chan);
 
 /**
  * \brief Get one character from the serial port

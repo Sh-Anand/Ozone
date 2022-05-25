@@ -41,8 +41,6 @@ struct spawninfo {
     void *got_addr;
     genvaddr_t pc;
 
-	bool attach_terminal; 
-	struct capref stdin_source;
     struct capref dispatcher_cap_in_parent;
     dispatcher_handle_t local_dispatcher_handle;
 

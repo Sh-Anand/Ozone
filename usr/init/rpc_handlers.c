@@ -17,8 +17,6 @@ extern size_t (*local_terminal_write_function)(const char*, size_t);
 extern size_t (*local_terminal_read_function)(char*, size_t);
 
 extern spinlock_t* global_print_lock;
-//spinlock_t* terminal_read_lock;
-volatile domainid_t terminal_read_recipient;
 
 #define DEBUG_RPC_HANDLERS 1
 
@@ -372,55 +370,20 @@ RPC_HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
-RPC_HANDLER(terminal_aquire_handler)
-{
-	ASSERT_ZERO_IN_SIZE;
-    if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (terminal_read_recipient == 0) {
-			terminal_read_recipient = caller->pid;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
-	} else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-	}
-}
-
-RPC_HANDLER(terminal_release_handler)
-{
-	ASSERT_ZERO_IN_SIZE;
-    if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (terminal_read_recipient == caller->pid) {
-			terminal_read_recipient = 0;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
-	} else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-	}
-}
-
 RPC_HANDLER(terminal_getchar_handler)
 {
     ASSERT_ZERO_IN_SIZE;
     if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (caller->pid == terminal_read_recipient) {
-			char c;
-			grading_rpc_handler_serial_getchar();
-			c = terminal_getchar();
-			MALLOC_OUT_MSG(reply, char);
-			*reply = c;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
+        char c;
+        grading_rpc_handler_serial_getchar();
+        c = terminal_getchar();
+        MALLOC_OUT_MSG(reply, char);
+        *reply = c;
+        return SYS_ERR_OK;
     } else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+        forward_to_core(0, in_payload, in_size, out_payload, out_size);
+
+        return SYS_ERR_OK;
     }
 }
 
@@ -785,8 +748,6 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_PROCESS_SPAWN] = spawn_msg_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
-	[RPC_TERMINAL_AQUIRE] = terminal_aquire_handler,
-	[RPC_TERMINAL_RELEASE] = terminal_release_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
 	[RPC_TERMINAL_GETS] = terminal_gets_handler,

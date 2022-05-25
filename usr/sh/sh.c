@@ -108,6 +108,13 @@ int main(int argc, char **argv)
 {
 	puts("AOS Team 1 shell starting...\n");
 	
+	nameservice_chan_t terminal_channel;
+	nameservice_lookup("terminal_server", &terminal_channel);
+	
+	void* res;
+	size_t rlen;
+	nameservice_rpc(terminal_channel, "A", 1, &res, &rlen, NULL_CAP, NULL_CAP);
+	
 	setup_environment();
 	
 	while (env.active) {
