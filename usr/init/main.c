@@ -52,7 +52,6 @@ struct aos_rpc nameserver_rpc;
 struct capref dev_cap_sdhc2;
 struct capref dev_cap_enet;
 
-extern struct aos_rpc *terminal_server_channel;
 
 spinlock_t* global_print_lock;
 
@@ -330,19 +329,6 @@ static errval_t start_nameserver(void) {
     return SYS_ERR_OK;
 }
 
-static errval_t start_terminal_server(void)
-{
-    errval_t err;
-    struct spawninfo si;
-    domainid_t pid;
-    err = spawn_load_by_name("terminal", &si, &pid);
-    if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_LOAD);
-    }
-	
-    return SYS_ERR_OK;
-}
-
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -408,14 +394,6 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "failed to start nameserver");
         exit(EXIT_FAILURE);
     }
-			
-	err = start_terminal_server();
-	if (err_is_fail(err)) {
-		DEBUG_ERR(err, "failed to start terminal server");
-		exit(EXIT_FAILURE);
-	}
-	
-	DEBUG_PRINTF("Messages Sent to terminal server!\n");
 
     // Grading
     grading_test_late();

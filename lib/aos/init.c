@@ -52,6 +52,10 @@ void libc_exit(int);
 __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
+	// release the terminal
+	errval_t err = aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	DEBUG_ERR(err, "terminal release");
+	
     debug_printf("libc exit NYI!\n");
     thread_exit(status);
     // If we're not dead by now, we wait
@@ -174,6 +178,13 @@ void barrelfish_libc_glue_init(void)
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
+	
+	proc
+	
+	if (!init_domain) {
+		errval_t err = aos_rpc_serial_aquire(aos_rpc_get_serial_channel());
+		DEBUG_ERR(err, "terminal aquire");
+	}
 
     // XXX: set a static buffer for stdout
     // this avoids an implicit call to malloc() on the first printf
