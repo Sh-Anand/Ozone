@@ -179,8 +179,6 @@ void barrelfish_libc_glue_init(void)
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
 	
-	proc
-	
 	if (!init_domain) {
 		errval_t err = aos_rpc_serial_aquire(aos_rpc_get_serial_channel());
 		DEBUG_ERR(err, "terminal aquire");
