@@ -502,7 +502,6 @@ RPC_HANDLER(terminal_release_handler)
 
 RPC_HANDLER(terminal_has_stdin_handler)
 {
-	DEBUG_PRINTF("enter terminal_has_stdin_handler\n");
 	if (disp_get_core_id() == 0) {
 		CAST_IN_MSG_AT_LEAST_SIZE(st, void*);
 		

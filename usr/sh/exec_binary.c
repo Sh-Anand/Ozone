@@ -16,7 +16,8 @@ void exec_binary(struct shell_env *env)
 	//err = spawn_load_argv(env->argc, env->argv, &si, &pid);
 	
 	if (err_is_fail(err)) {
-		printf("Error: could not spawn process: %s\n", err_getstring(err));
+		printf("Error: could not spawn process: %s: %s\n", err_getcode(err), err_getstring(err));
+		aos_rpc_serial_release_terminal_state(aos_rpc_get_serial_channel(), child_terminal_state);
 		return;
 	}
 	
@@ -24,7 +25,7 @@ void exec_binary(struct shell_env *env)
 	
 	bool can_access_stdin = false;
 	do {
-		event_dispatch(get_default_waitset());
+		thread_yield();
 		err = aos_rpc_serial_has_stdin(aos_rpc_get_serial_channel(), &can_access_stdin);
 	} while (!can_access_stdin);
 	

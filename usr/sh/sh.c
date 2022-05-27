@@ -106,7 +106,7 @@ static void shell_print_prefix(void)
 
 int main(int argc, char **argv)
 {
-	puts("AOS Team 1 shell starting...\n");
+	puts("AOS Team 1 shell starting...");
 	
 	setup_environment();
 	

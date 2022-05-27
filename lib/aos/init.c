@@ -56,7 +56,7 @@ void libc_exit(int status)
 {
     debug_printf("libc exit NYI!\n");
 	
-	aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	aos_rpc_serial_release_terminal_state(aos_rpc_get_serial_channel(), terminal_state);
 	
     thread_exit(status);
     // If we're not dead by now, we wait
@@ -92,7 +92,6 @@ __attribute__((__used__)) static size_t syscall_terminal_write(const char *buf, 
 
 __attribute__((__used__)) static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    //sys_print("aos_terminal_write called\n", 27);
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
 	//assert (serial_rpc);
@@ -139,18 +138,22 @@ __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 	char c;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
 	
+	
+	
 	assert(serial_rpc);
 	
 	// wait for access to stdin
 	bool can_access_stdin = false;
 	do {
 		err = aos_rpc_serial_has_stdin(serial_rpc, &can_access_stdin);
-		if (!can_access_stdin) printf("Cannot access stdin\n");
-		if (!can_access_stdin) event_dispatch(get_default_waitset());
+		if (!can_access_stdin) thread_yield();
 	} while (!can_access_stdin);
 	
 	for (; read < len;) {
-		err = aos_rpc_serial_getchar(serial_rpc, &c);
+		do {
+			err = aos_rpc_serial_getchar(serial_rpc, &c);
+			if (err == TERM_ERR_RECV_CHARS) thread_yield();
+		} while (err == TERM_ERR_RECV_CHARS);
 		
 		if (err_is_fail(err)) {
 			// cannot receive so exit
@@ -159,6 +162,8 @@ __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 		
 		buf[read++] = c;
 	}
+	
+	buf[read] = 0;
 	
     return read;
 }
@@ -310,6 +315,8 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 		} else {
 			aos_rpc_serial_aquire(aos_rpc_get_serial_channel(), false);
 		}
+		
+		DEBUG_PRINTF("Received terminal state: %p\n", terminal_state);
 		
     }
 	

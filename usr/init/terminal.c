@@ -162,7 +162,6 @@ void terminal_putchar(char c)
 
 bool terminal_can_use_stdin(void* stptr)
 {
-	DEBUG_PRINTF("Checking stdin access for %p\n", stptr);
 	if (stptr == NULL) return ERR_INVALID_ARGS;
 	// check that stdin is available
 	struct terminal_state *st = stptr;
@@ -229,9 +228,13 @@ void* terminal_aquire(bool use_stdin)
 	
 	// add state to to the stack
 	if (use_stdin) {
+		if (stdin_stack) stdin_stack->prev = st;
+		st->prev = NULL;
 		st->next = stdin_stack;
 		stdin_stack = st;
 	} else {
+		if (non_stdin_stack) non_stdin_stack->prev = st;
+		st->prev = NULL;
 		st->next = non_stdin_stack;
 		non_stdin_stack = st;
 	}

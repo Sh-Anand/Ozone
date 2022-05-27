@@ -746,6 +746,7 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
         assert(ret_size >= sizeof(char));
         *retc = *ret_char;
     }
+	
     free(ret_char);
     return err;
 }
@@ -758,6 +759,7 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
     // sys_print("aos_rpc_serial_putchar called!\n", 32);
     errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_PUTCHAR, NULL_CAP, &c, sizeof(char),
                                 NULL, NULL, NULL);
+	
 
     return err;
 }
@@ -798,32 +800,33 @@ errval_t aos_rpc_serial_aquire(struct aos_rpc *rpc, uint8_t use_stdin)
 errval_t aos_rpc_serial_aquire_new_state(struct aos_rpc *rpc, void** st, uint8_t attach_stdin)
 {
 	size_t rlen = 0;
-	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_AQUIRE, NULL_CAP, &attach_stdin, sizeof(uint8_t), NULL, st, &rlen);
+	void* st_ret;
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_AQUIRE, NULL_CAP, &attach_stdin, sizeof(uint8_t), NULL, &st_ret, &rlen);
 	
-	DEBUG_PRINTF("Received Terminal State: %p\n", *st);
+	*st = *(void**)st_ret;
 	
 	return err;
 }
 
 errval_t aos_rpc_serial_release(struct aos_rpc *rpc)
 {
-	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_RELEASE, NULL_CAP, &terminal_state, sizeof(void*), NULL, NULL, NULL);
-	
-	if (err_is_ok(err)) terminal_state = NULL;
-	
-	DEBUG_PRINTF("Freed terminal state\n");
+	errval_t err = aos_rpc_serial_release_terminal_state(rpc, terminal_state);
+	terminal_state = NULL;
+	return err;
+}
+
+errval_t aos_rpc_serial_release_terminal_state(struct aos_rpc *rpc, void* st)
+{
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_RELEASE, NULL_CAP, &st, sizeof(void*), NULL, NULL, NULL);
 	
 	return err;
 }
 
 errval_t aos_rpc_serial_has_stdin(struct aos_rpc *rpc, bool *can_access_stdin)
 {
-	DEBUG_PRINTF("enter aos_rpc_serial_has_stdin\n");
 	bool* can_access;
 	size_t rlen;
 	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_HAS_STDIN, NULL_CAP, &terminal_state, sizeof(void*), NULL, (void**)&can_access, &rlen);
-	
-	DEBUG_PRINTF("Call done: err: %d, result: %d\n", err, *can_access);
 	
 	if (rlen >= sizeof(bool)) *can_access_stdin = *can_access;
 	

@@ -275,6 +275,7 @@ errval_t aos_rpc_serial_aquire_new_state(struct aos_rpc *chan, void** st, uint8_
  * @brief release terminal session
  */
 errval_t aos_rpc_serial_release(struct aos_rpc *chan);
+errval_t aos_rpc_serial_release_terminal_state(struct aos_rpc *chan, void* st);
 
 /**
  * @brief check if has access to stdin
