@@ -44,6 +44,8 @@ extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 extern void (*_libc_exit_func)(int);
 extern void (*_libc_assert_func)(const char *, const char *, const char *, int);
 
+extern void* terminal_state;
+
 size_t (*local_terminal_write_function)(const char*, size_t) = NULL;
 size_t (*local_terminal_read_function)(char*, size_t) = NULL;
 
@@ -53,6 +55,9 @@ __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
     debug_printf("libc exit NYI!\n");
+	
+	aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {
@@ -135,6 +140,14 @@ __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
 	
 	assert(serial_rpc);
+	
+	// wait for access to stdin
+	bool can_access_stdin = false;
+	do {
+		err = aos_rpc_serial_has_stdin(serial_rpc, &can_access_stdin);
+		if (!can_access_stdin) printf("Cannot access stdin\n");
+		if (!can_access_stdin) event_dispatch(get_default_waitset());
+	} while (!can_access_stdin);
 	
 	for (; read < len;) {
 		err = aos_rpc_serial_getchar(serial_rpc, &c);
@@ -291,8 +304,15 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         set_init_rpc(init_rpc);
 
         ram_alloc_set(NULL);  // use RAM allocation over RPC
+		
+		if (params->terminal_state) {
+			terminal_state = params->terminal_state;
+		} else {
+			aos_rpc_serial_aquire(aos_rpc_get_serial_channel(), false);
+		}
+		
     }
-
+	
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
     return SYS_ERR_OK;

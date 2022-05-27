@@ -43,8 +43,12 @@ enum rpc_identifier {
     RPC_STR,
     RPC_RAM_REQUEST,
     RPC_PROCESS_SPAWN,
+	RPC_PROCESS_SPAWN_WITH_STDIN,
     RPC_PROCESS_GET_NAME,
     RPC_PROCESS_GET_ALL_PIDS,
+	RPC_TERMINAL_AQUIRE,
+	RPC_TERMINAL_RELEASE,
+	RPC_TERMINAL_HAS_STDIN,
     RPC_TERMINAL_GETCHAR,
     RPC_TERMINAL_PUTCHAR,
 	RPC_TERMINAL_GETS,
@@ -61,6 +65,7 @@ enum rpc_identifier {
 };
 STATIC_ASSERT(RPC_SPECIAL_CAP_TRANSFER_FLAG == 0x80, "RPC_SPECIAL_CAP_TRANSFER_FLAG");
 
+
 struct aos_rpc_msg_ram {
     size_t size;
     size_t alignment;
@@ -73,6 +78,7 @@ struct aos_rpc {
 
 struct rpc_process_spawn_call_msg {
     coreid_t core;
+	void* terminal_state;
     char cmdline[0];
 } __attribute__((packed));
 
@@ -260,6 +266,22 @@ errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, s
 errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t *retlen);
 
 /**
+ * @brief aquire terminal session
+ */
+errval_t aos_rpc_serial_aquire(struct aos_rpc *chan, uint8_t use_stdin);
+errval_t aos_rpc_serial_aquire_new_state(struct aos_rpc *chan, void** st, uint8_t attach_stdin);
+
+/**
+ * @brief release terminal session
+ */
+errval_t aos_rpc_serial_release(struct aos_rpc *chan);
+
+/**
+ * @brief check if has access to stdin
+ */
+errval_t aos_rpc_serial_has_stdin(struct aos_rpc *chan, bool *can_access_stdin);
+
+/**
  * \brief Request that the process manager start a new process
  * \arg cmdline the name of the process that needs to be spawned (without a
  *           path prefix) and optionally any arguments to pass to it
@@ -268,6 +290,7 @@ errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t 
 errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *cmdline, coreid_t core,
                                domainid_t *newpid);
 
+errval_t aos_rpc_process_spawn_with_terminal_state(struct aos_rpc *rpc, char *cmdline, void* st, coreid_t core, domainid_t *newpid);
 
 /**
  * \brief Get name of process with the given PID.

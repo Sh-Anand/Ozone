@@ -10,13 +10,24 @@
 
 #include <grading.h>
 
+struct terminal_state {
+	uint32_t magic_word; // serves as a sanity check, to prevent memory corruption
+	struct terminal_state *next;
+	struct terminal_state *prev;
+	// TODO: implement structures for redirecting output
+	
+	struct {
+		uint8_t use_stdin : 1;
+	} flags;
+} __attribute__((packed));
+
 
 extern spinlock_t* global_print_lock;
 extern struct capref dev_cap_uart3;
 extern struct capref dev_cap_gic;
 
 extern size_t (*local_terminal_write_function)(const char*, size_t);
-extern size_t (*local_terminal_read_function)(char*, size_t);
+extern size_t (*local_terminal_read_function)(void* st, char*, size_t);
 
 struct capref int_cap_uart3;
 
@@ -31,6 +42,10 @@ static bool gic_avail;
 
 const char* str = "UART3 is working!";
 
+// datastructure for multiplexing resources
+struct terminal_state *stdin_stack;
+struct terminal_state *non_stdin_stack;
+
 
 // ringbuffer for input buffering
 static char char_buffer[4096];
@@ -38,8 +53,20 @@ static uint16_t buffer_head = 0;
 static uint16_t buffer_tail = 0;
 static uint16_t buffer_size = 0;
 
-size_t local_read_function(char* buf, size_t len);
+size_t local_read_function(void *st, char* buf, size_t len);
 size_t local_write_function(const char* buf, size_t len);
+
+
+
+static void stack_remove(struct terminal_state **stack, struct terminal_state *st)
+{
+	if (st == NULL) return;
+	
+	if (st->next) st->next->prev = st->prev;
+	if (st->prev) st->prev->next = st->next;
+	else *stack = st->next;
+}
+
 
 static void uart3_int_handler(void* arg)
 {
@@ -132,23 +159,45 @@ void terminal_putchar(char c)
 	}
 }
 
-char terminal_getchar(void)
+
+bool terminal_can_use_stdin(void* stptr)
 {
-	// wait for the buffer to contain some characters, giving the cpu time to do other stuff
-	while (buffer_size == 0) event_dispatch(get_default_waitset());
+	DEBUG_PRINTF("Checking stdin access for %p\n", stptr);
+	if (stptr == NULL) return ERR_INVALID_ARGS;
+	// check that stdin is available
+	struct terminal_state *st = stptr;
+	if (st->magic_word != 0xDEADBEEF) return ERR_INVALID_ARGS;
 	
-	char c = char_buffer[buffer_tail++];
+	return stdin_stack == st;
+}
+
+errval_t terminal_getchar(void* stptr, char* c)
+{
+	if (stptr == NULL) return ERR_INVALID_ARGS;
+	// check that stdin is available
+	struct terminal_state *st = stptr;
+	if (st->magic_word != 0xDEADBEEF) return ERR_INVALID_ARGS;
+	if (stdin_stack != st) return TERM_ERR_TERMINAL_IN_USE;
+	
+	// return error if no characters are available
+	if (buffer_size == 0) return TERM_ERR_RECV_CHARS;
+	
+	*c = char_buffer[buffer_tail++];
 	buffer_tail %= sizeof(char_buffer);
 	buffer_size--;
 	
-	return c;
+	return SYS_ERR_OK;
 }
 
-size_t local_read_function(char* buf, size_t len)
+size_t local_read_function(void* stptr, char* buf, size_t len)
 {
+	if (stptr == NULL) return 0;
+	errval_t err;
 	for (size_t i = 0; i < len; i++) {
 		grading_rpc_handler_serial_getchar();
-		buf[i] = terminal_getchar();
+		err = terminal_getchar(stptr, buf + i);
+		if (err == TERM_ERR_TERMINAL_IN_USE) return i;
+		if (err == TERM_ERR_RECV_CHARS) return i;
 	}
 	return len;
 }
@@ -165,15 +214,42 @@ size_t local_write_function(const char* buf, size_t len)
 	return len;
 }
 
-/**
- * @brief Temporary main function for the terminal. configures the uart and setup necessary capabilities
- * 
- * @param argc 
- * @param argv 
- * @return int 
- */
-int terminal_main(int argc, char** argv) __attribute__((unused));
-int terminal_main(int argc, char** argv)
+
+void* terminal_aquire(bool use_stdin)
 {
-	return 0;
+	// create new terminal state
+	struct terminal_state *st = (struct terminal_state*)malloc(sizeof(struct terminal_state));
+	
+	st->magic_word = 0xDEADBEEF; // write known value here
+	
+	// set flags
+	st->flags.use_stdin = use_stdin;
+	
+	DEBUG_PRINTF("Aquiring terminal session %p, %d\n", st, use_stdin);
+	
+	// add state to to the stack
+	if (use_stdin) {
+		st->next = stdin_stack;
+		stdin_stack = st;
+	} else {
+		st->next = non_stdin_stack;
+		non_stdin_stack = st;
+	}
+	
+	return st;
+}
+
+void terminal_release(void* ptr)
+{
+	if (ptr == NULL) return;
+	struct terminal_state *st = ptr;
+	if (st->magic_word != 0xDEADBEEF) return;
+	
+	if (st->flags.use_stdin) {
+		// remove from strin stack
+		stack_remove(&stdin_stack, st);
+	} else {
+		// remove from non stdin stack
+		stack_remove(&non_stdin_stack, st);
+	}
 }

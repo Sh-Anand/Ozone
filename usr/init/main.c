@@ -385,19 +385,6 @@ static errval_t start_nameserver(void) {
     return SYS_ERR_OK;
 }
 
-static errval_t start_terminal_server(void)
-{
-    errval_t err;
-    struct spawninfo si;
-    domainid_t pid;
-    err = spawn_load_by_name("terminal", &si, &pid);
-    if (err_is_fail(err)) {
-        return err_push(err, SPAWN_ERR_LOAD);
-    }
-	
-    return SYS_ERR_OK;
-}
-
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -463,12 +450,6 @@ static int bsp_main(int argc, char *argv[])
         DEBUG_ERR(err, "failed to start nameserver");
         exit(EXIT_FAILURE);
     }
-			
-	err = start_terminal_server();
-	if (err_is_fail(err)) {
-		DEBUG_ERR(err, "failed to start terminal server");
-		exit(EXIT_FAILURE);
-	}
 	
 	DEBUG_PRINTF("Messages Sent to terminal server!\n");
 
@@ -479,7 +460,8 @@ static int bsp_main(int argc, char *argv[])
 	
 	struct spawninfo shell_si;
 	domainid_t shell_pid;
-	err = spawn_load_by_name("sh", &shell_si, &shell_pid);
+	void *sh_terminal_state = terminal_aquire(true);
+	err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;
