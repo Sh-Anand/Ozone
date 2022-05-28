@@ -135,7 +135,7 @@ __srefill(FILE *fp)
 	fp->_flags &= ~__SMOD;	/* buffer contents are again pristine */
 	if (fp->_r <= 0) {
 		if (fp->_r == 0)
-			fp->_flags |= __SEOF;
+			if (fp->_file != __stdinp->_file) fp->_flags |= __SEOF; // FIXME: why is this necessary?
 		else {
 			fp->_r = 0;
 			fp->_flags |= __SERR;

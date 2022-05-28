@@ -16,6 +16,9 @@
 #include <aos/aos_rpc.h>
 #include <aos/capabilities.h>
 
+// terminal state for multiplexing terminal resource
+void* terminal_state = NULL;
+
 typedef uint8_t lmp_single_msg_size_t;
 
 #define LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE                                                  \
@@ -732,28 +735,18 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 }
 
 
-errval_t aos_rpc_serial_aquire(struct aos_rpc *rpc)
-{
-	return aos_rpc_call(rpc, RPC_TERMINAL_AQUIRE, NULL_CAP, NULL, 0, NULL, NULL, NULL);
-}
-
-errval_t aos_rpc_serial_release(struct aos_rpc *rpc)
-{
-	return aos_rpc_call(rpc, RPC_TERMINAL_RELEASE, NULL_CAP, NULL, 0, NULL, NULL, NULL);
-}
-
-
 errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 {
     errval_t err;
     char *ret_char = NULL;
     size_t ret_size = 0;
-    err = aos_rpc_call(rpc, RPC_TERMINAL_GETCHAR, NULL_CAP, NULL, 0, NULL,
+    err = aos_rpc_call(rpc, RPC_TERMINAL_GETCHAR, NULL_CAP, &terminal_state, sizeof(void*), NULL,
                        (void **)&ret_char, &ret_size);
     if (err_is_ok(err)) {
         assert(ret_size >= sizeof(char));
         *retc = *ret_char;
     }
+	
     free(ret_char);
     return err;
 }
@@ -766,6 +759,7 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
     // sys_print("aos_rpc_serial_putchar called!\n", 32);
     errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_PUTCHAR, NULL_CAP, &c, sizeof(char),
                                 NULL, NULL, NULL);
+	
 
     return err;
 }
@@ -789,21 +783,74 @@ errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, s
 errval_t aos_rpc_serial_gets(struct aos_rpc *rpc, char *buf, size_t len, size_t *retlen)
 {
 	char* tmp_buf;
-	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_GETS, NULL_CAP, &len, sizeof(size_t), NULL, (void**)&tmp_buf, retlen);
+	char* inbuf[sizeof(void*) + sizeof(size_t)];
+	*(void**)inbuf = terminal_state;
+	*(size_t*)((void**)inbuf + 1) = len;
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_GETS, NULL_CAP, &inbuf, sizeof(void*) + sizeof(size_t), NULL, (void**)&tmp_buf, retlen);
 	memcpy(buf, tmp_buf, MIN(len, *retlen));
 	
 	return err;
 }
 
+errval_t aos_rpc_serial_aquire(struct aos_rpc *rpc, uint8_t use_stdin)
+{
+	return aos_rpc_serial_aquire_new_state(rpc, &terminal_state, use_stdin);
+}
+
+errval_t aos_rpc_serial_aquire_new_state(struct aos_rpc *rpc, void** st, uint8_t attach_stdin)
+{
+	size_t rlen = 0;
+	void* st_ret;
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_AQUIRE, NULL_CAP, &attach_stdin, sizeof(uint8_t), NULL, &st_ret, &rlen);
+	
+	*st = *(void**)st_ret;
+	
+	return err;
+}
+
+errval_t aos_rpc_serial_release(struct aos_rpc *rpc)
+{
+	errval_t err = aos_rpc_serial_release_terminal_state(rpc, terminal_state);
+	terminal_state = NULL;
+	return err;
+}
+
+errval_t aos_rpc_serial_release_terminal_state(struct aos_rpc *rpc, void* st)
+{
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_RELEASE, NULL_CAP, &st, sizeof(void*), NULL, NULL, NULL);
+	
+	return err;
+}
+
+errval_t aos_rpc_serial_has_stdin(struct aos_rpc *rpc, bool *can_access_stdin)
+{
+	bool* can_access;
+	size_t rlen;
+	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_HAS_STDIN, NULL_CAP, &terminal_state, sizeof(void*), NULL, (void**)&can_access, &rlen);
+	
+	if (rlen >= sizeof(bool)) *can_access_stdin = *can_access;
+	
+	free(can_access);
+	
+	return err;
+}
+
+
 errval_t aos_rpc_process_spawn(struct aos_rpc *rpc, char *cmdline, coreid_t core, domainid_t *newpid)
 {
-    size_t call_msg_size = sizeof(struct rpc_process_spawn_call_msg) + strlen(cmdline) + 1;
+    return aos_rpc_process_spawn_with_terminal_state(rpc, cmdline, NULL, core, newpid);
+}
+
+errval_t aos_rpc_process_spawn_with_terminal_state(struct aos_rpc *rpc, char *cmdline, void* st, coreid_t core, domainid_t *newpid)
+{
+	size_t call_msg_size = sizeof(struct rpc_process_spawn_call_msg) + strlen(cmdline) + 1;
     struct rpc_process_spawn_call_msg *call_msg = calloc(call_msg_size, 1);
     call_msg->core = core;
+	call_msg->terminal_state = st;
     strcpy(call_msg->cmdline, cmdline);
 
     domainid_t *return_pid = NULL;
-    errval_t err = aos_rpc_call(rpc, RPC_PROCESS_SPAWN, NULL_CAP, call_msg, call_msg_size,
+    errval_t err = aos_rpc_call(rpc, RPC_PROCESS_SPAWN_WITH_STDIN, NULL_CAP, call_msg, call_msg_size,
                                 NULL, (void **)&return_pid, NULL);
     if (err_is_ok(err)) {
         *newpid = *return_pid;

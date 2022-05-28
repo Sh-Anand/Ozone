@@ -275,6 +275,29 @@ RPC_HANDLER(spawn_msg_handler)
     }
 }
 
+RPC_HANDLER(spawn_msg_stdin_handler)
+{
+	CAST_IN_MSG_AT_LEAST_SIZE(msg, struct rpc_process_spawn_call_msg);
+    grading_rpc_handler_process_spawn(msg->cmdline, msg->core);
+
+    if (msg->core == disp_get_core_id()) {
+        // Spawn on the current core
+
+        struct spawninfo info;
+        domainid_t pid;
+        errval_t err = spawn_load_cmdline_complete(msg->cmdline, NULL_CAP, msg->terminal_state, &info, &pid);
+        if (err_is_fail(err)) {
+            return err;
+        }
+
+        MALLOC_OUT_MSG(reply, domainid_t);
+        *reply = pid;
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(msg->core, in_payload, in_size, out_payload, out_size);
+    }
+}
+
 RPC_HANDLER(process_get_name_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
@@ -372,53 +395,15 @@ RPC_HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
-RPC_HANDLER(terminal_aquire_handler)
-{
-	ASSERT_ZERO_IN_SIZE;
-    if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (terminal_read_recipient == 0) {
-			terminal_read_recipient = caller->pid;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
-	} else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-	}
-}
-
-RPC_HANDLER(terminal_release_handler)
-{
-	ASSERT_ZERO_IN_SIZE;
-    if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (terminal_read_recipient == caller->pid) {
-			terminal_read_recipient = 0;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
-	} else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-	}
-}
-
 RPC_HANDLER(terminal_getchar_handler)
 {
-    ASSERT_ZERO_IN_SIZE;
+    assert(in_size >= sizeof(void*));
     if (disp_get_current_core_id() == 0) {
-		struct proc_node *caller = arg;
-		if (caller->pid == terminal_read_recipient) {
-			char c;
-			grading_rpc_handler_serial_getchar();
-			c = terminal_getchar();
-			MALLOC_OUT_MSG(reply, char);
-			*reply = c;
-			return SYS_ERR_OK;
-		} else {
-			return TERM_ERR_TERMINAL_IN_USE;
-		}
+		void* st = *(void**)in_payload;
+        grading_rpc_handler_serial_getchar();
+        MALLOC_OUT_MSG(reply, char);
+        errval_t err = terminal_getchar(st, reply);
+        return err;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
@@ -442,18 +427,26 @@ RPC_HANDLER(terminal_gets_handler)
 {
 	if (disp_get_core_id() == 0) {
 		assert(in_size == sizeof(size_t));
-		CAST_IN_MSG_NO_CHECK(len, size_t);
-		char *buf = (char*)malloc(*len);
+		CAST_IN_MSG_NO_CHECK(st, void*);
+		size_t len = *(size_t*)((void**)in_payload + 1);
+		char *buf = (char*)malloc(len);
 		size_t i = 0;
-		for (; i < *len; i++) {
-			buf[i] = terminal_getchar();
+		errval_t err = SYS_ERR_OK;
+		for (; i < len; i++) {
+			err = terminal_getchar(st, buf + i);
+			if (err == TERM_ERR_TERMINAL_IN_USE) {
+				break;
+			}
+			if (err == TERM_ERR_RECV_CHARS) {
+				break;
+			}
 			//if (buf[i] == '\0' || buf[i] == 0x03 || buf[i] == 0x04 || buf[i] == 0x17) break; // terminate if EOF like characters are read
 		}
 		*out_payload = realloc(buf, i); // in case there has been less read than requested
 		if (!*out_payload) *out_payload = buf; // in case realloc failed
 		*out_size = i;
 		
-		return SYS_ERR_OK;
+		return err;
 	} else {
 		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
 	}
@@ -475,6 +468,49 @@ RPC_HANDLER(terminal_puts_handler)
 		release_spinlock(global_print_lock);
 		MALLOC_OUT_MSG_WITH_SIZE(len, size_t, sizeof(size_t));
 		*len = in_size;
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
+}
+
+RPC_HANDLER(terminal_aquire_handler)
+{
+	if (disp_get_core_id() == 0) {
+		CAST_IN_MSG_AT_LEAST_SIZE(use_stdin, uint8_t);
+		
+		void* st = terminal_aquire(*use_stdin);
+		MALLOC_OUT_MSG_WITH_SIZE(reply, void*, sizeof(void*));
+		*reply = st;
+		
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
+}
+
+RPC_HANDLER(terminal_release_handler)
+{
+	if (disp_get_core_id() == 0) {
+		CAST_IN_MSG_AT_LEAST_SIZE(st, void*);
+		
+		terminal_release(*st);
+		
+		return SYS_ERR_OK;
+	} else {
+		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+	}
+}
+
+RPC_HANDLER(terminal_has_stdin_handler)
+{
+	if (disp_get_core_id() == 0) {
+		CAST_IN_MSG_AT_LEAST_SIZE(st, void*);
+		
+		bool has_access = terminal_can_use_stdin(*st);
+		
+		MALLOC_OUT_MSG_WITH_SIZE(reply, bool, sizeof(bool));
+		*reply = has_access;
 		return SYS_ERR_OK;
 	} else {
 		return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -772,6 +808,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_STR] = str_msg_handler,
     [RPC_RAM_REQUEST] = ram_request_msg_handler,
     [RPC_PROCESS_SPAWN] = spawn_msg_handler,
+    [RPC_PROCESS_SPAWN_WITH_STDIN] = spawn_msg_stdin_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
 	[RPC_TERMINAL_AQUIRE] = terminal_aquire_handler,
@@ -780,6 +817,9 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
 	[RPC_TERMINAL_GETS] = terminal_gets_handler,
 	[RPC_TERMINAL_PUTS] = terminal_puts_handler,
+	[RPC_TERMINAL_AQUIRE] = terminal_aquire_handler,
+	[RPC_TERMINAL_RELEASE] = terminal_release_handler,
+	[RPC_TERMINAL_HAS_STDIN] = terminal_has_stdin_handler,
     [RPC_STRESS_TEST] = stress_test_handler,
     [RPC_REGISTER_AS_NAMESERVER] = register_nameserver_hander,
     [RPC_BIND_NAMESERVER] = bind_nameserver_handler,

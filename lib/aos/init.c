@@ -44,6 +44,8 @@ extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 extern void (*_libc_exit_func)(int);
 extern void (*_libc_assert_func)(const char *, const char *, const char *, int);
 
+extern void* terminal_state;
+
 size_t (*local_terminal_write_function)(const char*, size_t) = NULL;
 size_t (*local_terminal_read_function)(char*, size_t) = NULL;
 
@@ -57,6 +59,9 @@ void libc_exit(int status)
 	DEBUG_ERR(err, "terminal release");
 	
     debug_printf("libc exit NYI!\n");
+	
+	aos_rpc_serial_release_terminal_state(aos_rpc_get_serial_channel(), terminal_state);
+	
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {
@@ -91,7 +96,6 @@ __attribute__((__used__)) static size_t syscall_terminal_write(const char *buf, 
 
 __attribute__((__used__)) static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    //sys_print("aos_terminal_write called\n", 27);
 	errval_t err;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
 	//assert (serial_rpc);
@@ -138,10 +142,22 @@ __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 	char c;
 	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
 	
+	
+	
 	assert(serial_rpc);
 	
+	// wait for access to stdin
+	bool can_access_stdin = false;
+	do {
+		err = aos_rpc_serial_has_stdin(serial_rpc, &can_access_stdin);
+		if (!can_access_stdin) thread_yield();
+	} while (!can_access_stdin);
+	
 	for (; read < len;) {
-		err = aos_rpc_serial_getchar(serial_rpc, &c);
+		do {
+			err = aos_rpc_serial_getchar(serial_rpc, &c);
+			if (err == TERM_ERR_RECV_CHARS) thread_yield();
+		} while (err == TERM_ERR_RECV_CHARS);
 		
 		if (err_is_fail(err)) {
 			// cannot receive so exit
@@ -150,6 +166,8 @@ __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 		
 		buf[read++] = c;
 	}
+	
+	buf[read] = 0;
 	
     return read;
 }
@@ -178,11 +196,6 @@ void barrelfish_libc_glue_init(void)
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
-	
-	if (!init_domain) {
-		errval_t err = aos_rpc_serial_aquire(aos_rpc_get_serial_channel());
-		DEBUG_ERR(err, "terminal aquire");
-	}
 
     // XXX: set a static buffer for stdout
     // this avoids an implicit call to malloc() on the first printf
@@ -300,8 +313,17 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         set_init_rpc(init_rpc);
 
         ram_alloc_set(NULL);  // use RAM allocation over RPC
+		
+		if (params->terminal_state) {
+			terminal_state = params->terminal_state;
+		} else {
+			aos_rpc_serial_aquire(aos_rpc_get_serial_channel(), false);
+		}
+		
+		DEBUG_PRINTF("Received terminal state: %p\n", terminal_state);
+		
     }
-
+	
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
     return SYS_ERR_OK;

@@ -457,7 +457,8 @@ static int bsp_main(int argc, char *argv[])
 	
 	struct spawninfo shell_si;
 	domainid_t shell_pid;
-	err = spawn_load_by_name("sh", &shell_si, &shell_pid);
+	void *sh_terminal_state = terminal_aquire(true);
+	err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;

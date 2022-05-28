@@ -1,7 +1,0 @@
-[ build application 
-  { 
-    target = "terminal",
-    cFiles = [ "terminal.c" ],
-	addLibraries = [ "aos" ]
-  }
-]
