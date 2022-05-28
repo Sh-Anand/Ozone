@@ -54,10 +54,12 @@ enum rpc_identifier {
     RPC_REGISTER_AS_NAMESERVER,
     RPC_BIND_NAMESERVER,
     RPC_FOPEN,
+    RPC_FCREATE,
     RPC_FREAD,
     RPC_FWRITE,
     RPC_FCLOSE,
-    RPC_FLSEEK,
+    RPC_FSEEK,
+    RPC_FTELL,
     RPC_FRM,
     RPC_MKDIR,
     RPC_RMDIR,
@@ -305,12 +307,12 @@ errval_t aos_rpc_fread(struct aos_rpc *chan, handle_t handle, void *buffer, size
 errval_t aos_rpc_fwrite(struct aos_rpc *chan, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes);
 errval_t aos_rpc_fseek(struct aos_rpc *chan, handle_t handle, enum fs_seekpos fs_whence, off_t offset);
 errval_t aos_rpc_ftell(struct aos_rpc *chan, handle_t handle, size_t *ret_offset);
-errval_t aos_rpc_opendir(struct aos_rpc *rpc, const char *path, handle_t *handle);
-errval_t aos_rpc_mkdir(struct aos_rpc *rpc, const char *path);
-errval_t aos_rpc_rmdir(struct aos_rpc *rpc, const char *path);
-errval_t aos_rpc_closedir(struct aos_rpc *rpc, handle_t handle);
-errval_t aos_rpc_readdir_next(struct aos_rpc *rpc, handle_t handle, char **name);
-errval_t aos_rpc_fstat(struct aos_rpc *rpc, handle_t handle, struct fs_fileinfo *info);
+errval_t aos_rpc_opendir(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_mkdir(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_rmdir(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_closedir(struct aos_rpc *chan, handle_t handle);
+errval_t aos_rpc_readdir_next(struct aos_rpc *chan, handle_t handle, char **name);
+errval_t aos_rpc_fstat(struct aos_rpc *chan, handle_t handle, struct fs_fileinfo *info);
 
 
 /**

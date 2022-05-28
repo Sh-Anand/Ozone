@@ -809,8 +809,10 @@ errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_
     struct fat32_dirent *dir;
     parse_directory_entry(dir_block + offset, handle->dirent, sector, offset, &dir);
     *retname = dir->name;
-    info->size = dir->size;
-    info->type = dir->is_dir ? FS_DIRECTORY : FS_FILE;
+    if(info != NULL) {
+        info->size = dir->size;
+        info->type = dir->is_dir ? FS_DIRECTORY : FS_FILE;
+    }
 
     handle->pos++;
 

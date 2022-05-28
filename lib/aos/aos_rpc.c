@@ -15,6 +15,7 @@
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
 #include <aos/capabilities.h>
+#include <fs/fat32.h>
 
 typedef uint8_t lmp_single_msg_size_t;
 
@@ -809,6 +810,265 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
 
     free(return_msg);
     return err;
+}
+
+errval_t aos_rpc_fopen(struct aos_rpc *rpc, const char *path, handle_t *handle) 
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_open(path, handle);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_FOPEN, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fclose(struct aos_rpc *rpc, handle_t handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_close(handle);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_FCLOSE, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fcreate(struct aos_rpc *rpc, const char *path, handle_t *handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_create(path, handle);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_FCREATE, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_frm(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_remove(path);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_FRM, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fread(struct aos_rpc *rpc, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_read(handle, buffer, bytes, ret_bytes);
+    }
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(size_t);
+    void *send_msg = malloc(sizeof(lvaddr_t) + sizeof(size_t));
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
+
+    errval_t err = aos_rpc_call(rpc, RPC_FREAD, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fwrite(struct aos_rpc *rpc, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_write(handle, buffer, bytes, ret_bytes);
+    }
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(size_t) + bytes;
+    void *send_msg = malloc(send_size);
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
+    memcpy(send_msg + sizeof(lvaddr_t) + bytes, buffer, bytes);
+
+    errval_t err = aos_rpc_call(rpc, RPC_FWRITE, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fseek(struct aos_rpc *rpc, handle_t handle, enum fs_seekpos whence, off_t offset)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_seek(handle, whence, offset);
+    }
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(enum fs_seekpos) + sizeof(off_t);
+    void *send_msg = malloc(send_size);
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &whence, sizeof(enum fs_seekpos));
+    memcpy(send_msg + sizeof(lvaddr_t) + sizeof(enum fs_seekpos), &offset, sizeof(off_t));
+
+    errval_t err = aos_rpc_call(rpc, RPC_FSEEK, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_ftell(struct aos_rpc *rpc, handle_t handle, size_t *ret_offset)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_tell(handle, ret_offset);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_FTELL, NULL_CAP, &handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_opendir(struct aos_rpc *rpc, const char *path, handle_t *handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_opendir(path, handle);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_OPENDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_mkdir(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_mkdir(path);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_MKDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_rmdir(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_rmdir(path);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_RMDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_closedir(struct aos_rpc *rpc, handle_t handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_closedir(handle);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_CLOSEDIR, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_readdir_next(struct aos_rpc *rpc, handle_t handle, char **name)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    if(disp_get_current_core_id() == 0) {
+        return fat32_dir_read_next(handle, name, NULL);
+    }
+
+    errval_t err = aos_rpc_call(rpc, RPC_READDIR, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fstat(struct aos_rpc *rpc, handle_t handle, struct fs_fileinfo *info)
+{
+    return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 
