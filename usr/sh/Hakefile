@@ -1,7 +1,8 @@
 [ build application 
   { 
     target = "sh",
-    cFiles = [ "sh.c", "builtins.c", "exec_binary.c" ],
-	architectures = allArchitectures
+    cFiles = [ "sh.c", "builtins.c", "exec_binary.c", "escape_sequence.c" ],
+	architectures = allArchitectures,
+	addLibraries = [ "fs", "sdhc" ]
   }
 ]

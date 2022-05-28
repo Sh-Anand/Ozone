@@ -57,7 +57,7 @@ errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const voi
 
     } else {
         // Buffer doesn't fit, make and map frame cap
-#if 1
+#if 0
         DEBUG_PRINTF("lmp_serialize: alloc frame\n");
 #endif
 
@@ -118,7 +118,7 @@ errval_t lmp_deserialize(struct lmp_recv_msg *recv_msg, struct capref *recv_cap,
     if (type == RPC_MSG_IN_FRAME) {
         assert(!capref_is_null(*recv_cap));
 
-#if 1
+#if 0
         DEBUG_PRINTF("lmp_deserialize: trying to map received frame in local space\n");
 #endif
 

@@ -4,6 +4,6 @@
 #include "sh.h"
 
 
-void exec_binary(struct shell_env *env);
+int exec_binary(struct shell_env *env);
 
 #endif // _EXEC_BINARY_H
