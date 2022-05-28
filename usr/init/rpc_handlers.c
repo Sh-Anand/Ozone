@@ -9,6 +9,7 @@
 #include <spawn/spawn.h>
 #include <grading.h>
 #include <aos/ump_chan.h>
+#include <fs/fat32.h>
 
 struct ump_chan *urpc_client[MAX_COREID];
 
@@ -332,6 +333,15 @@ HANDLER(terminal_putchar_handler)
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
 }
+
+// HANDLER(fopen_handler)
+// {
+//     if (disp_get_current_core_id() == 0) {
+//         CAST_IN_MSG(path, char);
+//     } else {
+//         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+//     }
+// }
 
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_NUM] = num_msg_handler,

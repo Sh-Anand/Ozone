@@ -16,6 +16,9 @@
 #define _LIB_BARRELFISH_AOS_MESSAGES_H
 
 #include <aos/aos.h>
+#include <fs/fs.h>
+
+typedef void *handle_t;
 
 // For now, lmp chan can be directly cast to aos_chan
 struct aos_chan {
@@ -41,7 +44,19 @@ enum rpc_msg_type {
     RPC_TERMINAL_PUTCHAR,
     RPC_SHUTDOWN,
 	RPC_STRESS,
-    RPC_MSG_COUNT
+    RPC_MSG_COUNT,
+    RPC_FOPEN,
+    RPC_FREAD,
+    RPC_FWRITE,
+    RPC_FCLOSE,
+    RPC_FLSEEK,
+    RPC_FRM,
+    RPC_MKDIR,
+    RPC_RMDIR,
+    RPC_OPENDIR,
+    RPC_READDIR,
+    RPC_CLOSEDIR,
+    RPC_FSTAT,
 };
 
 typedef uint8_t rpc_identifier_t;
@@ -150,6 +165,23 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
                                       domainid_t **pids, size_t *pid_count);
 
 
+//filesystem rpc calls
+errval_t aos_rpc_fopen(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_fclose(struct aos_rpc *chan, handle_t handle);
+errval_t aos_rpc_fcreate(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_frm(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_fread(struct aos_rpc *chan, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes);
+errval_t aos_rpc_fwrite(struct aos_rpc *chan, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes);
+errval_t aos_rpc_fseek(struct aos_rpc *chan, handle_t handle, enum fs_seekpos fs_whence, off_t offset);
+errval_t aos_rpc_ftell(struct aos_rpc *chan, handle_t handle, size_t *ret_offset);
+errval_t aos_rpc_opendir(struct aos_rpc *rpc, const char *path, handle_t *handle);
+errval_t aos_rpc_mkdir(struct aos_rpc *rpc, const char *path);
+errval_t aos_rpc_rmdir(struct aos_rpc *rpc, const char *path);
+errval_t aos_rpc_closedir(struct aos_rpc *rpc, handle_t handle);
+errval_t aos_rpc_readdir_next(struct aos_rpc *rpc, handle_t handle, char **name);
+errval_t aos_rpc_fstat(struct aos_rpc *rpc, handle_t handle, struct fs_fileinfo *info);
+
+
 /**
  * \brief Returns the RPC channel to init.
  */
@@ -169,5 +201,6 @@ struct aos_rpc *aos_rpc_get_process_channel(void);
  * \brief Returns the channel to the serial console
  */
 struct aos_rpc *aos_rpc_get_serial_channel(void);
+
 
 #endif // _LIB_BARRELFISH_AOS_MESSAGES_H
