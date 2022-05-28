@@ -17,7 +17,9 @@
         "fs.c",
         "fopen.c",
         "ramfs.c",
-        "dirent.c"
+        "dirent.c",
+        "list.c",
+        "fat32.c"
     ]
   }
 ]

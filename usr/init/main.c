@@ -30,6 +30,8 @@
 #include <grading.h>
 #include <aos/capabilities.h>
 #include <ringbuffer/ringbuffer.h>
+#include <drivers/sdhc.h>
+#include <fs/fat32.h>
 
 #include <maps/imx8x_map.h>
 #include <maps/qemu_map.h>
@@ -41,6 +43,14 @@
 #include "rpc_handlers.h"
 
 #include "terminal.h"
+
+#define CHECK_ERR(f, msg) ({\
+            err = f;\
+            if(err_is_fail(err)) {\
+                DEBUG_ERR(err, msg);\
+                return err;\
+            }\
+})
 
 struct bootinfo *bi;
 
@@ -384,6 +394,37 @@ static errval_t start_nameserver(void) {
     return SYS_ERR_OK;
 }
 
+// initialize sd card: map sd devframe capability, and initialize the driver
+static errval_t init_sd(void) {
+    errval_t err;
+
+    struct capability sdhc_c;
+    err = cap_direct_identify(dev_cap_sdhc2, &sdhc_c);
+    assert(sdhc_c.type == ObjType_DevFrame);
+    if(err_is_fail(err))
+        return err;
+
+    //map capability to sd card
+    void *sdhc_base;
+    err = paging_map_frame_attr(get_current_paging_state(), &sdhc_base, sdhc_c.u.ram.bytes, dev_cap_sdhc2, VREGION_FLAGS_READ_WRITE_NOCACHE);
+    if(err_is_fail(err))
+        return err;
+    
+    struct sdhc_s *sd;
+    err = sdhc_init(&sd, sdhc_base);
+    if(err_is_fail(err))
+        return err;
+
+    set_sd(sd);
+
+    err = fat32_init();
+
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "FAT INIT FAILED");
+
+    return SYS_ERR_OK;
+}
+
 static int bsp_main(int argc, char *argv[])
 {
     errval_t err;
@@ -434,7 +475,15 @@ static int bsp_main(int argc, char *argv[])
 		break;
 	}
 
-    // Booting other four cores
+    //Initialize sd card
+    err = init_sd();
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to initialize SD card\n");
+    }
+
+    debug_printf("Initialized SD card\n");
+    
+    // Booting other cores
     for (int i = 1; i < 4; i++) {
         err = boot_core(i);
         if (err_is_fail(err)) {
