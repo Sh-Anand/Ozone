@@ -18,6 +18,7 @@
                         "distops/invocations.c",
                         "main.c",
                         "mem_alloc.c",
+                        "init_urpc.c",
                         "rpc_handlers.c"
                       ],
                       addLinkFlags = [ "-e _start_init"], -- this is only needed for init

@@ -66,7 +66,7 @@ static char exception_stack[EXCEPTION_STACK_SIZE];
 
 /// RB tree implementations for general nodes and wrapper functions
 
-int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1, struct paging_rb_tree_node *e2)
+static int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1, struct paging_rb_tree_node *e2)
 {
     return (e1->addr < e2->addr ? -1 : e1->addr > e2->addr);
 }
@@ -826,7 +826,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
         }
     }
 
-    DEBUG_PRINTF("paging: fixed mapping to already used region\n");
+    // DEBUG_PRINTF("paging: fixed mapping to already used region\n");
     return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
 
 FAILURE_MAP_FRAME:
@@ -1153,23 +1153,23 @@ static inline errval_t assert_arguments(struct paging_state *st, lvaddr_t vaddr,
                                         size_t *size)
 {
     if (st == NULL) {
-        DEBUG_PRINTF("paging: NULL paging_state\n");
+        // DEBUG_PRINTF("paging: NULL paging_state\n");
         return ERR_INVALID_ARGS;
     }
     if (vaddr < st->start_addr) {
-        DEBUG_PRINTF("paging: vaddr < start_addr\n");
+        // DEBUG_PRINTF("paging: vaddr < start_addr\n");
         return ERR_INVALID_ARGS;
     }
     if (vaddr > BIT(PAGING_ADDR_BITS)) {
-        DEBUG_PRINTF("paging: vaddr too large\n");
+        // DEBUG_PRINTF("paging: vaddr too large\n");
         return ERR_INVALID_ARGS;
     }
     if (*size == 0) {
-        DEBUG_PRINTF("paging: cannot map size 0\n");
+        // DEBUG_PRINTF("paging: cannot map size 0\n");
         return ERR_INVALID_ARGS;
     }
     if (*size >= BIT(PAGING_ADDR_BITS)) {
-        DEBUG_PRINTF("paging: size too large\n");
+        // DEBUG_PRINTF("paging: size too large\n");
         return ERR_INVALID_ARGS;
     }
 //    *size = ROUND_UP(*size, BASE_PAGE_SIZE);
@@ -1290,7 +1290,7 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
  */
 errval_t paging_init(void)
 {
-    debug_printf("paging_init\n");
+//    debug_printf("paging_init\n");
     // DONE (M2): Call paging_init_state for &current
     // DONE (M4): initialize self-paging handler
     // TIP: use thread_set_exception_handler() to setup a page fault handler

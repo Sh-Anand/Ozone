@@ -8,6 +8,7 @@
 #include <aos/ram_alloc.h>
 
 #define QUITE_TEST true
+#define MUTE_TEST_TITLE true
 #define UNMAP_FOR_ALL_TEST true
 
 static struct capref test_alloc_frame_success(struct mm *mm, size_t size, bool no_print)
@@ -222,9 +223,14 @@ static void paging_force_refill(struct paging_state *st)
 
 void grading_test_paging(struct mm *mm, struct paging_state *st)
 {
-    DEBUG_PRINTF("Start grading_test_paging...\n");
 
+#if !MUTE_TEST_TITLE
+    DEBUG_PRINTF("Start grading_test_paging...\n");
+#endif
+
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Fixed Mapping]\n");
+#endif
     paging_force_refill(st);  // avoid pages being used by dynamic allocation
     const uint64_t vaddr_base = VMSAv8_64_L0_SIZE << 4;  // avoid conflict with slab allocators
     test_fixed_mapping_success(mm, st, vaddr_base, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
@@ -238,7 +244,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_fixed_mapping_success(mm, st, vaddr_base + VMSAv8_64_L0_SIZE,
                                BASE_PAGE_SIZE * 2048, QUITE_TEST, UNMAP_FOR_ALL_TEST);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Overlapping Fixed Mapping]\n");
+#endif
     const uint64_t vaddr_base2 = vaddr_base + VMSAv8_64_L0_SIZE * 2;
     paging_force_refill(st);  // avoid pages being used by dynamic allocation
     test_fixed_mapping_success(mm, st, vaddr_base2, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);  // one page in first L3
@@ -259,7 +267,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
         mm, st, vaddr_base3 + BASE_PAGE_SIZE, VMSAv8_64_L2_BLOCK_SIZE - BASE_PAGE_SIZE * 2,
         QUITE_TEST, UNMAP_FOR_ALL_TEST);  // involves 2 L3's, including the two above
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Dynamic Mapping]\n");
+#endif
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
@@ -267,7 +277,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE * 4, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE * 2048, QUITE_TEST, UNMAP_FOR_ALL_TEST);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Alloc + Fixed Mapping]\n");
+#endif
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, UNMAP_FOR_ALL_TEST);
@@ -275,7 +287,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE * 4, QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE * 2048, QUITE_TEST, UNMAP_FOR_ALL_TEST);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Alloc + Fixed Mapping in the Middle]\n");
+#endif
     void *vaddr = NULL;
     test_mapping_alloc_success(mm, st, BASE_PAGE_SIZE * 4, &vaddr, QUITE_TEST,
                                false);
@@ -286,7 +300,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_fixed_mapping_success(mm, st, (size_t)vaddr, BASE_PAGE_SIZE, QUITE_TEST,
                                false);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Alloc + Fixed Mapping in the Middle Large]\n");
+#endif
     paging_force_refill(st);  // avoid pages being used by dynamic allocation
     test_mapping_alloc_success(mm, st, BASE_PAGE_SIZE * 2048, &vaddr, QUITE_TEST,
                                false);
@@ -295,7 +311,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_fixed_mapping_success(mm, st, (size_t)vaddr + BASE_PAGE_SIZE * 1025,
                                BASE_PAGE_SIZE, QUITE_TEST, false);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Alloc with Alignment]\n");
+#endif
     test_alloc_with_alignment_success(mm, st, BASE_PAGE_SIZE, BASE_PAGE_SIZE * 2048,
                                       QUITE_TEST, UNMAP_FOR_ALL_TEST);
     test_alloc_with_alignment_success(mm, st, BASE_PAGE_SIZE * 2048,
@@ -306,16 +324,22 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     struct capref frame = test_alloc_frame_success(mm, BASE_PAGE_SIZE, QUITE_TEST);
 
     // Index 0 L1 page table
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Paging to Index 0 L1]\n");
+#endif
     test_paging_fixed_map_fail(st, 0, frame, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
     test_paging_fixed_map_fail(st, VMSAv8_64_L0_SIZE - BASE_PAGE_SIZE, frame, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
     // In kernel space
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Paging to Kernel Space Addresses]\n");
+#endif
     test_paging_fixed_map_fail(st, -1, frame, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
     test_paging_fixed_map_fail(st, BIT(48), frame, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Unmapping Fixed Maps]\n");
+#endif
     const uint64_t vaddr_base4 = vaddr_base3 + VMSAv8_64_L0_SIZE;
     test_fixed_mapping_success(mm, st, vaddr_base4, BASE_PAGE_SIZE, QUITE_TEST, true);
     test_fixed_mapping_success(mm, st, vaddr_base4, BASE_PAGE_SIZE, QUITE_TEST, true);
@@ -323,7 +347,9 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_fixed_mapping_success(mm, st, vaddr_base4, BASE_PAGE_SIZE * 2048, QUITE_TEST, true);
     test_fixed_mapping_success(mm, st, vaddr_base4, BASE_PAGE_SIZE, QUITE_TEST, true);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Unmapping Dynamic Maps]\n");
+#endif
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, true);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, true);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, true);
@@ -331,23 +357,31 @@ void grading_test_paging(struct mm *mm, struct paging_state *st)
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE * 4, QUITE_TEST, true);
     test_dynamic_mapping_success(mm, st, BASE_PAGE_SIZE * 2048, QUITE_TEST, true);
 
+#if !MUTE_TEST_TITLE
     DEBUG_PRINTF("[Try Unmapping Alloc + Fixed]\n");
+#endif
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE, QUITE_TEST, true);
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE * 4, QUITE_TEST, true);
     test_alloc_plus_fixed_mapping_success(mm, st, BASE_PAGE_SIZE * 2048, QUITE_TEST, true);
     // Invalid caps
-    //    DEBUG_PRINTF("[Try Paging with Invalid Caps]\n");
+    // #if !MUTE_TEST_TITLE
+    //     DEBUG_PRINTF("[Try Paging with Invalid Caps]\n");
+    // #endif
     //    test_paging_fixed_map_fail(st, VMSAv8_64_L0_SIZE << 7, NULL_CAP, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
     //    test_paging_fixed_map_fail(st, VMSAv8_64_L0_SIZE << 7, cap_vroot, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
     //    test_paging_fixed_map_fail(st, VMSAv8_64_L0_SIZE << 7, cap_dispatcher, BASE_PAGE_SIZE, VREGION_FLAGS_READ_WRITE);
 
     // Tricky sizes
-    //    DEBUG_PRINTF("[Try Paging with Invalid Size]\n");
+    // #if !MUTE_TEST_TITLE
+    //     DEBUG_PRINTF("[Try Paging with Invalid Size]\n");
+    // #endif
     //    test_paging_map_su(st, VMSAv8_64_L0_SIZE << 7, cap_dispatcher, 0, VREGION_FLAGS_READ_WRITE);
     //    test_paging_map_fail(st, VMSAv8_64_L0_SIZE << 7, cap_dispatcher, 1, VREGION_FLAGS_READ_WRITE);
     // -1 is not tested since it span multiple tables
 
     cap_delete(frame);
+
+    DEBUG_PRINTF("Paging tests all PASSED\n");
 }
 
 void grading_test_fixed_map_more_time(struct mm *mm, struct paging_state *st, int count)

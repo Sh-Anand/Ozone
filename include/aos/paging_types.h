@@ -46,8 +46,6 @@ struct paging_rb_tree_node {
     lvaddr_t addr;
 };
 
-int	paging_rb_tree_node_cmp(struct paging_rb_tree_node *, struct paging_rb_tree_node *);
-
 RB_HEAD(paging_rb_tree, paging_rb_tree_node);  // tree type declaration
 
 struct paging_vnode_node {

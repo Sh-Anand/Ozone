@@ -365,7 +365,7 @@ errval_t coreboot(coreid_t mpid,
     err = cap_retype(kcb, ram_16k_aligned, 0, ObjType_KernelControlBlock, OBJSIZE_KCB, 1);
     if(err_is_fail(err))
         return err_push(err, CORE_BOOT_ERR_KCB_RETYPE);
-    DEBUG_PRINTF("KCB OBTAINED\n", mpid);
+    // DEBUG_PRINTF("KCB OBTAINED\n", mpid);
 
     //load and reloc boot_driver elf
     struct mem_region *module_boot_driver;
@@ -373,7 +373,7 @@ errval_t coreboot(coreid_t mpid,
     err = load_and_relocate(boot_driver, "boot_entry_psci", 0, &module_boot_driver, &entry_point_boot_driver);
     if(err_is_fail(err))
         return err_push(err, CORE_BOOT_ERR_ELF_LOAD_RELOCATE);
-    DEBUG_PRINTF("LOADED AND RELOCATED BOOT DRIVER\n", mpid);
+    // DEBUG_PRINTF("LOADED AND RELOCATED BOOT DRIVER\n", mpid);
 
     //load and reloc cpu_driver elf
     struct mem_region *module_cpu_driver;
@@ -381,7 +381,7 @@ errval_t coreboot(coreid_t mpid,
     err = load_and_relocate(cpu_driver, "arch_init", ARMv8_KERNEL_OFFSET, &module_cpu_driver, &entry_point_cpu_driver);
     if(err_is_fail(err))
         return err_push(err, CORE_BOOT_ERR_ELF_LOAD_RELOCATE);
-    DEBUG_PRINTF("LOADED AND RELOCATED CPU DRIVER\n", mpid);
+    // DEBUG_PRINTF("LOADED AND RELOCATED CPU DRIVER\n", mpid);
 
     //load init and grab physical memory info
     struct armv8_coredata_memreg init_memreg;
@@ -395,13 +395,13 @@ errval_t coreboot(coreid_t mpid,
     err = load_memreg_from_frame(&init_memreg, init_frame);
     if(err_is_fail(err))
         return err;
-    DEBUG_PRINTF("PHYSICAL ADDR OF INIT OBTAINED\n", mpid);
+    // DEBUG_PRINTF("PHYSICAL ADDR OF INIT OBTAINED\n", mpid);
 
     //map init binary into our addr space
     err = paging_map_frame(get_current_paging_state(), &init_data, ROUND_UP(init_memreg.length, BASE_PAGE_SIZE), init_frame);
     if(err_is_fail(err))
         return err_push(err, LIB_ERR_PAGING_MAP);
-    DEBUG_PRINTF("MAPPED INIT BINARY\n", mpid);
+    // DEBUG_PRINTF("MAPPED INIT BINARY\n", mpid);
 
     //create memory region for CPU driver allocations
     struct armv8_coredata_memreg memreg;
@@ -414,7 +414,7 @@ errval_t coreboot(coreid_t mpid,
     err = load_memreg_from_frame(&memreg, allocation_frame);
     if(err_is_fail(err))
         return err;
-    DEBUG_PRINTF("MEMREG FOR CPU DRIVER ALLOCATIONS CREATED\n", mpid);
+    // DEBUG_PRINTF("MEMREG FOR CPU DRIVER ALLOCATIONS CREATED\n", mpid);
 
     //allocate kernel stack
     struct capref kernel_stack_cap;
@@ -422,7 +422,7 @@ errval_t coreboot(coreid_t mpid,
     err = frame_alloc(&kernel_stack_cap, kernel_stack_size, NULL);
     if(err_is_fail(err))
         return err_push(err, LIB_ERR_FRAME_ALLOC);
-    DEBUG_PRINTF("KERNEL STACK ALLOCATED\n", mpid);
+    // DEBUG_PRINTF("KERNEL STACK ALLOCATED\n", mpid);
 
     void *kernel_stack;
     err = paging_map_frame(get_current_paging_state(), &kernel_stack, kernel_stack_size, kernel_stack_cap);
@@ -433,7 +433,7 @@ errval_t coreboot(coreid_t mpid,
     struct armv8_coredata_memreg urpc_memreg;
     urpc_memreg.base = urpc_frame_id.base;
     urpc_memreg.length = urpc_frame_id.bytes;
-    DEBUG_PRINTF("URPC FRAME SET\n", mpid);
+    // DEBUG_PRINTF("URPC FRAME SET\n", mpid);
 
     //finally, create the coredata struct
     //we are not mallocing coredata because we want the physical address
@@ -443,18 +443,18 @@ errval_t coreboot(coreid_t mpid,
     err = frame_alloc(&coredata_frame, coredata_size, NULL);
     if(err_is_fail(err))
         return err;
-    DEBUG_PRINTF("COREDATA CREATED\n", mpid);
+    // DEBUG_PRINTF("COREDATA CREATED\n", mpid);
 
     err = paging_map_frame(get_current_paging_state(), (void **) &coredata, BASE_PAGE_SIZE, coredata_frame);
     if(err_is_fail(err))
         return err;
-    DEBUG_PRINTF("COREDATA MAPPED\n", mpid);
+    // DEBUG_PRINTF("COREDATA MAPPED\n", mpid);
 
     //fill coredata struct
     err = fill_coredata(coredata, mpid, kcb, kernel_stack_cap, entry_point_cpu_driver, &memreg, &init_memreg, &urpc_memreg);
     if(err_is_fail(err))
         return err_push(err, CORE_BOOT_ERR_FILL_COREDATA);
-    DEBUG_PRINTF("COREDATA FILLED\n", mpid);
+    // DEBUG_PRINTF("COREDATA FILLED\n", mpid);
 
     //TODO : CLEAR CACHE!!
     arm64_dcache_wb_range((vm_offset_t) coredata, coredata_size);
@@ -462,7 +462,7 @@ errval_t coreboot(coreid_t mpid,
     arm64_idcache_wbinv_range((vm_offset_t) coredata, coredata_size);
     arm64_idcache_wbinv_range((vm_offset_t) kernel_stack, kernel_stack_size);
 
-    DEBUG_PRINTF("CACHE FLUSHED\n", mpid);
+    // DEBUG_PRINTF("CACHE FLUSHED\n", mpid);
 
     //finally, invoke kernel cap with boot data pointer
     struct frame_identity coredata_frame_id;
@@ -474,7 +474,7 @@ errval_t coreboot(coreid_t mpid,
     if(err_is_fail(err))
         return err_push(err, CORE_BOOT_ERR_INVOKE);
 
-    DEBUG_PRINTF("CORE BOOTED\n");
+    // DEBUG_PRINTF("CORE BOOTED\n");
     return SYS_ERR_OK;
 
 }

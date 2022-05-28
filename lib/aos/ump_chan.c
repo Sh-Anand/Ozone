@@ -11,16 +11,18 @@
  * \brief Initialise a new UMP channel
  *
  * \param uc  UMP channel
- * \param shared_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE
+ * \param zeroed_frame  Shared frame of size UMP_CHAN_SHARED_FRAME_SIZE that is already zeroed
  * \param client  Whether the current program is the client
+ * \param pid
  */
-errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool client) {
+errval_t ump_chan_init(struct ump_chan *uc, struct capref zeroed_frame, enum UMP_CHAN_ROLE role, domainid_t pid)
+{
     assert(uc != NULL);
 
     errval_t err;
 
     struct frame_identity urpc_frame_id;
-    err = frame_identify(shared_frame, &urpc_frame_id);
+    err = frame_identify(zeroed_frame, &urpc_frame_id);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_FRAME_IDENTIFY);
     }
@@ -29,15 +31,13 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool cli
     }
 
     uint8_t *buf;
-    err = paging_map_frame(get_current_paging_state(), (void **)&buf, UMP_CHAN_SHARED_FRAME_SIZE,
-                           shared_frame);
+    err = paging_map_frame(get_current_paging_state(), (void **)&buf,
+                           UMP_CHAN_SHARED_FRAME_SIZE, zeroed_frame);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_PAGING_MAP);
     }
 
-    memset(buf, 0, UMP_CHAN_SHARED_FRAME_SIZE);
-
-    return ump_chan_init_from_buf(uc, buf, client);
+    return ump_chan_init_from_buf(uc, buf, role, pid);
 }
 
 /**
@@ -46,25 +46,30 @@ errval_t ump_chan_init(struct ump_chan *uc, struct capref shared_frame, bool cli
  * \param uc  UMP channel
  * \param zeroed_buf  Mapped memory region of the shared frame, should be memset to 0
  * \param client  Whether the current program is the client
+ * \param pid
  */
-errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool client) {
+errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, enum UMP_CHAN_ROLE role, domainid_t pid)
+{
     assert(uc != NULL);
+    assert(role == UMP_CHAN_SERVER || role == UMP_CHAN_CLIENT);
 
     errval_t err;
 
     uint8_t *b = zeroed_buf;
 
-    err = ring_consumer_init(&uc->recv, client ? b : b + RING_BUFFER_SIZE);
+    err = ring_consumer_init(&uc->recv, role == UMP_CHAN_CLIENT ? b : b + RING_BUFFER_SIZE);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RING_CONSUMER_INIT);
     }
 
-    err = ring_producer_init(&uc->send, client ? b + RING_BUFFER_SIZE : b);
+    err = ring_producer_init(&uc->send, role == UMP_CHAN_CLIENT ? b + RING_BUFFER_SIZE : b);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RING_PRODUCER_INIT);
     }
 
     waitset_chanstate_init(&uc->recv_waitset, CHANTYPE_UMP_IN);
+
+    uc->pid = pid;
 
     return SYS_ERR_OK;
 }
@@ -74,6 +79,7 @@ errval_t ump_chan_init_from_buf(struct ump_chan *uc, void *zeroed_buf, bool clie
  *
  * \param uc  UMP channel
  */
-void ump_chan_destroy(struct ump_chan *uc) {
-    waitset_chanstate_destroy(&uc->recv_waitset);
+void ump_chan_destroy(struct ump_chan *uc)
+{
+    waitset_chanstate_destroy(&uc->recv_waitset);  // will deregister inside
 }

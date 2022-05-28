@@ -31,10 +31,12 @@
 #include "threads_priv.h"
 #include "init.h"
 
+#define DIRECT_PRINTF 0
+
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;
 
-#define LOCAL_ENDPOINT_BUF_SIZE  256  // XXX: a good number?
+#define LOCAL_ENDPOINT_BUF_SIZE 256  // XXX: a good number?
 
 extern size_t (*_libc_terminal_read_func)(char *, size_t);
 extern size_t (*_libc_terminal_write_func)(const char *, size_t);
@@ -49,27 +51,28 @@ void libc_exit(int status)
     debug_printf("libc exit NYI!\n");
     thread_exit(status);
     // If we're not dead by now, we wait
-    while (1) {}
+    while (1) {
+    }
 }
 
-static void libc_assert(const char *expression, const char *file,
-                        const char *function, int line)
+static void libc_assert(const char *expression, const char *file, const char *function,
+                        int line)
 {
     char buf[512];
     size_t len;
 
     /* Formatting as per suggestion in C99 spec 7.2.1.1 */
-    len = snprintf(buf, sizeof(buf), "Assertion failed on core %d in %.*s: %s,"
+    len = snprintf(buf, sizeof(buf),
+                   "Assertion failed on core %d in %.*s: %s,"
                    " function %s, file %s, line %d.\n",
-                   disp_get_core_id(), DISP_NAME_LEN,
-                   disp_name(), expression, function, file, line);
+                   disp_get_core_id(), DISP_NAME_LEN, disp_name(), expression, function,
+                   file, line);
     sys_print(buf, len < sizeof(buf) ? len : sizeof(buf));
 }
 
-__attribute__((__used__))
-static size_t syscall_terminal_write(const char *buf, size_t len)
+__attribute__((__used__)) static size_t syscall_terminal_write(const char *buf, size_t len)
 {
-    if(len) {
+    if (len) {
         errval_t err = sys_print(buf, len);
         if (err_is_fail(err)) {
             return 0;
@@ -78,59 +81,55 @@ static size_t syscall_terminal_write(const char *buf, size_t len)
     return len;
 }
 
-__attribute__((__used__))
-static size_t aos_terminal_write(const char *buf, size_t len)
+__attribute__((__used__)) static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    //sys_print("aos_terminal_write called\n", 27);
-	size_t sent;
-	errval_t err;
-	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-	assert(serial_rpc != NULL);
-	
-	// TODO: this is probably very inefficient, so maybe do this for whole strings instead
-	for (sent = 0; sent < len;) {
-		err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
-		
-		if (err_is_fail(err)) {
-			// sending failed, so return
-			break;
-		}
-		
-		sent++;
-	}
-	
-	// return the number of characters sent
-	return sent;
-	
+    // sys_print("aos_terminal_write called\n", 27);
+    size_t sent;
+    errval_t err;
+    struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+    assert(serial_rpc != NULL);
+
+    // TODO: this is probably very inefficient, so maybe do this for whole strings instead
+    for (sent = 0; sent < len;) {
+        err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
+
+        if (err_is_fail(err)) {
+            // sending failed, so return
+            break;
+        }
+
+        sent++;
+    }
+
+    // return the number of characters sent
+    return sent;
 }
 
-__attribute__((__used__))
-static size_t dummy_terminal_read(char *buf, size_t len)
+__attribute__((__used__)) static size_t dummy_terminal_read(char *buf, size_t len)
 {
     debug_printf("Terminal read NYI!\n");
     return 0;
 }
 
-__attribute__((__used__))
-static size_t aos_terminal_read(char *buf, size_t len)
+__attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 {
-	size_t read = 0;
-	errval_t err;
-	char c;
-	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-	assert(serial_rpc != NULL);
-	
-	for (; read < len;) {
-		err = aos_rpc_serial_getchar(serial_rpc, &c);
-		
-		if (err_is_fail(err)) {
-			// cannot receive so exit
-			break;
-		}
-		
-		buf[read++] = c;
-	}
-	
+    size_t read = 0;
+    errval_t err;
+    char c;
+    struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+    assert(serial_rpc != NULL);
+
+    for (; read < len;) {
+        err = aos_rpc_serial_getchar(serial_rpc, &c);
+
+        if (err_is_fail(err)) {
+            // cannot receive so exit
+            break;
+        }
+
+        buf[read++] = c;
+    }
+
     return read;
 }
 
@@ -142,7 +141,7 @@ void barrelfish_libc_glue_init(void)
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
     _libc_terminal_read_func = !init_domain ? aos_terminal_read : dummy_terminal_read;
-    _libc_terminal_write_func = !init_domain ? aos_terminal_write : syscall_terminal_write;
+    _libc_terminal_write_func = !init_domain && !DIRECT_PRINTF ? aos_terminal_write : syscall_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
@@ -152,33 +151,6 @@ void barrelfish_libc_glue_init(void)
     static char buf[BUFSIZ];
     setvbuf(stdout, buf, _IOLBF, sizeof(buf));
 }
-
-static void init_ack_handler(void *arg)
-{
-    struct lmp_chan *lc = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-    errval_t err;
-
-    // Try to receive a message
-    err = lmp_chan_recv(lc, &msg, &cap);
-    if (err_is_fail(err)) {
-        if (lmp_err_is_transient(err)) {
-            // Re-register
-            err = lmp_chan_register_recv(lc, get_default_waitset(),
-                                         MKCLOSURE(init_ack_handler, arg));
-            if (err_is_ok(err)) return;  // otherwise, fall through
-        }
-        USER_PANIC_ERR(err_push(err, LIB_ERR_BIND_INIT_SET_RECV),
-                       "unhandled error in init_ack_handler");
-    }
-
-    assert(capcmp(lc->remote_cap, cap_initep));  // should be the original one
-    lc->remote_cap = cap;
-    lc->connstate = LMP_CONNECTED;
-}
-
-extern struct capref rpc_reserved_recv_slot;
 
 /** \brief Initialise libbarrelfish.
  *
@@ -235,65 +207,61 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     assert(!capref_is_null(cap_selfep));
 
     if (!init_domain) {
-
-        /* allocate lmp channel structure */
-        struct lmp_chan *init_chan = malloc(sizeof(*init_chan));
-        if (init_chan == NULL) {
+        /* allocate rpc structure */
+        struct aos_rpc *init_rpc = malloc(sizeof(*init_rpc));
+        if (init_rpc == NULL) {
             return err_push(err, LIB_ERR_MALLOC_FAIL);
         }
-        lmp_chan_init(init_chan);
+        aos_rpc_init(init_rpc);
+
+        /* initialize init RPC client with lmp channel */
+        aos_chan_lmp_init(&init_rpc->chan);
+        struct lmp_chan *init_lc = &init_rpc->chan.lc;
 
         /* set remote endpoint to init's endpoint */
         assert(!capref_is_null(cap_initep) && "init ep not available");
-        err = lmp_chan_accept(init_chan, LOCAL_ENDPOINT_BUF_SIZE, cap_initep);
+        err = lmp_chan_accept(init_lc, LOCAL_ENDPOINT_BUF_SIZE, cap_initep);
         if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_BIND_INIT_ACCEPT);
+            return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
         }
-        init_chan->connstate = LMP_BIND_WAIT;
-
-        /* set receive handler */
-        struct capref new_init_ep_slot;
-        err = slot_alloc(&new_init_ep_slot);
-        if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
-        }
-        lmp_chan_set_recv_slot(init_chan, new_init_ep_slot);
-        err = lmp_chan_register_recv(init_chan, get_default_waitset(),
-                                     MKCLOSURE(init_ack_handler, init_chan));
-        if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_BIND_INIT_SET_RECV);
-        }
+        init_lc->connstate = LMP_BIND_WAIT;
 
         /* send local ep to init */
-        // TODO: change to special format since we are reusing
-        err = lmp_chan_send1(init_chan, LMP_SEND_FLAGS_DEFAULT, init_chan->local_cap,
+        err = lmp_chan_send1(init_lc, LMP_SEND_FLAGS_DEFAULT, init_lc->local_cap,
                              get_dispatcher_generic(curdispatcher())->domain_id);
         if (err_is_fail(err)) {
             return err_push(err, LIB_ERR_BIND_INIT_SEND_EP);
         }
 
         /* wait for init to acknowledge receiving the endpoint */
-        while (init_chan->connstate != LMP_CONNECTED) {
-            err = event_dispatch(get_default_waitset());
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "error in init event_dispatch loop");
+        DEBUG_PRINTF("binding with init\n");
+        while (true) {
+            struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+            err = lmp_chan_recv(init_lc, &msg, NULL);
+            if (err == LIB_ERR_NO_LMP_MSG) {
+                thread_yield();
+            } else if (err_is_fail(err)) {
+                if (lmp_err_is_transient(err)) {
+                    thread_yield() ;
+                }
                 return err_push(err, LIB_ERR_BIND_INIT_WAITING);
+            } else {
+                break;
             }
         }
+        init_lc->connstate = LMP_CONNECTED;
 
-        // XXX: For now, lmp chan can be directly cast to aos_chan
-        set_init_chan((struct aos_chan *) init_chan);
-
-        /* initialize init RPC client with lmp channel */
-        struct aos_rpc *init_rpc = malloc(sizeof(*init_rpc));
-        if (init_rpc == NULL) {
-            return err_push(err, LIB_ERR_MALLOC_FAIL);
+        /* alloc recv for init_rpc */
+        err = lmp_chan_alloc_recv_slot(&init_rpc->chan.lc);
+        if (err_is_fail(err)) {
+            return err;
         }
-        init_rpc->type = TYPE_LMP;
-        init_rpc->chan = init_chan;
-        aos_rpc_init(init_rpc);
 
-        ram_alloc_set(NULL); // Use Ram allocation over RPC
+        /* init rpc is ready for use */
+        set_init_chan(&init_rpc->chan);
+        set_init_rpc(init_rpc);
+
+        ram_alloc_set(NULL);  // use RAM allocation over RPC
     }
 
     // right now we don't have the nameservice & don't need the terminal
