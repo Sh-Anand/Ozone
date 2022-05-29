@@ -16,10 +16,12 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <aos/aos.h>
+#include <aos/aos_rpc.h>
 
 #include <fs/fs.h>
 #include <fs/dirent.h>
 #include <fs/ramfs.h>
+#include <fs/fat32.h>
 #include "fs_internal.h"
 
 
@@ -92,29 +94,29 @@ static void fdtab_free(int fd)
 //XXX: flags are ignored...
 static int fs_libc_open(char *path, int flags)
 {
-    ramfs_handle_t vh;
+    fat32_handle_t vh;
     errval_t err;
 
     // If O_CREAT was given, we use ramfsfs_create()
     if(flags & O_CREAT) {
         // If O_EXCL was also given, we check whether we can open() first
         if(flags & O_EXCL) {
-            err = ramfs_open(mount, path, &vh);
+            err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
             if(err_is_ok(err)) {
-                ramfs_close(mount, vh);
+                mount ? aos_rpc_fclose(mount, vh) : fat32_close(vh);
                 errno = EEXIST;
                 return -1;
             }
             assert(err_no(err) == FS_ERR_NOTFOUND);
         }
 
-        err = ramfs_create(mount, path, &vh);
+        err = aos_rpc_fcreate(mount, path, &vh);
         if (err_is_fail(err) && err == FS_ERR_EXISTS) {
-            err = ramfs_open(mount, path, &vh);
+            err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
         }
     } else {
         // Regular open()
-        err = ramfs_open(mount, path, &vh);
+        err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
     }
 
     if (err_is_fail(err)) {
@@ -137,7 +139,7 @@ static int fs_libc_open(char *path, int flags)
     };
     int fd = fdtab_alloc(&e);
     if (fd < 0) {
-        ramfs_close(mount, vh);
+        mount ? aos_rpc_fclose(mount, vh) : fat32_close(vh);
         return -1;
     } else {
         return fd;
@@ -153,9 +155,9 @@ static int fs_libc_read(int fd, void *buf, size_t len)
     switch(e->type) {
     case FDTAB_TYPE_FILE:
     {
-        ramfs_handle_t fh = e->handle;
+        fat32_handle_t fh = e->handle;
         assert(e->handle);
-        err = ramfs_read(mount, fh, buf, len, &retlen);
+        err = mount ? aos_rpc_fread(mount, fh, buf, len, &retlen) : fat32_read(fh, buf, len, &retlen);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -180,8 +182,8 @@ static int fs_libc_write(int fd, void *buf, size_t len)
     switch(e->type) {
     case FDTAB_TYPE_FILE:
     {
-        ramfs_handle_t fh = e->handle;
-        errval_t err = ramfs_write(mount, fh, buf, len, &retlen);
+        fat32_handle_t fh = e->handle;
+        errval_t err = mount ? aos_rpc_fwrite(mount, fh, buf, len, &retlen) : fat32_write(fh, buf, len, &retlen);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -202,10 +204,10 @@ static int fs_libc_close(int fd)
         return -1;
     }
 
-    ramfs_handle_t fh = e->handle;
+    fat32_handle_t fh = e->handle;
     switch(e->type) {
     case FDTAB_TYPE_FILE:
-        err = ramfs_close(mount, fh);
+        err = mount ? aos_rpc_fclose(mount, fh) : fat32_close(fh);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -221,7 +223,7 @@ static int fs_libc_close(int fd)
 static off_t fs_libc_lseek(int fd, off_t offset, int whence)
 {
     struct fdtab_entry *e = fdtab_get(fd);
-    ramfs_handle_t fh = e->handle;
+    fat32_handle_t fh = e->handle;
     switch(e->type) {
     case FDTAB_TYPE_FILE:
     {
@@ -246,13 +248,13 @@ static off_t fs_libc_lseek(int fd, off_t offset, int whence)
             return -1;
         }
 
-        err = ramfs_seek(mount, fh, fs_whence, offset);
+        err = mount ? aos_rpc_fseek(mount, fh, fs_whence, offset) : fat32_seek(fh, fs_whence, offset);
         if(err_is_fail(err)) {
             DEBUG_ERR(err, "vfs_seek");
             return -1;
         }
 
-        err = ramfs_tell(mount, fh, &retpos);
+        err = mount ? aos_rpc_ftell(mount, fh, &retpos) : fat32_tell(fh, &retpos);
         if(err_is_fail(err)) {
             return -1;
         }
@@ -265,13 +267,13 @@ static off_t fs_libc_lseek(int fd, off_t offset, int whence)
     }
 }
 
-static errval_t fs_mkdir(const char *path){ return ramfs_mkdir(mount, path);}
-static errval_t fs_rmdir(const char *path){ return ramfs_rmdir(mount, path); }
-static errval_t fs_rm(const char *path){ return ramfs_remove(mount, path); }
-static errval_t fs_opendir(const char *path, fs_dirhandle_t *h){ return ramfs_opendir(mount, path, h); }
-static errval_t fs_readdir(fs_dirhandle_t h, char **name) { return ramfs_dir_read_next(mount, h, name, NULL); }
-static errval_t fs_closedir(fs_dirhandle_t h) { return ramfs_closedir(mount, h); }
-static errval_t fs_fstat(fs_dirhandle_t h, struct fs_fileinfo *b) { return ramfs_stat(mount, h, b); }
+static errval_t fs_mkdir(const char *path){ return aos_rpc_mkdir(mount, path);}
+static errval_t fs_rmdir(const char *path){ return aos_rpc_rmdir(mount, path); }
+static errval_t fs_rm(const char *path){ return aos_rpc_frm(mount, path); }
+static errval_t fs_opendir(const char *path, fs_dirhandle_t *h){ return aos_rpc_opendir(mount, path, h); }
+static errval_t fs_readdir(fs_dirhandle_t h, char **name) { return aos_rpc_readdir_next(mount, h, name); }
+static errval_t fs_closedir(fs_dirhandle_t h) { return aos_rpc_closedir(mount, h); }
+static errval_t fs_fstat(fs_dirhandle_t h, struct fs_fileinfo *b) { return aos_rpc_fstat(mount, h, b); }
 
 typedef int   fsopen_fn_t(char *, int);
 typedef int   fsread_fn_t(int, void *buf, size_t);

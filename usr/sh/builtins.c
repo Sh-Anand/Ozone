@@ -5,8 +5,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#include <fs/fat32.h>
-
 #include <aos/aos_rpc.h>
 
 #define REGISTER_BUILTIN(name, ...) if (strcmp(env->argv[0], #name) == 0) { sh_##name(env, ##__VA_ARGS__); return 1; }
@@ -33,7 +31,6 @@ static void sh_echo(struct shell_env *env)
 
 static void sh_mkdir(struct shell_env *env)
 {
-	DEBUG_PRINTF("enter sh_mkdir\n");
 	env->last_return_status = 1;
 	if (env->argc != 2) {
 		printf("usage: mkdir <path>\n");
@@ -41,8 +38,7 @@ static void sh_mkdir(struct shell_env *env)
 	}
 	
 	char *path = env-> argv[1]; // TODO: add flags like -p
-	errval_t err = fat32_mkdir(path);
-	DEBUG_PRINTF("fat32_mkdir done\n");
+	errval_t err = aos_rpc_mkdir(aos_rpc_get_init_channel(), path);
 	
 	if (err_is_fail(err)) {
 		printf("mkdir failed\n");
@@ -50,16 +46,48 @@ static void sh_mkdir(struct shell_env *env)
 	}
 	
 	env->last_return_status = 0;
-	DEBUG_PRINTF("exit sh_mkdir\n");
 }
 
 static void sh_ls(struct shell_env *env)
 {
+	env->last_return_status = 1;
 	char* path;
 	if (env->argc == 1) {
 		path = env->current_path;
+	} else {
+		path = env->argv[1]; // TODO: add ability for flags
 	}
 	
+	struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
+	handle_t dir;
+	errval_t err = aos_rpc_opendir(init_rpc, path, &dir);
+	if (err_is_fail(err)) goto error;
+	printf("opendir succeeded\n");
+	
+	struct fs_fileinfo finfo;
+	err = aos_rpc_fstat(init_rpc, dir, &finfo);
+	if (err_is_fail(err)) goto error;
+	printf("fstat succeeded\n");
+	
+	if (finfo.type == FS_FILE) {
+		printf("target is not a directory\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	printf("target is directory, size: %d\n", finfo.size);
+	char* name;
+	err = aos_rpc_readdir_next(init_rpc, dir, &name);
+	if (err_is_fail(err)) goto error;
+	
+	printf("reported back: %s\n", name);
+	
+	
+	printf("ls succeeded!\n");
+	env->last_return_status = 0;
+	return;
+error:
+	printf("ls failed: %s\n", err_getcode(err));
 }
 
 static void sh_ps(struct shell_env *env)

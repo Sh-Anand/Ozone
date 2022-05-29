@@ -29,10 +29,6 @@ STATIC_ASSERT(LMP_SINGLE_MSG_MAX_PAYLOAD_SIZE
                   <= (1 << (sizeof(lmp_single_msg_size_t) * 8)),
               "lmp_single_msg_size_t too small");
 
-#define OFFSET(ptr, offset_in_byte) ((uint8_t *)(ptr) + (offset_in_byte))
-
-#define CAST_DEREF(type, ptr, offset_in_byte) (*((type *)OFFSET(ptr, offset_in_byte)))
-
 errval_t lmp_serialize(rpc_identifier_t identifier, struct capref cap, const void *buf,
                        size_t size, uintptr_t ret_payload[LMP_MSG_LENGTH],
                        struct capref *ret_cap, struct lmp_helper *helper)
@@ -891,6 +887,247 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
         }
         memcpy(*pids, return_msg->pids, return_msg->count * sizeof(domainid_t));
     }  // on failure, fall through
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fopen(struct aos_rpc *rpc, const char *path, handle_t *handle) 
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FOPEN, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *handle = *(handle_t *)(return_msg + sizeof(errval_t));
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fclose(struct aos_rpc *rpc, handle_t handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FCLOSE, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fcreate(struct aos_rpc *rpc, const char *path, handle_t *handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FCREATE, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *handle = *(handle_t *)(return_msg + sizeof(errval_t));
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_frm(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FRM, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fread(struct aos_rpc *rpc, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(size_t);
+    void *send_msg = malloc(sizeof(lvaddr_t) + sizeof(size_t));
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
+
+    errval_t err = aos_rpc_call(rpc, RPC_FREAD, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *ret_bytes = *(size_t *)(return_msg + sizeof(errval_t));
+            memcpy(buffer, return_msg + sizeof(errval_t) + sizeof(size_t), *ret_bytes);
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fwrite(struct aos_rpc *rpc, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(size_t) + bytes;
+    void *send_msg = malloc(send_size);
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
+    memcpy(send_msg + sizeof(lvaddr_t) + bytes, buffer, bytes);
+
+    errval_t err = aos_rpc_call(rpc, RPC_FWRITE, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *ret_bytes = *(size_t *)(return_msg + sizeof(errval_t));
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fseek(struct aos_rpc *rpc, handle_t handle, enum fs_seekpos whence, off_t offset)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    size_t send_size = sizeof(lvaddr_t) + sizeof(enum fs_seekpos) + sizeof(off_t);
+    void *send_msg = malloc(send_size);
+    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    memcpy(send_msg + sizeof(lvaddr_t), &whence, sizeof(enum fs_seekpos));
+    memcpy(send_msg + sizeof(lvaddr_t) + sizeof(enum fs_seekpos), &offset, sizeof(off_t));
+
+    errval_t err = aos_rpc_call(rpc, RPC_FSEEK, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+    free(send_msg);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_ftell(struct aos_rpc *rpc, handle_t handle, size_t *ret_offset)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FTELL, NULL_CAP, &handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *ret_offset = *(size_t *)(return_msg + sizeof(errval_t));
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_opendir(struct aos_rpc *rpc, const char *path, handle_t *handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_OPENDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *handle = *(handle_t *)(return_msg + sizeof(errval_t));
+        }
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_mkdir(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_MKDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_rmdir(struct aos_rpc *rpc, const char *path)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_RMDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_closedir(struct aos_rpc *rpc, handle_t handle)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_CLOSEDIR, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_readdir_next(struct aos_rpc *rpc, handle_t handle, char **name)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_READDIR, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        size_t length = *(size_t *)(return_msg + sizeof(errval_t));
+        *name = malloc(length);
+        memcpy(name, return_msg + sizeof(errval_t) + sizeof(size_t), length);
+    }
+
+    free(return_msg);
+    return err;
+}
+
+errval_t aos_rpc_fstat(struct aos_rpc *rpc, handle_t handle, struct fs_fileinfo *info)
+{
+    void *return_msg = NULL;
+    size_t return_size = 0;
+
+    errval_t err = aos_rpc_call(rpc, RPC_FSTAT, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
+    if(err_is_ok(err)) {
+        err = *(errval_t *)return_msg;
+        if(err_is_ok(err)) {
+            *info = *(struct fs_fileinfo *)(return_msg + sizeof(errval_t));
+        }
+    }
 
     free(return_msg);
     return err;

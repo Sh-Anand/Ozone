@@ -16,6 +16,9 @@
 #define _LIB_BARRELFISH_AOS_MESSAGES_H
 
 #include <aos/aos.h>
+#include <fs/fs.h>
+
+typedef void *handle_t;
 
 enum aos_chan_type {
     AOS_CHAN_TYPE_UNKNOWN,
@@ -57,6 +60,20 @@ enum rpc_identifier {
     RPC_STRESS_TEST,
     RPC_REGISTER_AS_NAMESERVER,
     RPC_BIND_NAMESERVER,
+    RPC_FOPEN,
+    RPC_FCREATE,
+    RPC_FREAD,
+    RPC_FWRITE,
+    RPC_FCLOSE,
+    RPC_FSEEK,
+    RPC_FTELL,
+    RPC_FRM,
+    RPC_MKDIR,
+    RPC_RMDIR,
+    RPC_OPENDIR,
+    RPC_READDIR,
+    RPC_CLOSEDIR,
+    RPC_FSTAT,
     RPC_MSG_COUNT,
     // User defined identifier cannot exceed this number
     RPC_IDENTIFIER_MAX = (1U << (sizeof(uint8_t) * 8 - 1)) - 1,
@@ -91,6 +108,10 @@ struct lmp_helper {
     struct capref payload_frame;
     void *mapped_frame;
 };
+
+#define OFFSET(ptr, offset_in_byte) ((uint8_t *)(ptr) + (offset_in_byte))
+
+#define CAST_DEREF(type, ptr, offset_in_byte) (*((type *)OFFSET(ptr, offset_in_byte)))
 
 errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref send_cap, bool no_blocking);
 
@@ -311,6 +332,23 @@ errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid, char **n
  */
 errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan, domainid_t **pids,
                                       size_t *pid_count);
+
+
+//filesystem rpc calls
+errval_t aos_rpc_fopen(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_fclose(struct aos_rpc *chan, handle_t handle);
+errval_t aos_rpc_fcreate(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_frm(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_fread(struct aos_rpc *chan, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes);
+errval_t aos_rpc_fwrite(struct aos_rpc *chan, handle_t handle, void *buffer, size_t bytes, size_t *ret_bytes);
+errval_t aos_rpc_fseek(struct aos_rpc *chan, handle_t handle, enum fs_seekpos fs_whence, off_t offset);
+errval_t aos_rpc_ftell(struct aos_rpc *chan, handle_t handle, size_t *ret_offset);
+errval_t aos_rpc_opendir(struct aos_rpc *chan, const char *path, handle_t *handle);
+errval_t aos_rpc_mkdir(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_rmdir(struct aos_rpc *chan, const char *path);
+errval_t aos_rpc_closedir(struct aos_rpc *chan, handle_t handle);
+errval_t aos_rpc_readdir_next(struct aos_rpc *chan, handle_t handle, char **name);
+errval_t aos_rpc_fstat(struct aos_rpc *chan, handle_t handle, struct fs_fileinfo *info);
 
 
 /**
