@@ -101,9 +101,9 @@ static int fs_libc_open(char *path, int flags)
     if(flags & O_CREAT) {
         // If O_EXCL was also given, we check whether we can open() first
         if(flags & O_EXCL) {
-            err = aos_rpc_fopen(mount, path, &vh);
+            err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
             if(err_is_ok(err)) {
-                aos_rpc_fclose(mount, vh);
+                mount ? aos_rpc_fclose(mount, vh) : fat32_close(vh);
                 errno = EEXIST;
                 return -1;
             }
@@ -112,11 +112,11 @@ static int fs_libc_open(char *path, int flags)
 
         err = aos_rpc_fcreate(mount, path, &vh);
         if (err_is_fail(err) && err == FS_ERR_EXISTS) {
-            err = aos_rpc_fopen(mount, path, &vh);
+            err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
         }
     } else {
         // Regular open()
-        err = aos_rpc_fopen(mount, path, &vh);
+        err = mount ? aos_rpc_fopen(mount, path, &vh) : fat32_open(path, &vh);
     }
 
     if (err_is_fail(err)) {
@@ -139,7 +139,7 @@ static int fs_libc_open(char *path, int flags)
     };
     int fd = fdtab_alloc(&e);
     if (fd < 0) {
-        aos_rpc_fclose(mount, vh);
+        mount ? aos_rpc_fclose(mount, vh) : fat32_close(vh);
         return -1;
     } else {
         return fd;
@@ -157,7 +157,7 @@ static int fs_libc_read(int fd, void *buf, size_t len)
     {
         fat32_handle_t fh = e->handle;
         assert(e->handle);
-        err = aos_rpc_fread(mount, fh, buf, len, &retlen);
+        err = mount ? aos_rpc_fread(mount, fh, buf, len, &retlen) : fat32_read(fh, buf, len, &retlen);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -183,7 +183,7 @@ static int fs_libc_write(int fd, void *buf, size_t len)
     case FDTAB_TYPE_FILE:
     {
         fat32_handle_t fh = e->handle;
-        errval_t err = aos_rpc_fwrite(mount, fh, buf, len, &retlen);
+        errval_t err = mount ? aos_rpc_fwrite(mount, fh, buf, len, &retlen) : fat32_write(fh, buf, len, &retlen);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -207,7 +207,7 @@ static int fs_libc_close(int fd)
     fat32_handle_t fh = e->handle;
     switch(e->type) {
     case FDTAB_TYPE_FILE:
-        err = aos_rpc_fclose(mount, fh);
+        err = mount ? aos_rpc_fclose(mount, fh) : fat32_close(fh);
         if (err_is_fail(err)) {
             return -1;
         }
@@ -248,13 +248,13 @@ static off_t fs_libc_lseek(int fd, off_t offset, int whence)
             return -1;
         }
 
-        err = aos_rpc_fseek(mount, fh, fs_whence, offset);
+        err = mount ? aos_rpc_fseek(mount, fh, fs_whence, offset) : fat32_seek(fh, fs_whence, offset);
         if(err_is_fail(err)) {
             DEBUG_ERR(err, "vfs_seek");
             return -1;
         }
 
-        err = aos_rpc_ftell(mount, fh, &retpos);
+        err = mount ? aos_rpc_ftell(mount, fh, &retpos) : fat32_tell(fh, &retpos);
         if(err_is_fail(err)) {
             return -1;
         }

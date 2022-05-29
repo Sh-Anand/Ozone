@@ -114,7 +114,7 @@ errval_t fat32_truncate(void *st, fat32_handle_t handle, size_t bytes);
 
 errval_t fat32_tell(fat32_handle_t handle, size_t *pos);
 
-errval_t fat32_stat(void *st, fat32_handle_t inhandle, struct fs_fileinfo *info);
+errval_t fat32_stat(fat32_handle_t inhandle, struct fs_fileinfo *info);
 
 errval_t fat32_seek(fat32_handle_t handle, enum fs_seekpos whence,
                     off_t offset);
@@ -136,6 +136,6 @@ errval_t fat32_mount(const char *uri, fat32_mount_t *retst);
 
 void set_sd(struct sdhc_s *sd);
 
-errval_t fat32_init(void);
+errval_t fat32_init(char *mnt);
 
 #endif

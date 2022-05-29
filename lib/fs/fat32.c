@@ -745,7 +745,7 @@ static errval_t delete_dirent(struct fat32_dirent *dir) {
 }
 
 // Initialize the FAT32 filesystem, get all the necessary information, and populate the free block list with some free blocks
-errval_t fat32_init(void) { 
+errval_t fat32_init(char *mnt) { 
     errval_t err;
     uint8_t bpb[SDHC_BLOCK_SIZE];
     
@@ -757,8 +757,7 @@ errval_t fat32_init(void) {
 
     current_directory = NULL;
 
-    mount = malloc(8);
-    mount = "/"; 
+    mount = mnt; 
 
     return SYS_ERR_OK; 
 }
@@ -999,5 +998,12 @@ errval_t fat32_remove(const char *path) {
 
     CHECK_ERR_PUSH(delete_dirent(dir), FS_ERR_DELETE_DIR);
 
+    return SYS_ERR_OK;
+}
+
+errval_t fat32_stat(fat32_handle_t inhandle, struct fs_fileinfo *info) {
+    struct fat32_handle *fhandle = inhandle;
+    info->type = fhandle->isdir ? FS_DIRECTORY : FS_FILE;
+    info->size = fhandle->dirent->size;
     return SYS_ERR_OK;
 }

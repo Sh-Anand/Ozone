@@ -407,7 +407,7 @@ static errval_t init_sd(void) {
 
     set_sd(sd);
 
-    err = fat32_init();
+    err = filesystem_init();
 
     if(err_is_fail(err))
         DEBUG_ERR(err, "FAT INIT FAILED");
@@ -635,6 +635,12 @@ static int app_main(int argc, char *argv[])
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to forge cap_mmstrings");
         abort();
+    }
+
+    //initialize filesystem
+    err = filesystem_init();
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to init filesystem");
     }
 
     spawn_init(rpc_lmp_handler);

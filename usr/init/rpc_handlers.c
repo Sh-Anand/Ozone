@@ -9,6 +9,9 @@
 #include <aos/kernel_cap_invocations.h>
 #include <spawn/spawn.h>
 #include <grading.h>
+#include <fs/fat32.h>
+
+typedef void *handle_t;
 
 // Does not allow cap sending or receiving
 static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
@@ -379,14 +382,122 @@ RPC_HANDLER(terminal_putchar_handler)
     }
 }
 
-// HANDLER(fopen_handler)
-// {
-//     if (disp_get_current_core_id() == 0) {
-//         CAST_IN_MSG(path, char);
-//     } else {
-//         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
-//     }
-// }
+
+
+RPC_HANDLER(fopen_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        handle_t handle;
+        errval_t err = fat32_open(path, &handle);
+        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(opendir_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        handle_t handle;
+        errval_t err = fat32_opendir(path, &handle);
+        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(fclose_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        errval_t err = fat32_close(path);
+        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(closedir_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        errval_t err = fat32_closedir(path);
+        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(fcreate_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        handle_t handle;
+        errval_t err = fat32_create(path, &handle);
+        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(mkdir_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_AT_LEAST_SIZE(path, char);
+        errval_t err = fat32_mkdir(path);
+        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(fread_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        handle_t handle = *(handle_t *) in_payload;
+        size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
+
+        *out_payload = malloc(sizeof(errval_t) + sizeof(size_t) + bytes);
+        size_t ret_size = 0;
+
+        errval_t err = fat32_read(handle, out_payload + sizeof(errval_t) + sizeof(size_t), bytes, &ret_size);
+        memcpy(out_payload, &err, sizeof(err));
+        memcpy(out_payload + sizeof(errval_t), &ret_size, sizeof(size_t));
+
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(fwrite_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        handle_t handle = *(handle_t *) in_payload;
+        size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
+
+        *out_payload = malloc(sizeof(errval_t) + sizeof(size_t));
+        size_t ret_size = 0;
+
+        errval_t err = fat32_write(handle, in_payload + sizeof(lvaddr_t) + sizeof(size_t), bytes, &ret_size);
+
+        memcpy(out_payload, &err, sizeof(err));
+        memcpy(out_payload + sizeof(errval_t), &ret_size, sizeof(size_t));
+
+        return SYS_ERR_OK;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
 
 
 RPC_HANDLER(bind_core_urpc_handler)
@@ -654,4 +765,12 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
     [INTERNAL_RPC_REMOTE_BIND_NAMESERVER] = remote_bind_nameserver_handler,
     [INTERNAL_RPC_GET_LOCAL_PIDS] = get_local_pids_handler,
+    [RPC_FOPEN] = fopen_handler,
+    [RPC_OPENDIR] = opendir_handler,
+    [RPC_FCLOSE] = fclose_handler,
+    [RPC_CLOSEDIR] = closedir_handler,
+    [RPC_FCREATE] = fcreate_handler,
+    [RPC_MKDIR] = mkdir_handler,
+    [RPC_FREAD] = fread_handler,
+    [RPC_FWRITE] = fwrite_handler,
 };
