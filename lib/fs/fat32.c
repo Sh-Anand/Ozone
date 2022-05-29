@@ -59,7 +59,6 @@ int RootSector;
 
 struct free_cluster_list *free_clusters;
 
-struct fat32_dirent *current_directory;
 struct fat32_dirent *root_directory;
 char *mount;
 
@@ -225,8 +224,7 @@ static void check_set_bpb_metadata(uint8_t *bpb) {
     root_directory = malloc(sizeof(struct fat32_dirent));
     root_directory->Attr = ATTR_DIRECTORY;
     root_directory->FstCluster = RootClus;
-    root_directory->name = malloc(1);
-    root_directory->name[0] = '/';
+    root_directory->name = mount;
     root_directory->parent = NULL;
     root_directory->size = -1;
     root_directory->is_dir = true;
@@ -637,7 +635,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
         dir = root_directory;
     }
     else {
-        dir = current_directory;
+        return FS_ERR_NOTFOUND;
     }
 
     CHECK_ERR_PUSH(search_dirent(dir, path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
@@ -747,17 +745,16 @@ static errval_t delete_dirent(struct fat32_dirent *dir) {
 // Initialize the FAT32 filesystem, get all the necessary information, and populate the free block list with some free blocks
 errval_t fat32_init(char *mnt) { 
     errval_t err;
+
+    mount = mnt; 
+
     uint8_t bpb[SDHC_BLOCK_SIZE];
-    
+
     CHECK_ERR(sd_read_sector(BPB_SECTOR, bpb), "bad read");
 
     check_set_bpb_metadata(bpb);
 
     CHECK_ERR(initialize_free_clusters(), "Failed to find free clusters");
-
-    current_directory = NULL;
-
-    mount = mnt; 
 
     return SYS_ERR_OK; 
 }
