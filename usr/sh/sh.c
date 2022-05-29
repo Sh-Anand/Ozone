@@ -46,6 +46,8 @@ static void setup_environment(void)
 	allocate_command_buffer();
 	env.max_args = 16;
 	allocate_argv();
+	env.max_prefix_length = 64;
+	env.prefix = (char*)malloc(env.max_prefix_length);
 	
 	// set stdin to unbuffered
 	setbuffer(stdin, NULL, 0);
@@ -188,10 +190,7 @@ static uint8_t read_from_input(void)
 		printf("\r\n");
 		return 0;
 	} else if (c == 0x08 || c == 0x7f) { // backspace
-		if (env.command_buffer_offset) {
-			env.command_buffer[--env.command_buffer_offset] = 0;
-			printf("\b \b");
-		}
+		shell_delete_character(&env);
 		return 1;
 	} else if (c == '\x1b') { // this is an escape sequence
 		size_t max_i = 64;
@@ -203,7 +202,7 @@ static uint8_t read_from_input(void)
 			if (i+1 >= max_i) escape_sequence = (char*)realloc(escape_sequence, max_i *= 2);
 			c = getchar();
 			escape_sequence[i++] = c;
-			if (is_alpha(c)) {
+			if (is_alpha(c)) { // escape sequences are terminated by an alpha character
 				escape_sequence[i] = 0;
 				active = 0;
 			}
@@ -216,16 +215,70 @@ static uint8_t read_from_input(void)
 		
 		return 1;
 	} else { // nothing interesting, just another character, so add it to the pile
-		env.command_buffer[env.command_buffer_offset++] = c;
-		putchar(c);
+		shell_insert_character(&env, c);
 		return 1;
 	}
+}
+
+void shell_delete_character(struct shell_env *shenv)
+{
+	// in case cursor is at beginning of line, bell and return
+	if (shenv->command_buffer_cursor == 0) {
+		bell();
+		return;
+	}
+	
+	// shift rest of command buffer
+	for (size_t i = shenv->command_buffer_cursor; i <= shenv->command_buffer_offset; i++)
+		shenv->command_buffer[i-1] = shenv->command_buffer[i];
+	
+	shenv->command_buffer_cursor--;
+	shenv->command_buffer_offset--;
+	
+	shenv->command_buffer[shenv->command_buffer_offset] = 0; // terminate the string
+	shell_print_current_line(shenv);
+}
+
+void shell_insert_character(struct shell_env *shenv, char c)
+{
+	// in case the cursor is at the end, simply append
+	if (shenv->command_buffer_cursor != shenv->command_buffer_offset) {
+		size_t len = strlen(shenv->command_buffer);
+		if (len >= shenv->command_buffer_size - 2) allocate_command_buffer();
+		
+		for (size_t i = len; i >= shenv->command_buffer_cursor; i--) shenv->command_buffer[i+1] = shenv->command_buffer[i];
+	}
+	
+	shenv->command_buffer[shenv->command_buffer_cursor] = c;
+	
+	shenv->command_buffer_cursor++;
+	shenv->command_buffer_offset++;
+	
+	shenv->command_buffer[shenv->command_buffer_offset] = 0; // terminate the string
+	shell_print_current_line(shenv);
+}
+
+void shell_print_current_line(struct shell_env *shenv)
+{
+	// the following is done in a single printf statement in order to reduce terminal flickering with multiple consecutive prints on the same line
+	// move to beginning of line
+	// print the prefix
+	// print the command buffer
+	// clear the rest of the line
+	// set the cursor position
+	printf("\e[0E%s%s\e[0K\e[0E\e[%dC", shenv->prefix, shenv->command_buffer, shenv->prefix_length + shenv->command_buffer_cursor);
+	fflush(stdout);
 }
 
 void shell_print_prefix(struct shell_env *shenv)
 {
 	// TODO: this should be more sophisticated
-	printf("team01@AOS %s> \0", shenv->current_path);
+	shenv->prefix_length = snprintf(shenv->prefix, shenv->max_prefix_length - 1, "team01@AOS %s> ", shenv->current_path);
+	if (shenv->prefix_length == shenv->max_prefix_length) {
+		shenv->max_prefix_length *= 2;
+		shenv->prefix = (char*)realloc(shenv->prefix, shenv->max_prefix_length);
+		shell_print_prefix(shenv);
+	}
 }
 
 void bell(void)
@@ -244,7 +297,9 @@ int main(int argc, char **argv)
 		env.command_buffer_size = env.default_command_buffer_size;
 		env.command_buffer = (char*)malloc(env.command_buffer_size);
 		env.command_buffer_offset = 0;
+		env.command_buffer_cursor = 0;
 		shell_print_prefix(&env);
+		shell_print_current_line(&env);
 		
 		// read the input
 		while (read_from_input());
