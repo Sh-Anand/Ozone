@@ -46,7 +46,7 @@ errval_t filesystem_init(void)
     /* TODO: Mount your sdcard at /sdcard */
     struct aos_chan *st = get_init_chan();
     if(!st) {
-        err = fat32_init("/sdcard");
+        err = fat32_init("/sdcard/");
         if (err_is_fail(err)) {
             return err;
         }
