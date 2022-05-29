@@ -49,6 +49,7 @@ enum rpc_identifier {
 	RPC_PROCESS_SPAWN_WITH_STDIN,
     RPC_PROCESS_GET_NAME,
     RPC_PROCESS_GET_ALL_PIDS,
+	RPC_PROCESS_KILL_PID,
 	RPC_TERMINAL_AQUIRE,
 	RPC_TERMINAL_RELEASE,
 	RPC_TERMINAL_HAS_STDIN,
@@ -332,6 +333,9 @@ errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid, char **n
  */
 errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan, domainid_t **pids,
                                       size_t *pid_count);
+
+
+errval_t aos_rpc_process_kill_pid(struct aos_rpc *chan, domainid_t pid);
 
 
 //filesystem rpc calls

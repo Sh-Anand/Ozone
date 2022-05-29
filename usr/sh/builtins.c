@@ -1,9 +1,13 @@
+#include "sh.h"
 #include "builtins.h"
 #include "strutil.h"
+#include "exec_binary.h"
 
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+
+#include <errno.h>
 
 #include <aos/aos_rpc.h>
 
@@ -136,12 +140,72 @@ static void sh_ps(struct shell_env *env)
 
 static void sh_kill(struct shell_env *env)
 {
+	domainid_t pid;
+	errval_t err;
 	env->last_return_status = 1;
-	//struct aos_rpc *rpc = aos_rpc_get_process_channel();
 	
-	// TODO: implement killing over rpc
+	if (env->argc <= 1) {
+		printf("No pids given to kill\n");
+		env->last_return_status = 0;
+		return;
+	}
+	for (int i = 1; i < env->argc; i++) {
+		int r = sscanf(env->argv[i], "%d", &pid);
+		if (r > 0) {
+			err = aos_rpc_process_kill_pid(aos_rpc_get_process_channel(), pid);
+			if (err_is_fail(err)) {
+				printf("Failed to kill process '%s': %s\n", env->argv[i], err_getcode(err));
+			}
+		} else {
+			printf("Invalied PID: '%s'\n", env->argv[i]);
+		}
+	}
+	
+	
 	
 	env->last_return_status = 0;
+}
+
+static void sh_oncore(struct shell_env *env)
+{
+	if (env->argc < 3) {
+		printf("Usage: oncore <core id> <command>...\n");
+		env->last_return_status = 1;
+		return;
+	}
+	
+	uint8_t core;
+	if (sscanf(env->argv[1], "%d", &core) < 1) {
+		printf("Failed to parse core id!\n");
+		env->last_return_status = 1;
+		return;
+	}
+	
+	char* tmp_cmd_buffer = (char*)calloc(strlen(env->command_buffer), 1);
+	size_t offset = 0;
+	for (size_t i = 2; i < env->argc; i++) {
+		size_t sl = strlen(env->argv[i]);
+		memcpy(tmp_cmd_buffer + offset, env->argv[i], sl);
+		tmp_cmd_buffer[sl] = ' ';
+		offset += sl + 1;
+	}
+	
+	printf("Running '%s' on core %d\n", tmp_cmd_buffer, core);
+	
+	struct shell_env tmp_env = {
+		.active = false,
+		.argc = env->argc - 2,
+		.argv = env->argv + 2,
+		.command_buffer = tmp_cmd_buffer,
+		.current_path = env->current_path,
+		.next_core = core
+	};
+	
+	if (!exec_binary(&tmp_env)) {
+		printf("Error cannot run '%s', no such binary!", tmp_env.argv[0]);
+	}
+	
+	free(tmp_cmd_buffer);
 }
 
 
@@ -151,10 +215,15 @@ int builtin(struct shell_env *env)
 	
 	REGISTER_BUILTIN(exit);
 	REGISTER_BUILTIN(echo);
-	REGISTER_BUILTIN(ls);
-	REGISTER_BUILTIN(mkdir);
+	
+	// process management
 	REGISTER_BUILTIN(ps);
 	REGISTER_BUILTIN(kill);
+	REGISTER_BUILTIN(oncore);
+	
+	// file system utilities
+	REGISTER_BUILTIN(ls);
+	REGISTER_BUILTIN(mkdir);
 	
 	return 0; // no builtin has been found
 }

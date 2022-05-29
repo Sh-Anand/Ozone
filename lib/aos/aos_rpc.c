@@ -892,6 +892,12 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *rpc, domainid_t **pids,
     return err;
 }
 
+
+errval_t aos_rpc_process_kill_pid(struct aos_rpc *rpc, domainid_t pid)
+{
+	return aos_rpc_call(rpc, RPC_PROCESS_KILL_PID, NULL_CAP, &pid, sizeof(domainid_t), NULL, NULL, NULL);
+}
+
 errval_t aos_rpc_fopen(struct aos_rpc *rpc, const char *path, handle_t *handle) 
 {
     void *return_msg = NULL;

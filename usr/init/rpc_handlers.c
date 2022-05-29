@@ -398,6 +398,16 @@ RPC_HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
+RPC_HANDLER(process_kill_pid_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+		assert(in_size >= sizeof(domainid_t));
+		return spawn_kill(*(domainid_t*)in_payload);
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
 RPC_HANDLER(terminal_getchar_handler)
 {
     assert(in_size >= sizeof(void*));
@@ -970,6 +980,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_PROCESS_SPAWN_WITH_STDIN] = spawn_msg_stdin_handler,
     [RPC_PROCESS_GET_NAME] = process_get_name_handler,
     [RPC_PROCESS_GET_ALL_PIDS] = process_get_all_pids_handler,
+	[RPC_PROCESS_KILL_PID] = process_kill_pid_handler,
 	[RPC_TERMINAL_AQUIRE] = terminal_aquire_handler,
 	[RPC_TERMINAL_RELEASE] = terminal_release_handler,
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,

@@ -32,7 +32,7 @@ static void handle_keyboard_string(struct shell_env *env, char* seq)
 static void prev_command(struct shell_env *env)
 {
 	// if already at the beginning of the history, don't do anything
-	if (env->history_active && env->history->current == env->history->first) {
+	if (env->history_active && env->history->current == env->history->first && env->history->command_history[env->history->current] != NULL) {
 		bell();
 		return;
 	}
