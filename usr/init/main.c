@@ -415,12 +415,26 @@ static errval_t init_sd(void) {
     if(err_is_fail(err))
         return err;
 
+    fat32_preinit();
     set_sd(sd);
-
     err = filesystem_init();
 
     if(err_is_fail(err))
         DEBUG_ERR(err, "FAT INIT FAILED");
+
+    //I DO NOT KNOW WHY, BUT WITHOUT THESE LINES THE CODE BREAKS!!!!!
+    fat32_handle_t handle;
+    err = fat32_opendir("/sdcard/DIR1", &handle);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "DIR1 open fail");
+    err = fat32_closedir(handle);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "DIR1 close fail");
+    char *name;
+    err = fat32_dir_read_next(handle, &name, NULL);
+    if(err_is_fail(err))
+        DEBUG_ERR(err, "DIR1 read_next fail");
+
 
     return SYS_ERR_OK;
 }

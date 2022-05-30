@@ -538,7 +538,8 @@ RPC_HANDLER(fopen_handler)
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         handle_t handle;
         errval_t err = fat32_open(path, &handle);
-        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        if(err_is_fail(err)) return err;
+        MALLOC_OUT_MSG_WITH_HANDLE(var, lvaddr_t, handle);
         return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -551,7 +552,8 @@ RPC_HANDLER(opendir_handler)
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         handle_t handle;
         errval_t err = fat32_opendir(path, &handle);
-        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        if(err_is_fail(err)) return err;
+        MALLOC_OUT_MSG_WITH_HANDLE(var, lvaddr_t, handle);
         return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -563,8 +565,7 @@ RPC_HANDLER(fclose_handler)
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         errval_t err = fat32_close(path);
-        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
-        return SYS_ERR_OK;
+        return err;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
@@ -575,8 +576,7 @@ RPC_HANDLER(closedir_handler)
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         errval_t err = fat32_closedir(path);
-        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
-        return SYS_ERR_OK;
+        return err;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
@@ -588,7 +588,8 @@ RPC_HANDLER(fcreate_handler)
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         handle_t handle;
         errval_t err = fat32_create(path, &handle);
-        MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, void, err, handle);
+        if(err_is_fail(err)) return err;
+        MALLOC_OUT_MSG_WITH_HANDLE(var, lvaddr_t, handle);
         return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
@@ -600,8 +601,7 @@ RPC_HANDLER(mkdir_handler)
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_AT_LEAST_SIZE(path, char);
         errval_t err = fat32_mkdir(path);
-        MALLOC_OUT_MSG_WITH_ERR(var, void, err);
-        return SYS_ERR_OK;
+        return err;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);
     }
@@ -613,12 +613,12 @@ RPC_HANDLER(fread_handler)
         handle_t handle = *(handle_t *) in_payload;
         size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
 
-        *out_payload = malloc(sizeof(errval_t) + sizeof(size_t) + bytes);
+        *out_payload = malloc(sizeof(size_t) + bytes);
         size_t ret_size = 0;
 
-        errval_t err = fat32_read(handle, out_payload + sizeof(errval_t) + sizeof(size_t), bytes, &ret_size);
-        memcpy(out_payload, &err, sizeof(err));
-        memcpy(out_payload + sizeof(errval_t), &ret_size, sizeof(size_t));
+        errval_t err = fat32_read(handle, (*out_payload) + sizeof(size_t), bytes, &ret_size);
+        if(err_is_fail(err)) { free(*out_payload); return err; }
+        memcpy(out_payload, &ret_size, sizeof(size_t));
 
         return SYS_ERR_OK;
     } else {
@@ -632,13 +632,12 @@ RPC_HANDLER(fwrite_handler)
         handle_t handle = *(handle_t *) in_payload;
         size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
 
-        *out_payload = malloc(sizeof(errval_t) + sizeof(size_t));
         size_t ret_size = 0;
 
         errval_t err = fat32_write(handle, in_payload + sizeof(lvaddr_t) + sizeof(size_t), bytes, &ret_size);
-
-        memcpy(out_payload, &err, sizeof(err));
-        memcpy(out_payload + sizeof(errval_t), &ret_size, sizeof(size_t));
+        if(err_is_fail(err)) return err;
+        *out_payload = malloc(sizeof(size_t));
+        memcpy(out_payload, &ret_size, sizeof(size_t));
 
         return SYS_ERR_OK;
     } else {
@@ -670,15 +669,15 @@ RPC_HANDLER(readdir_handler)
 	if (disp_get_current_core_id() == 0) {
 		handle_t handle = *(handle_t *) in_payload;
 		
-		char* name;
+		char *name;
 		errval_t err = fat32_dir_read_next(handle, &name, NULL);
 		
 		if (err_is_fail(err)) return err;
-		
-		*out_size = strlen(name) + 1;
+        size_t length = strlen(name);
+		*out_size = sizeof(size_t) + length;
 		*out_payload = malloc(*out_size);
-		memcpy(*out_payload, name, *out_size);
-		
+        memcpy(*out_payload, &length, sizeof(size_t));
+		memcpy(*out_payload + sizeof(size_t), name, length);
 		return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);

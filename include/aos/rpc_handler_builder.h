@@ -64,18 +64,10 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
 
 #define MALLOC_OUT_MSG(var, type) MALLOC_OUT_MSG_WITH_SIZE(var, type, sizeof(*var))
 
-#define MALLOC_OUT_MSG_WITH_ERR_HANDLE(var, type, err, handle)                          \
-    size_t size = sizeof(errval_t) + sizeof(lvaddr_t);                                  \
+#define MALLOC_OUT_MSG_WITH_HANDLE(var, type, handle)                                   \
+    size_t size = sizeof(lvaddr_t);                                                     \
     MALLOC_WITH_SIZE(var, type, size);                                                  \
-    memcpy(var, &err, sizeof(errval_t));                                                \
-    memcpy(var + sizeof(errval_t), &handle, sizeof(lvaddr_t));                          \
-    *out_payload = var;                                                                 \
-    *out_size =  size;                                                                  \
-
-#define MALLOC_OUT_MSG_WITH_ERR(var, type, err)                                         \
-    size_t size = sizeof(errval_t);                                                     \
-    MALLOC_WITH_SIZE(var, type, size);                                                  \
-    memcpy(var, &err, sizeof(errval_t));                                                \
+    *var = (type) handle;                                                           \
     *out_payload = var;                                                                 \
     *out_size =  size;                                                                  \
 
