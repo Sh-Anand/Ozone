@@ -11,6 +11,7 @@
 #include <errno.h>
 
 #include <aos/aos_rpc.h>
+#include <aos/systime.h>
 
 #define REGISTER_BUILTIN(name, ...) if (strcmp(env->argv[0], #name) == 0) { sh_##name(env, ##__VA_ARGS__); return 1; }
 
@@ -216,9 +217,52 @@ static void sh_oncore(struct shell_env *env)
 	};
 	
 	if (!exec_binary(&tmp_env)) {
-		printf("Error cannot run '%s', no such binary!", tmp_env.argv[0]);
+		printf("Error cannot run '%s', no such binary!\n", tmp_env.argv[0]);
 	}
 	
+	free(tmp_cmd_buffer);
+}
+
+static void sh_time(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("Usage: time <command>...\n");
+		env->last_return_status = 1;
+		return;
+	}
+	
+	char* tmp_cmd_buffer = (char*)calloc(strlen(env->command_buffer), 1);
+	size_t offset = 0;
+	for (size_t i = 1; i < env->argc; i++) {
+		size_t sl = strlen(env->argv[i]);
+		memcpy(tmp_cmd_buffer + offset, env->argv[i], sl);
+		tmp_cmd_buffer[sl] = ' ';
+		offset += sl + 1;
+	}
+	
+	struct shell_env tmp_env = {
+		.active = false,
+		.argc = env->argc - 1,
+		.argv = env->argv + 1,
+		.command_buffer = tmp_cmd_buffer,
+		.current_path = env->current_path,
+		.next_core = env->next_core
+	};
+	
+	systime_t start = systime_now();
+	if (builtin(&tmp_env)) {}
+	else if (exec_binary(&tmp_env)) {}
+	else {
+		printf("Error: cannot run '%s'!\n", tmp_env.argv[0]);
+		env->last_return_status = 1;
+		goto exit;
+	}
+	
+	systime_t stop = systime_now();
+	uint64_t duration_us = systime_to_us(stop - start);
+	env->last_return_status = 0;
+	printf("Executed successfully! Took %0.3fms\n", (double)duration_us / (double)1000);
+exit:
 	free(tmp_cmd_buffer);
 }
 
@@ -234,6 +278,7 @@ int builtin(struct shell_env *env)
 	REGISTER_BUILTIN(ps);
 	REGISTER_BUILTIN(kill);
 	REGISTER_BUILTIN(oncore);
+	REGISTER_BUILTIN(time);
 	
 	// file system utilities
 	REGISTER_BUILTIN(ls);
