@@ -56,6 +56,35 @@ struct Date {
     uint8_t Year, Month, Day;
 };
 
+struct fat32_manager {
+    struct sdhc_s *sd;
+
+    //meta data
+    int BytsPerSec;
+    int SecPerClus;
+    int RsvdSecCnt;
+    int RootEntCnt;
+    int NumFATs;
+    int TotSec32;
+    int FATSz32;
+    int RootClus;
+
+    //computed from meta data
+    int FirstDataSector;
+    int TotalClusters;
+    int BlocksPerSec;
+
+    //tracking data for current cluster; used for getting free blocks
+    int FreeClustersToCheckFrom;
+
+    int RootSector;
+
+    struct free_cluster_list *free_clusters;
+
+    struct fat32_dirent *root_directory;
+    char *mount;
+};
+
 /**
  * @brief an entry in the fat32_fs
  */
@@ -137,5 +166,7 @@ errval_t fat32_mount(const char *uri, fat32_mount_t *retst);
 void set_sd(struct sdhc_s *sd);
 
 errval_t fat32_init(char *mnt);
+
+void fat32_preinit(void);
 
 #endif
