@@ -492,6 +492,11 @@ RPC_HANDLER(remote_cap_transfer_handler)
 static errval_t coordinate_nameserver_binding(domainid_t client_pid,
                                               struct capref *out_frame)
 {
+    // Wait for the nameserver to online
+    if (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
+        return MON_ERR_RETRY;
+    }
+
     errval_t err;
     struct capref frame;
     // The input frame contains two UMP channels: first for RPC, second for listener
@@ -500,19 +505,13 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
         return err_push(err, LIB_ERR_FRAME_ALLOC);
     }
 
-    // Wait for the nameserver to online
-    while (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
-        err = event_dispatch_non_block(get_default_waitset());
-        if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
-            DEBUG_ERR(err, "in event_dispatch");
-            return err;
-        }
-    }
-
-    err = aos_chan_call(&nameserver_rpc.chan, 0, frame, &client_pid, sizeof(domainid_t),
-                        out_frame, NULL, NULL);
+    err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &client_pid, sizeof(domainid_t), true);
     if (err_is_fail(err)) {
         cap_destroy(frame);
+        if (lmp_err_is_transient(err)) {
+            cap_destroy(frame);
+            return MON_ERR_RETRY;
+        }
         return err;  // expose transient error to the user
     }
 
@@ -530,7 +529,10 @@ RPC_HANDLER(bind_nameserver_handler)
 
     if (disp_get_core_id() == 0) {
         // Return the frame as out_cap
-        return coordinate_nameserver_binding(proc->pid, out_cap);
+        err = coordinate_nameserver_binding(proc->pid, out_cap);
+        if (err_is_fail(err)) {
+            return err;
+        }
 
     } else {
         // Allocate a slot for the frame cap
@@ -560,8 +562,10 @@ RPC_HANDLER(bind_nameserver_handler)
         }
 
         *out_cap = frame;
-        return SYS_ERR_OK;
     }
+
+    // DEBUG_PRINTF(">> process %u tries to bind nameserver\n", proc->pid);
+    return SYS_ERR_OK;
 }
 
 RPC_HANDLER(remote_bind_nameserver_handler)
@@ -576,6 +580,7 @@ RPC_HANDLER(remote_bind_nameserver_handler)
     if (err_is_fail(err)) {
         return err;
     }
+    // DEBUG_PRINTF("> process %u remote bind nameserver\n", *pid);
 
     // Serialize
     MALLOC_OUT_MSG(msg, struct capability);
@@ -584,6 +589,8 @@ RPC_HANDLER(remote_bind_nameserver_handler)
         cap_destroy(frame);
         return err_push(err, LIB_ERR_CAP_IDENTIFY);
     }
+
+    // DEBUG_PRINTF(">> process %u remote bind nameserver\n", *pid);
     return SYS_ERR_OK;
 }
 

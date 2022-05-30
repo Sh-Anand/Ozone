@@ -234,6 +234,14 @@ static errval_t boot_core(coreid_t core)
     return SYS_ERR_OK;
 }
 
+static AOS_CHAN_HANDLER(nameserver_rpc_reply_handler) {
+    *out_size = -1;  // -1 means no reply
+
+    // XXX: maybe check and print errors here
+
+    return SYS_ERR_OK;
+}
+
 static errval_t start_nameserver(void)
 {
     errval_t err;
@@ -247,7 +255,7 @@ static errval_t start_nameserver(void)
     assert(nameserver_rpc.chan.lc.connstate == LMP_BIND_WAIT);
     // Binding is handled automatically
     err = aos_chan_register_recv(&nameserver_rpc.chan, get_default_waitset(),
-                                 NULL, NULL);
+                                 nameserver_rpc_reply_handler, NULL);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
     }

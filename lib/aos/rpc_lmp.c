@@ -166,11 +166,7 @@ errval_t lmp_try_send(struct lmp_chan *lc, uintptr_t *send_words, struct capref 
                 if (non_blocking) {
                     return err;  // expose transient error directly
                 } else {
-                    err = event_dispatch_non_block(get_default_waitset());
-                    if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
-                        DEBUG_ERR(err, "in event_dispatch");
-                        return err;
-                    }
+                    thread_yield();
                 }
             } else {
                 return err_push(err, LIB_ERR_LMP_CHAN_SEND);
@@ -189,11 +185,7 @@ errval_t lmp_try_recv(struct lmp_chan *lc, struct lmp_recv_msg *recv_msg,
         err = lmp_chan_recv(lc, recv_msg, recv_cap);
         if (err_is_fail(err)) {
             if (err == LIB_ERR_NO_LMP_MSG) {
-                err = event_dispatch_non_block(get_default_waitset());
-                if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
-                    DEBUG_ERR(err, "in event_dispatch");
-                    return err;
-                }
+                thread_yield();
             } else {
                 return err_push(err, LIB_ERR_LMP_CHAN_RECV);
             }
@@ -268,7 +260,7 @@ errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
     struct lmp_recv_msg recv_msg = LMP_RECV_MSG_INIT;
     struct capref recv_cap = NULL_CAP;
 
-    THREAD_MUTEX_ENTER_OR_DISPATCH_IF(&chan->mutex, !no_lock)
+    THREAD_MUTEX_ENTER_IF(&chan->mutex, !no_lock)
     {
         // Send
         err = lmp_try_send(lc, send_words, send_cap, false);
@@ -453,15 +445,18 @@ static void rpc_lmp_generic_handler(void *arg)
         bool free_out_payload = true;
         err = chan->handler(chan->arg, recv_identifier, recv_buf, recv_size, recv_cap,
                             &reply_buf, &reply_size, &reply_cap, &free_out_payload, &re_register);
-        if (err_is_ok(err)) {
-            err = rpc_lmp_ack(lc, reply_cap, reply_buf, reply_size);
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
-            }
-        } else {
-            err = rpc_lmp_nack(lc, err);
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "%s: aos_chan_nack failed\n", __func__);
+
+        if (reply_size != -1) {  // -1 means no reply
+            if (err_is_ok(err)) {
+                err = rpc_lmp_ack(lc, reply_cap, reply_buf, reply_size);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
+                }
+            } else {
+                err = rpc_lmp_nack(lc, err);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "%s: aos_chan_nack failed\n", __func__);
+                }
             }
         }
 
@@ -481,7 +476,7 @@ static void rpc_lmp_generic_handler(void *arg)
 FAILURE:
     // Do nothing for now
 RE_REGISTER:
-    if (chan->handler && re_register) {
+    if (re_register) {
         err = lmp_chan_register_recv(lc, get_default_waitset(),
                                      MKCLOSURE(rpc_lmp_generic_handler, arg));
         if (err_is_fail(err)) {

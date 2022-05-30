@@ -10,7 +10,7 @@
 
 // XXX: is there a more elegant way to expose it only to aos lib and init?
 enum nameservice_rpc_identifier {
-    NAMESERVICE_REGISTER,             // [call] payload: name
+    NAMESERVICE_REGISTER = RPC_IDENTIFIER_USER_START,             // [call] payload: name
                                       // [return] errval
 
     NAMESERVICE_REFILL_LMP_ENDPOINT,  // Deprecated

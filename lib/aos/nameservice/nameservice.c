@@ -36,8 +36,10 @@ static errval_t ensure_nameserver_chan(void)
 
     // Bind with the nameserver
     struct capref frame;
-    err = aos_rpc_call(get_init_rpc(), RPC_BIND_NAMESERVER, NULL_CAP, NULL, 0, &frame,
-                       NULL, NULL);
+    do {
+        err = aos_rpc_call(get_init_rpc(), RPC_BIND_NAMESERVER, NULL_CAP, NULL, 0, &frame,
+                           NULL, NULL);
+    } while (err == MON_ERR_RETRY);
     if (err_is_fail(err)) {
         goto FAILURE_BIND_NAMESERVER_RPC;
     }
@@ -234,5 +236,6 @@ static AOS_CHAN_HANDLER(ns_notification_handler)
         return ERR_INVALID_ARGS;
     }
 
+    *out_size = -1;  // do not reply !!!
     return SYS_ERR_OK;
 }

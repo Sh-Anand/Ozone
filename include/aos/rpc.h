@@ -122,7 +122,7 @@ errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
  * \brief Unified interface to send a message
  */
 errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref cap, const void *buf, size_t size, bool no_blocking);
+                       struct capref cap, const void *buf, size_t size, bool non_blocking);
 
 /**
  * \brief Reply a successful RPC call.

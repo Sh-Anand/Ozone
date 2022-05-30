@@ -84,8 +84,8 @@ RPC_HANDLER(nameserver_bind)
         err = err_push(err, LIB_ERR_UMP_CHAN_INIT);
         goto FAILURE;
     }
-    err = aos_chan_register_recv(&b->chan, get_default_waitset(),
-                                 nameserver_urpc_handler, b);
+    err = aos_chan_register_recv(&b->chan, get_default_waitset(), nameserver_urpc_handler,
+                                 b);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
         goto FAILURE;
@@ -124,7 +124,8 @@ static AOS_CHAN_HANDLER(nameserver_urpc_handler)
         DEBUG_PRINTF("%s: invalid URPC msg %u\n", __func__, NAMESERVICE_RPC_COUNT);
         return ERR_INVALID_ARGS;
     }
-    return rpc_handlers[identifier](arg, in_payload, in_size, out_payload, out_size, in_cap, out_cap);
+    return rpc_handlers[identifier](arg, in_payload, in_size, out_payload, out_size,
+                                    in_cap, out_cap);
 }
 
 RPC_HANDLER(handle_register)
@@ -171,7 +172,8 @@ RPC_HANDLER(handle_deregister)
     return SYS_ERR_OK;
 }
 
-RPC_HANDLER(handle_lookup) {
+RPC_HANDLER(handle_lookup)
+{
     struct program *client = arg;
     errval_t err;
 
@@ -189,28 +191,16 @@ RPC_HANDLER(handle_lookup) {
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_FRAME_ALLOC);
     }
-    
-    uint8_t *urpc_buffer;
-    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
-                           UMP_CHAN_SHARED_FRAME_SIZE, frame);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_PAGING_MAP);
-    }
 
-    // Nameserver for zeroing the URPC frame
-    memset(urpc_buffer, 0, UMP_CHAN_SHARED_FRAME_SIZE);
-
-    err = paging_unmap(get_current_paging_state(), (void *)urpc_buffer);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_PAGING_UNMAP);
-    }
     // DEBUG_PRINTF("> process %u lookup \"%s\"\n", client->pid, name);
 
     struct program *server = service->program;
-    MALLOC_WITH_SIZE(server_reply, struct ns_binding_notification, sizeof(domainid_t) + strlen(name) + 1);
+    MALLOC_WITH_SIZE(server_reply, struct ns_binding_notification,
+                     sizeof(domainid_t) + strlen(name) + 1);
     server_reply->pid = client->pid;
     memcpy(server_reply->name, name, strlen(name) + 1);
-    err = aos_chan_send(&server->notifier, SERVER_BIND_UMP, frame, server_reply, sizeof(domainid_t) + strlen(name) + 1, false);
+    err = aos_chan_send(&server->notifier, SERVER_BIND_UMP, frame, server_reply,
+                        sizeof(domainid_t) + strlen(name) + 1, false);
     if (err_is_fail(err)) {
         return err;
     }
@@ -232,18 +222,17 @@ static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT] = {
 
 struct aos_chan init_listener;
 
-static AOS_CHAN_HANDLER(init_msg_handler) {
-    return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap, out_cap);
+static AOS_CHAN_HANDLER(init_msg_handler)
+{
+    return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap,
+                           out_cap);
 }
 
 int main(int argc, char *argv[])
 {
     errval_t err;
 
-    struct capref init_listener_ep = {
-        .cnode = cnode_task,
-        .slot = TASKCN_SLOTS_FREE
-    };
+    struct capref init_listener_ep = { .cnode = cnode_task, .slot = TASKCN_SLOTS_FREE };
 
     if (capref_is_null(init_listener_ep)) {
         DEBUG_PRINTF("init does not provide listener ep\n");
@@ -258,7 +247,8 @@ int main(int argc, char *argv[])
     }
 
     // The following call includes lmp_chan_alloc_recv_slot
-    err = aos_chan_register_recv(&init_listener, get_default_waitset(), init_msg_handler, NULL);
+    err = aos_chan_register_recv(&init_listener, get_default_waitset(), init_msg_handler,
+                                 NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to listen on init_listener\n");
         exit(EXIT_FAILURE);

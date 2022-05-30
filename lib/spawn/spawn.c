@@ -20,7 +20,7 @@ extern coreid_t my_core_id;
 static aos_chan_handler_t rpc_handler = NULL;
 
 static struct proc_mgmt mgmt;
-#define PROC_ENDPOINT_BUF_LEN 16
+#define PROC_ENDPOINT_BUF_LEN 32
 
 // TODO: these address works?
 #define CHILD_DISPFRAME_VADDR (0x20000000)

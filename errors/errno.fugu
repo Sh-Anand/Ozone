@@ -591,6 +591,8 @@ errors monitor MON_ERR_ {
     // Invocations
     failure INVOKE_IRQ_ALLOCATE "Unable to allocate IRQ vector",
     failure INVOKE_IRQ_SET "Unable to install IRQ vector",
+
+    failure RETRY      "Cannot perform the operation now, retry",
 };
 
 errors nameserver NAMESERVER_ERR_ {

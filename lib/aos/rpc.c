@@ -150,11 +150,11 @@ errval_t aos_chan_call(struct aos_chan *chan, rpc_identifier_t identifier,
 }
 
 errval_t aos_chan_send(struct aos_chan *chan, rpc_identifier_t identifier,
-                       struct capref cap, const void *buf, size_t size, bool no_blocking)
+                       struct capref cap, const void *buf, size_t size, bool non_blocking)
 {
     switch (chan->type) {
     case AOS_CHAN_TYPE_LMP:
-        return rpc_lmp_send(&chan->lc, identifier, cap, buf, size, no_blocking);
+        return rpc_lmp_send(&chan->lc, identifier, cap, buf, size, non_blocking);
     case AOS_CHAN_TYPE_UMP:
         return rpc_ump_send(&chan->uc, identifier, cap, buf, size);
     case AOS_CHAN_TYPE_ECHO:

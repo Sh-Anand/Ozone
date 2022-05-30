@@ -8,8 +8,8 @@
 #include <aos/domain.h>
 #include <string.h>
 
-errval_t rpc_ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_t identifier,
-                               void **ret)
+errval_t rpc_ump_prefix_identifier(const void *buf, size_t size,
+                                   rpc_identifier_t identifier, void **ret)
 {
     uint8_t *new_buf = malloc(sizeof(rpc_identifier_t) + size);
     if (new_buf == NULL) {
@@ -23,19 +23,16 @@ errval_t rpc_ump_prefix_identifier(const void *buf, size_t size, rpc_identifier_
     return SYS_ERR_OK;
 }
 
-static errval_t ump_chan_recv_blocking_dispatch(struct ump_chan *uc, void **payload, size_t *size) {
+__attribute((unused))
+static errval_t ump_chan_recv_blocking_dispatch(struct ump_chan *uc, void **payload,
+                                                size_t *size)
+{
     errval_t err;
     while (true) {
         err = ump_chan_recv(uc, payload, size);
         if (err_is_fail(err)) {
             if (err == LIB_ERR_RING_NO_MSG) {
-                
-                err = event_dispatch_non_block(get_default_waitset());
-                if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
-                    DEBUG_ERR(err, "in event_dispatch");
-                    return err;
-                }
-                
+                thread_yield();
             } else {
                 return err_push(err, LIB_ERR_LMP_CHAN_RECV);
             }
@@ -57,10 +54,10 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
     size_t recv_size = 0;
 
     // Grab init rpc for capability transfer
-    THREAD_MUTEX_ENTER_OR_DISPATCH(&get_init_rpc()->chan.mutex)
+    THREAD_MUTEX_ENTER(&get_init_rpc()->chan.mutex)
     {
         // Step 1: wait for ACK from UMP channel
-        err = ump_chan_recv_blocking_dispatch(uc, (void **)&recv_payload, &recv_size);
+        err = ump_chan_recv_blocking(uc, (void **)&recv_payload, &recv_size);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_send_cap: cap transfer step 1 fail\n");
             THREAD_MUTEX_BREAK;
@@ -88,8 +85,8 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
         // Step 3: send the cap through init
         // There must be no way to trigger recursive init RPC call inside
         do {
-            err = rpc_lmp_call(&get_init_rpc()->chan, RPC_TRANSFER_CAP, call_cap, &uc->pid,
-                               sizeof(uc->pid), NULL, NULL, NULL, true);
+            err = rpc_lmp_call(&get_init_rpc()->chan, RPC_TRANSFER_CAP, call_cap,
+                               &uc->pid, sizeof(uc->pid), NULL, NULL, NULL, true);
         } while (lmp_err_is_transient(err));
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_send_cap: cap transfer step 3 fail\n");
@@ -113,7 +110,7 @@ errval_t rpc_ump_recv_cap(struct ump_chan *uc, struct capref *recv_cap)
     }
 
     // Grab init rpc for capability transfer
-    THREAD_MUTEX_ENTER_OR_DISPATCH(&get_init_rpc()->chan.mutex)
+    THREAD_MUTEX_ENTER(&get_init_rpc()->chan.mutex)
     {
         // Step 1: send RPC_ACK_CAP_CHANNEL in UMP channel
         rpc_identifier_t ack = RPC_ACK_CAP_CHANNEL;
@@ -233,7 +230,7 @@ errval_t rpc_ump_call(struct aos_chan *chan, rpc_identifier_t identifier,
     size_t recv_size = 0;
     struct capref recv_cap = NULL_CAP;
 
-    THREAD_MUTEX_ENTER_OR_DISPATCH(&chan->mutex)
+    THREAD_MUTEX_ENTER(&chan->mutex)
     {
         // Make the call and transfer cap if needed
         err = rpc_ump_send(uc, identifier, call_cap, call_buf, call_size);
@@ -243,7 +240,7 @@ errval_t rpc_ump_call(struct aos_chan *chan, rpc_identifier_t identifier,
         }
 
         // Receive acknowledgement and/or return message
-        err = ump_chan_recv_blocking_dispatch(uc, (void **)&recv_payload, &recv_size);
+        err = ump_chan_recv_blocking(uc, (void **)&recv_payload, &recv_size);
         if (err_is_fail(err)) {
             err = err_push(err, LIB_ERR_UMP_CHAN_RECV);
             DEBUG_ERR(err, "rpc_ump_call: failed to recv\n");
@@ -349,19 +346,23 @@ static void rpc_ump_generic_handler(void *arg)
         struct capref reply_cap = NULL_CAP;
         bool free_out_payload = true;
         err = chan->handler(chan->arg, recv_identifier, recv_buf, recv_size, recv_cap,
-                            &reply_buf, &reply_size, &reply_cap, &free_out_payload, &re_register);
+                            &reply_buf, &reply_size, &reply_cap, &free_out_payload,
+                            &re_register);
 
-        if (err_is_fail(err)) {
-            err = rpc_ump_nack(uc, err);
+        if (reply_size != -1) {  // -1 means no reply
             if (err_is_fail(err)) {
-                DEBUG_ERR(err, "%s: aos_chan_nack failed\n", __func__);
-            }
-        } else {
-            err = rpc_ump_ack(uc, reply_cap, reply_buf, reply_size);
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
+                err = rpc_ump_nack(uc, err);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "%s: aos_chan_nack failed\n", __func__);
+                }
+            } else {
+                err = rpc_ump_ack(uc, reply_cap, reply_buf, reply_size);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
+                }
             }
         }
+
         if (free_out_payload) {
             free(reply_buf);
         }
