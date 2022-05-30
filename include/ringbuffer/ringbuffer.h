@@ -21,7 +21,6 @@ errval_t ring_init(void *buffer);
 
 struct ring_producer {
 	void *ringbuffer;
-	// TODO: necessary data
 };
 
 errval_t ring_producer_init(struct ring_producer *rp, void *ring_buffer);
@@ -29,7 +28,6 @@ errval_t ring_producer_send(struct ring_producer *rp, const void *payload, size_
 
 struct ring_consumer {
 	void *ringbuffer;
-	// TODO: necessary fields
 };
 
 errval_t ring_consumer_init(struct ring_consumer *rc, void *ring_buffer);

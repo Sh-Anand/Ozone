@@ -2,14 +2,12 @@
 // Created by Zikai Liu on 5/3/22.
 //
 
-#include "aos/aos_rpc.h"
-#include "aos/nameserver.h"
-#include "sys/queue.h"
-#include "spawn/spawn.h"
-#include "aos/lmp_handler_builder.h"
-#include "aos/ump_handler_builder.h"
-#include "aos/rpc_handler_builder.h"
-#include "sys/tree.h"
+#include <aos/aos_rpc.h>
+#include <aos/nameserver.h>
+#include <sys/queue.h>
+#include <spawn/spawn.h>
+#include <aos/rpc_handler_builder.h>
+#include <sys/tree.h>
 
 struct program {
     domainid_t pid;
@@ -43,8 +41,7 @@ static struct service *find_service(char *name)
     return RB_FIND(service_rb_tree, &services, &find);
 }
 
-static void nameserver_urpc_handler(void *arg);
-
+static AOS_CHAN_HANDLER(nameserver_urpc_handler);
 
 RPC_HANDLER(nameserver_bind)
 {
@@ -87,8 +84,8 @@ RPC_HANDLER(nameserver_bind)
         err = err_push(err, LIB_ERR_UMP_CHAN_INIT);
         goto FAILURE;
     }
-    err = ump_chan_register_recv(&b->chan.uc, get_default_waitset(),
-                                 MKCLOSURE(nameserver_urpc_handler, b));
+    err = aos_chan_register_recv(&b->chan, get_default_waitset(),
+                                 nameserver_urpc_handler, b);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
         goto FAILURE;
@@ -121,21 +118,13 @@ static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT];
  * Nameserver URPC handler
  * @param arg  *struct client
  */
-static void nameserver_urpc_handler(void *arg)
+static AOS_CHAN_HANDLER(nameserver_urpc_handler)
 {
-    errval_t err;
-    struct program *client = arg;
-    assert(client->chan.type == AOS_CHAN_TYPE_UMP);
-    struct ump_chan *uc = &client->chan.uc;
-
-    UMP_RECV_DESERIALIZE(uc)
-    UMP_RECV_NO_CAP
-
-    // DEBUG_PRINTF("nameserver_urpc_handler: handling %u\n", type);
-    UMP_ASSERT_DISPATCHER(rpc_handlers, NAMESERVICE_RPC_COUNT);
-    UMP_DISPATCH_AND_REPLY_MAY_FAIL(&client->chan, rpc_handlers[recv_type], client)
-
-    UMP_CLEANUP_AND_RE_REGISTER(uc, nameserver_urpc_handler, arg)
+    if (identifier >= NAMESERVICE_RPC_COUNT || rpc_handlers[identifier] == NULL) {
+        DEBUG_PRINTF("%s: invalid URPC msg %u\n", __func__, NAMESERVICE_RPC_COUNT);
+        return ERR_INVALID_ARGS;
+    }
+    return rpc_handlers[identifier](arg, in_payload, in_size, out_payload, out_size, in_cap, out_cap);
 }
 
 RPC_HANDLER(handle_register)
@@ -243,35 +232,8 @@ static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT] = {
 
 struct aos_chan init_listener;
 
-static void init_msg_handler(void *arg) {
-    errval_t err;
-    struct aos_chan *chan = arg;
-    assert(chan->type == AOS_CHAN_TYPE_LMP);
-    struct lmp_chan *lc = &chan->lc;
-
-    // Receive the message and cap, refill the recv slot, deserialize
-    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
-                                recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
-
-    // Call the handler, no reply to init
-    void *reply_payload = NULL;
-    size_t reply_size = 0;
-    struct capref reply_cap = NULL_CAP;
-    err = nameserver_bind(NULL, recv_buf, recv_size, &reply_payload, &reply_size,
-                recv_cap, &reply_cap);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "nameserver_bind failed\n");
-    }
-    if (reply_payload != NULL) {
-        free(reply_payload);
-    }
-
-    // Deserialization cleanup
-    LMP_CLEANUP(err, helper)
-
-FAILURE:
-RE_REGISTER:
-    LMP_RE_REGISTER(err, lc, init_msg_handler, arg)
+static AOS_CHAN_HANDLER(init_msg_handler) {
+    return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap, out_cap);
 }
 
 int main(int argc, char *argv[])
@@ -288,37 +250,15 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    // The following call include sending the local cap to complete setup
     err = aos_chan_lmp_accept(&init_listener, 32, init_listener_ep);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to init init_listener\n");
         exit(EXIT_FAILURE);
     }
 
-    err = aos_chan_send(&init_listener, 0, init_listener.lc.local_cap, NULL, 0, false);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to register as the nameserver\n");
-        exit(EXIT_FAILURE);
-    }
-
-    struct lmp_recv_msg ack_msg = LMP_RECV_MSG_INIT;
-    err = lmp_try_recv(&init_listener.lc, &ack_msg, NULL);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to receive ack from init\n");
-        exit(EXIT_FAILURE);
-    }
-    if (*((rpc_identifier_t*) ack_msg.words) != RPC_ACK) {
-        err = *((errval_t *) (((uint8_t *) ack_msg.words) + sizeof(rpc_identifier_t)));
-        DEBUG_ERR(err, "nack from init\n");
-        exit(EXIT_FAILURE);
-    }
-
-    err = lmp_chan_alloc_recv_slot(&init_listener.lc);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "failed to alloc recv slot on init_listener\n");
-        exit(EXIT_FAILURE);
-    }
-
-    err = lmp_chan_register_recv(&init_listener.lc, get_default_waitset(), MKCLOSURE(init_msg_handler, &init_listener));
+    // The following call includes lmp_chan_alloc_recv_slot
+    err = aos_chan_register_recv(&init_listener, get_default_waitset(), init_msg_handler, NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to listen on init_listener\n");
         exit(EXIT_FAILURE);

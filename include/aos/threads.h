@@ -123,10 +123,32 @@ static inline void thread_once(thread_once_t *control, void (*func)(void)) {
 void thread_set_status(int status);
 
 #define THREAD_MUTEX_ENTER(mutex) thread_mutex_lock(mutex); do
+#define THREAD_MUTEX_ENTER_OR_DISPATCH(mutex)                                            \
+    {                                                                                    \
+        while (!thread_mutex_trylock(mutex)) {                                           \
+            err = event_dispatch_non_block(get_default_waitset());                       \
+            if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {                           \
+                DEBUG_ERR(err, "in event_dispatch");                                     \
+                return err;                                                              \
+            }                                                                            \
+        }                                                                                \
+    }                                                                                    \
+    do
 #define THREAD_MUTEX_BREAK        break
 #define THREAD_MUTEX_EXIT(mutex)  while(0); thread_mutex_unlock(mutex);
 
 #define THREAD_MUTEX_ENTER_IF(mutex, b) if (b) { thread_mutex_lock(mutex); } do
+#define THREAD_MUTEX_ENTER_OR_DISPATCH_IF(mutex, b)                                      \
+    if (b) {                                                                             \
+        while (!thread_mutex_trylock(mutex)) {                                           \
+            err = event_dispatch_non_block(get_default_waitset());                       \
+            if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {                           \
+                DEBUG_ERR(err, "in event_dispatch");                                     \
+                return err;                                                              \
+            }                                                                            \
+        }                                                                                \
+    }                                                                                    \
+    do
 #define THREAD_MUTEX_EXIT_IF(mutex, b)  while(0); if (b) { thread_mutex_unlock(mutex); }
 
 __END_DECLS

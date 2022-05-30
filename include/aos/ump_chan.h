@@ -94,6 +94,11 @@ static inline errval_t ump_chan_deregister_recv(struct ump_chan *uc) {
     return waitset_chan_deregister(&uc->recv_waitset);
 }
 
+static inline bool ump_chan_can_recv(struct ump_chan *uc)
+{
+    return ring_consumer_can_recv(&uc->recv);
+}
+
 __END_DECLS
 
 #endif

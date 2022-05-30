@@ -17,7 +17,7 @@ extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
-static void (*rpc_handler)(void *) = NULL;
+static aos_chan_handler_t rpc_handler = NULL;
 
 static struct proc_mgmt mgmt;
 #define PROC_ENDPOINT_BUF_LEN 16
@@ -224,33 +224,25 @@ static errval_t setup_endpoint(struct spawninfo *si)
     errval_t err;
 
     // Create a new endpoint for the program
-    // si->lc should point to proc_node.chan.lc and uninitialized
-    assert(si->lc != NULL);
-    err = lmp_chan_init_local(si->lc, PROC_ENDPOINT_BUF_LEN);
+    err = aos_chan_lmp_init_local(si->chan, PROC_ENDPOINT_BUF_LEN);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_CHAN_INIT);
     }
 
-    // Assign initial slot for incoming cap
-    err = lmp_chan_alloc_recv_slot(si->lc);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
-    }
-
-    // Start receiving on the channel
-    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->proc));
+    // Start receiving on the channel (include lmp_chan_alloc_recv_slot)
+    err = aos_chan_register_recv(si->chan, get_default_waitset(), rpc_handler, si->proc);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
     }
 
     // The channel is still waiting for remote_cap
-    si->lc->connstate = LMP_BIND_WAIT;
+    assert(si->chan->lc.connstate == LMP_BIND_WAIT);
 
     struct capref child_initep_slot = {
         .cnode = si->taskcn,
         .slot = TASKCN_SLOT_INITEP,
     };
-    err = cap_copy(child_initep_slot, si->lc->local_cap);
+    err = cap_copy(child_initep_slot, si->chan->lc.local_cap);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
@@ -573,7 +565,6 @@ errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_t
 
     si->proc = node;
     si->chan = &node->chan;  // will be filled by setup_endpoint()
-    si->lc = &si->chan->lc;
 
     // Setup CSpace
     err = setup_cspace(si);
@@ -676,7 +667,7 @@ errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_
     return spawn_load_cmdline_with_cap(cmdline, NULL_CAP, si, pid);
 }
 
-void spawn_init(void (*handler)(void *)) {
+void spawn_init(aos_chan_handler_t handler) {
     proc_mgmt_init(&mgmt);
     rpc_handler = handler;
 }

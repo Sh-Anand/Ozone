@@ -18,7 +18,7 @@ struct enumerate_reply_msg {
 };
 
 enum msg_identifier {
-    IDENTIFIER_NORMAL,
+    DEFAULT_IDENTIFIER,
 };
 
 /*

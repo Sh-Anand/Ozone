@@ -3,8 +3,6 @@
 //
 
 #include <aos/aos.h>
-#include <aos/aos_rpc.h>
-#include <aos/lmp_handler_builder.h>
 #include "internal.h"
 
 #define CLIENT_SIDE_LMP_BUF_LEN 32
@@ -77,17 +75,9 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
 
     switch (c.type) {
     case ObjType_EndPointLMP: {
+        // The following call include sending the local cap to complete setup
         err = aos_chan_lmp_accept(&chan->rpc.chan, CLIENT_SIDE_LMP_BUF_LEN, ret_cap);
         if (err_is_fail(err)) {
-            goto FAILURE_CHAN_SETUP;
-        }
-        struct lmp_chan *lc = &chan->rpc.chan.lc;
-
-        // Send the local cap through the channel to complete setup
-        err = aos_rpc_call(&chan->rpc, IDENTIFIER_NORMAL, lc->local_cap, NULL, 0, NULL,
-                           NULL, NULL);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "client_lookup_service: fail to send local_cap\n");
             goto FAILURE_CHAN_SETUP;
         }
     } break;
@@ -159,7 +149,7 @@ errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,
     errval_t err;
 
     struct capref ret_cap = NULL_CAP;
-    err = aos_rpc_call(&chan->rpc, IDENTIFIER_NORMAL, tx_cap, message, bytes, &ret_cap, response, response_bytes);
+    err = aos_rpc_call(&chan->rpc, DEFAULT_IDENTIFIER, tx_cap, message, bytes, &ret_cap, response, response_bytes);
     if (err_is_fail(err)) {
         return err;
     }

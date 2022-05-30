@@ -3,9 +3,6 @@
 //
 
 #include <aos/aos.h>
-#include <aos/aos_rpc.h>
-#include <aos/lmp_handler_builder.h>
-#include <aos/ump_handler_builder.h>
 #include "internal.h"
 
 #define SERVER_SIDE_LMP_BUF_LEN 32
@@ -14,8 +11,7 @@
 struct service;
 struct server_side_chan;
 static void delete_chan(struct server_side_chan *chan);
-static void server_lmp_handler(void *arg);
-static void server_ump_handler(void *arg);
+static AOS_CHAN_HANDLER(server_ump_handler);
 
 struct service {
     char *name;  // hold the life cycle
@@ -104,23 +100,6 @@ static void delete_chan(struct server_side_chan *chan)
     free(chan);
 }
 
-static errval_t create_pending_lmp_chan_on_service(struct service *service)
-{
-    errval_t err;
-    service->pending_lmp_chan = NULL;
-    err = create_chan_from_service(service, &service->pending_lmp_chan);
-    if (err_is_fail(err)) {
-        return err;
-    }
-    err = aos_chan_lmp_init_local(&service->pending_lmp_chan->chan,
-                                  SERVER_SIDE_LMP_BUF_LEN);
-    if (err_is_fail(err)) {
-        delete_chan(service->pending_lmp_chan);
-        return err_push(err, LIB_ERR_LMP_CHAN_INIT_LOCAL);
-    }
-    return SYS_ERR_OK;
-}
-
 errval_t server_register(const char *name, nameservice_receive_handler_t recv_handler,
                          void *st)
 {
@@ -184,58 +163,7 @@ errval_t server_deregister(const char *name)
 
 errval_t server_bind_lmp(domainid_t pid, const char *name)
 {
-    errval_t err;
-
-    // Lookup the service
-    struct service *service = NULL;
-    err = lookup_service(name, &service);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    // Sanity check
-    struct server_side_chan *chan = service->pending_lmp_chan;
-    assert(chan != NULL);
-    assert(chan->chan.type == AOS_CHAN_TYPE_LMP);
-    assert(chan->chan.lc.connstate == LMP_BIND_WAIT);
-
-    chan->pid = pid;
-    // The channel becomes effective now, and it is already in chans at creation time
-
-    // Listen on the pending channel, the client will send its endpoint in the channel
-    err = lmp_chan_alloc_recv_slot(&chan->chan.lc);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
-    }
-    err = lmp_chan_register_recv(&chan->chan.lc, get_default_waitset(),
-                                 MKCLOSURE(server_lmp_handler, chan));
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
-    }
-
-    // Create another pending LMP channel
-    err = create_pending_lmp_chan_on_service(service);
-    if (err_is_fail(err)) {
-        goto FAILURE_CREATE_PENDING_CHAN;
-    }
-    assert(service->pending_lmp_chan->chan.type == AOS_CHAN_TYPE_LMP);
-    assert(service->pending_lmp_chan->chan.lc.connstate == LMP_BIND_WAIT);
-
-    // Register the new pending endpoint with nameserver
-    err = aos_rpc_call(&ns_rpc, NAMESERVICE_REFILL_LMP_ENDPOINT,
-                       service->pending_lmp_chan->chan.lc.local_cap, name,
-                       strlen(name) + 1, NULL, NULL, NULL);
-    if (err_is_fail(err)) {
-        goto FAILURE_REGISTER;
-    }
-
-    return SYS_ERR_OK;
-
-FAILURE_REGISTER:
-FAILURE_CREATE_PENDING_CHAN:
-    // aos_chan_destroy() in delete_chan() will call lmp_chan_destroy()
-    delete_chan(service->pending_lmp_chan);  // can handle NULL and do the free inside
-    return err;
+    return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame)
@@ -263,8 +191,8 @@ errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame)
     }
 
     // Listen on the UMP channel
-    err = ump_chan_register_recv(&chan->chan.uc, get_default_waitset(),
-                                 MKCLOSURE(server_ump_handler, chan));
+    err = aos_chan_register_recv(&chan->chan, get_default_waitset(),
+                                 server_ump_handler, chan);
     if (err_is_fail(err)) {
         err = err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
         goto FAILURE_REGISTER_RECV;
@@ -273,90 +201,30 @@ errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame)
     return SYS_ERR_OK;
 
 FAILURE_REGISTER_RECV:
-    chan->chan.type = AOS_CHAN_TYPE_UNKNOWN;
-    ump_chan_destroy(&chan->chan.uc);
+    aos_chan_destroy(&chan->chan);
 FAILURE_CREATE_UMP_CHAN:
     delete_chan(chan);
     return err;
 }
 
 /**
- * LMP handler.
- * @param arg  Pointer to a struct server_side_chan
- */
-static void server_lmp_handler(void *arg)
-{
-    errval_t err;
-    struct server_side_chan *chan = arg;
-    assert(chan->chan.type == AOS_CHAN_TYPE_LMP);
-    struct lmp_chan *lc = &chan->chan.lc;
-
-    // Receive the message and cap, refill the recv slot, deserialize
-    LMP_RECV_REFILL_DESERIALIZE(err, lc, recv_raw_msg, recv_cap, recv_type,
-                                        recv_buf, recv_size, helper, RE_REGISTER, FAILURE)
-
-    // If the channel is not setup yet, set it up
-    if (lc->connstate == LMP_BIND_WAIT) {
-        LMP_TRY_SETUP_BINDING(err, lc, recv_cap, FAILURE)
-
-        // Ack
-        err = aos_chan_ack(&chan->chan, NULL_CAP, NULL, 0);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "server_lmp_handler (binding): aos_chan_ack failed\n");
-            goto FAILURE;
-        }
-        goto RE_REGISTER;
-    }
-
-    // Identifier is not used and always set as IDENTIFIER_NORMAL for nameservice_chan
-    assert(recv_type == IDENTIFIER_NORMAL);
-
-    // Call the handler
-    LMP_DISPATCH_AND_REPLY_NO_FAIL(err, &chan->chan, NULL, chan->recv_handler, recv_cap)
-
-    // Deserialization cleanup
-    LMP_CLEANUP(err, helper)
-
-FAILURE:
-RE_REGISTER:
-    LMP_RE_REGISTER(err, lc, server_lmp_handler, arg)
-}
-
-/**
  * UMP handler.
  * @param arg  Pointer to a struct server_side_chan
  */
-static void server_ump_handler(void *arg)
+static AOS_CHAN_HANDLER(server_ump_handler)
 {
     struct server_side_chan *chan = arg;
     assert(chan->chan.type == AOS_CHAN_TYPE_UMP);
-    struct ump_chan *uc = &chan->chan.uc;
-
-    errval_t err;
-
-    UMP_RECV_DESERIALIZE(uc)
-    UMP_RECV_CAP_IF_ANY(uc)
-
-    // No free, do not use UMP_DISPATCH_AND_REPLY_NO_FAIL
-    void *reply_payload = NULL;
-    size_t reply_size = 0;
-    struct capref reply_cap = NULL_CAP;
 
     // XXX: trick to pass PID to the handler over the end of recv_buf
-    void *new_recv_buf = malloc(recv_size + sizeof(domainid_t));
-    memcpy(new_recv_buf, recv_buf, recv_size);
-    CAST_DEREF(domainid_t, new_recv_buf, recv_size) = chan->pid;
+    void *new_in_payload = malloc(in_size + sizeof(domainid_t));
+    memcpy(new_in_payload, in_payload, in_size);
+    CAST_DEREF(domainid_t, new_in_payload, in_size) = chan->pid;
 
-    chan->recv_handler(chan->st, new_recv_buf, recv_size, &reply_payload, &reply_size, recv_cap, &reply_cap);
+    chan->recv_handler(chan->st, new_in_payload, in_size, out_payload, out_size, in_cap, out_cap);
 
-    free(new_recv_buf);
-
-    err = aos_chan_ack(&chan->chan, reply_cap, reply_payload, reply_size);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "%s: aos_chan_ack failed\n", __func__);
-    }
-
-    UMP_CLEANUP_AND_RE_REGISTER(uc, server_ump_handler, arg)
+    *free_out_payload = false;
+    return SYS_ERR_OK;
 }
 
 errval_t server_kill_by_pid(domainid_t pid)

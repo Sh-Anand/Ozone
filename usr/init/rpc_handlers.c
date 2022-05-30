@@ -15,39 +15,9 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
                                 void **out_payload, size_t *out_size)
 {
     // XXX: trick to retrieve the rpc identifier by -1
-    // Bypass aos_rpc, aos_chan, and ump_chan to operate on raw buffer
-    errval_t err = ring_producer_send(&urpc[core]->chan.uc.send,
-                                      ((uint8_t *)in_payload) - 1, in_size + 1);
-    if (err_is_fail(err)) {
-        return err;
-    }
-
-    uint8_t *ret_payload = NULL;
-    size_t ret_size = 0;
-    err = ring_consumer_recv(&urpc[core]->chan.uc.recv, (void **)&ret_payload, &ret_size);
-    if (err_is_fail(err)) {
-        goto RET;
-    }
-
-    if (*((rpc_identifier_t *)ret_payload) == RPC_ACK) {
-        if (ret_payload != NULL) {
-            // XXX: it is annoying to malloc a new buf and make the copy just to remove
-            //      the identifier. Consider moving it into ring buffer.
-            MALLOC_OUT_MSG_WITH_SIZE(reply, uint8_t, ret_size - sizeof(rpc_identifier_t));
-            memcpy(reply, ret_payload + sizeof(rpc_identifier_t),
-                   ret_size - sizeof(rpc_identifier_t));
-        }
-        err = SYS_ERR_OK;
-        goto RET;
-    } else {
-        assert(ret_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
-        err = *((errval_t *)(ret_payload + sizeof(rpc_identifier_t)));
-        goto RET;
-    }
-
-RET:
-    free(ret_payload);
-    return err;
+    // aos_rpc_call dispatch events while waiting so no worry for deadlocks
+    return aos_rpc_call(urpc[core], CAST_DEREF(rpc_identifier_t, in_payload, -1),
+                        NULL_CAP, in_payload, in_size, NULL, out_payload, out_size);
 }
 
 RPC_HANDLER(stress_test_handler)
@@ -402,15 +372,14 @@ RPC_HANDLER(bind_core_urpc_handler)
     }
 
     // Setup URPC
-    err = setup_urpc(msg->core, urpc_frame, false, msg->listener_first);
+    err = setup_urpc(msg->core, urpc_frame, msg->listener_first);
     if (err_is_fail(err)) {
         return err;
     }
 
     // Start handling URPCs
-    err = ump_chan_register_recv(
-        &urpc_listen_from[msg->core]->uc, get_default_waitset(),
-        MKCLOSURE(init_urpc_handler, urpc_listen_from[msg->core]));
+    err = aos_chan_register_recv(urpc_listen_from[msg->core], get_default_waitset(),
+                                 init_urpc_handler, NULL);
     if (err_is_fail(err)) {
         return err;
     }
@@ -433,7 +402,7 @@ RPC_HANDLER(cap_transfer_handler)
             return err;
         }
         assert(chan->type == AOS_CHAN_TYPE_LMP);
-        err = lmp_put_cap(&chan->lc, in_cap);  // not blocking
+        err = rpc_lmp_put_cap(&chan->lc, in_cap);  // not blocking
         if (err_is_fail(err)) {
             return err;  // expose transient error to the caller
         }
@@ -512,7 +481,7 @@ RPC_HANDLER(remote_cap_transfer_handler)
         return err;
     }
     assert(chan->type == AOS_CHAN_TYPE_LMP);
-    err = lmp_put_cap(&chan->lc, cap);  // not blocking
+    err = rpc_lmp_put_cap(&chan->lc, cap);  // not blocking
     if (err_is_fail(err)) {
         return err;  // expose transient error to the caller
     }
@@ -520,8 +489,34 @@ RPC_HANDLER(remote_cap_transfer_handler)
     return SYS_ERR_OK;
 }
 
-RPC_HANDLER(register_nameserver_hander)
+static errval_t coordinate_nameserver_binding(domainid_t client_pid,
+                                              struct capref *out_frame)
 {
+    errval_t err;
+    struct capref frame;
+    // The input frame contains two UMP channels: first for RPC, second for listener
+    err = frame_alloc(&frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    }
+
+    // Wait for the nameserver to online
+    while (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
+        err = event_dispatch_non_block(get_default_waitset());
+        if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
+            DEBUG_ERR(err, "in event_dispatch");
+            return err;
+        }
+    }
+
+    err = aos_chan_call(&nameserver_rpc.chan, 0, frame, &client_pid, sizeof(domainid_t),
+                        out_frame, NULL, NULL);
+    if (err_is_fail(err)) {
+        cap_destroy(frame);
+        return err;  // expose transient error to the user
+    }
+
+    *out_frame = frame;
     return SYS_ERR_OK;
 }
 
@@ -532,98 +527,64 @@ RPC_HANDLER(bind_nameserver_handler)
     DEBUG_PRINTF("process %u tries to bind nameserver\n", proc->pid);
 
     errval_t err;
-    struct capref frame;
-    err = frame_alloc(&frame, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, NULL);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_FRAME_ALLOC);
-    }
-
-    uint8_t *urpc_buffer;
-    err = paging_map_frame(get_current_paging_state(), (void **)&urpc_buffer,
-                           INIT_BIDIRECTIONAL_URPC_FRAME_SIZE, frame);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_PAGING_MAP);
-    }
-
-    // Coordinator is responsible for zeroing the URPC frame
-    memset(urpc_buffer, 0, INIT_BIDIRECTIONAL_URPC_FRAME_SIZE);
-
-    err = paging_unmap(get_current_paging_state(), (void *)urpc_buffer);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_PAGING_UNMAP);
-    }
-
-    // DEBUG_PRINTF("> process %u tries to bind nameserver\n", proc->pid);
 
     if (disp_get_core_id() == 0) {
+        // Return the frame as out_cap
+        return coordinate_nameserver_binding(proc->pid, out_cap);
 
-        if (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
-            DEBUG_PRINTF("nameserver not online yet\n");
-            return SYS_ERR_LMP_TARGET_DISABLED;  // XXX: return a better retry flag
-        }
-
-        assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
-        // Never block, ask the client to retry if needed
-        err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &proc->pid,
-                            sizeof(domainid_t), true);
-        if (err_is_fail(err)) {
-            cap_destroy(frame);
-            return err;  // expose transient error to the user
-        }
     } else {
-        struct internal_rpc_remote_cap_msg msg;
-        msg.pid = proc->pid;
-        err = cap_direct_identify(frame, &msg.cap);
+        // Allocate a slot for the frame cap
+        struct capref frame;
+        err = slot_alloc(&frame);
         if (err_is_fail(err)) {
-            return err_push(err, LIB_ERR_CAP_IDENTIFY);
+            return err_push(err, LIB_ERR_SLOT_ALLOC);
         }
-        // FIXME: deadlock if both side make the call at the same time
-        err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP, &msg,
-                           sizeof(struct internal_rpc_remote_cap_msg), NULL, NULL, NULL);
-        // TODO: delete urpc frame
-    }
 
-    // DEBUG_PRINTF(">> process %u tries to bind nameserver\n", proc->pid);
+        // Forward the message to core 0
+        void *reply_payload = NULL;
+        size_t reply_size = 0;
+        err = aos_rpc_call(urpc[0], INTERNAL_RPC_REMOTE_BIND_NAMESERVER, NULL_CAP,
+                           &proc->pid, sizeof(domainid_t), NULL, &reply_payload,
+                           &reply_size);
+        if (err_is_fail(err)) {
+            free(reply_payload);
+            return err;
+        }
 
-    *out_cap = frame;
-    return err;
-}
-
-RPC_HANDLER(remote_bind_nameserver_handler)
-{
-    CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
-
-    DEBUG_PRINTF("process %u remote bind nameserver\n", msg->pid);
-    errval_t err;
-
-    struct capref cap;
-    err = slot_alloc(&cap);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-
-    switch (msg->cap.type) {
-    case ObjType_Frame:
-        err = frame_forge(cap, msg->cap.u.frame.base, msg->cap.u.frame.bytes,
+        // Forge the frame
+        CAST_EXACT_SIZE(reply_payload, reply_size, msg, struct capability);
+        err = frame_forge(frame, msg->u.frame.base, msg->u.frame.bytes,
                           disp_get_current_core_id());  // XXX: owner?
         if (err_is_fail(err)) {
             return err_push(err, MON_ERR_CAP_CREATE);
         }
-        break;
-    default:
-        return MON_ERR_CAP_CREATE;
-    }
 
-    assert(nameserver_rpc.chan.type == AOS_CHAN_TYPE_LMP);
-    err = aos_chan_send(&nameserver_rpc.chan, 0, cap, &msg->pid, sizeof(domainid_t), true);
+        *out_cap = frame;
+        return SYS_ERR_OK;
+    }
+}
+
+RPC_HANDLER(remote_bind_nameserver_handler)
+{
+    CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+
+    DEBUG_PRINTF("process %u remote bind nameserver\n", *pid);
+    errval_t err;
+
+    struct capref frame = NULL_CAP;
+    err = coordinate_nameserver_binding(*pid, &frame);
     if (err_is_fail(err)) {
-        cap_destroy(cap);
-        return err;  // expose transient error to the user
+        return err;
     }
 
-    // DEBUG_PRINTF(">> process %u remote bind nameserver\n", msg->pid);
-
-    return err;
+    // Serialize
+    MALLOC_OUT_MSG(msg, struct capability);
+    err = cap_direct_identify(frame, msg);
+    if (err_is_fail(err)) {
+        cap_destroy(frame);
+        return err_push(err, LIB_ERR_CAP_IDENTIFY);
+    }
+    return SYS_ERR_OK;
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
@@ -638,7 +599,6 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TERMINAL_GETCHAR] = terminal_getchar_handler,
     [RPC_TERMINAL_PUTCHAR] = terminal_putchar_handler,
     [RPC_STRESS_TEST] = stress_test_handler,
-    [RPC_REGISTER_AS_NAMESERVER] = register_nameserver_hander,
     [RPC_BIND_NAMESERVER] = bind_nameserver_handler,
     [INTERNAL_RPC_BIND_CORE_URPC] = bind_core_urpc_handler,
     [INTERNAL_RPC_REMOTE_CAP_TRANSFER] = remote_cap_transfer_handler,

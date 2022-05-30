@@ -5,7 +5,7 @@
 #ifndef AOS_RPC_HANDLER_BUILDER_H
 #define AOS_RPC_HANDLER_BUILDER_H
 
-#include "aos_rpc.h"
+#include <aos/rpc.h>
 
 typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
                                   void **out_payload, size_t *out_size,
@@ -41,13 +41,15 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
     }                                                                                    \
     type *var = in_payload
 
-#define CAST_IN_MSG_EXACT_SIZE(var, type)                                                \
-    if (in_size != sizeof(type)) {                                                       \
+#define CAST_EXACT_SIZE(payload, size, var, type)                                        \
+    if (size != sizeof(type)) {                                                          \
         DEBUG_PRINTF("%s: invalid payload size %lu != sizeof(%s) (%lu)\n", __func__,     \
                      in_size, #type, sizeof(type));                                      \
         return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
     }                                                                                    \
-    type *var = in_payload
+    type *var = payload
+
+#define CAST_IN_MSG_EXACT_SIZE(var, type) CAST_EXACT_SIZE(in_payload, in_size, var, type)
 
 #define MALLOC_WITH_SIZE(var, type, size)                                                \
     type *var = malloc(size);                                                            \
