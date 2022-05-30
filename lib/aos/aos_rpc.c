@@ -627,6 +627,7 @@ errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identifier,
                       struct capref call_cap, const void *call_buf, size_t call_size,
                       struct capref *ret_cap, void **ret_buf, size_t *ret_size)
 {
+	if (!rpc) return ERR_INVALID_ARGS;
     switch (rpc->chan.type) {
     case AOS_CHAN_TYPE_LMP:
         return rpc_lmp_call(rpc, identifier, call_cap, call_buf, call_size, ret_cap,

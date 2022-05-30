@@ -20,6 +20,7 @@
         "dirent.c",
         "list.c",
         "fat32.c"
-    ]
+    ],
+	addLibraries = [ "sdhc" ]
   }
 ]

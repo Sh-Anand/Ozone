@@ -29,6 +29,7 @@
 #include <aos/aos_rpc.h>
 #include <aos/debug.h>
 
+
 #include "threads_priv.h"
 #include "init.h"
 
@@ -55,12 +56,12 @@ __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
 	// release the terminal
-	errval_t err = aos_rpc_serial_release(aos_rpc_get_serial_channel());
-	DEBUG_ERR(err, "terminal release");
+	//errval_t err = aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	//DEBUG_ERR(err, "terminal release (err: %s)", err_getcode(err));
 	
     debug_printf("libc exit NYI!\n");
 	
-	aos_rpc_serial_release_terminal_state(aos_rpc_get_serial_channel(), terminal_state);
+	aos_rpc_serial_release(aos_rpc_get_serial_channel());
 	
     thread_exit(status);
     // If we're not dead by now, we wait
@@ -184,6 +185,8 @@ static size_t local_terminal_read(char* buf, size_t len)
 	return 0;
 }
 
+extern errval_t fs_libc_init(void*);
+
 /* Set libc function pointers */
 void barrelfish_libc_glue_init(void)
 {
@@ -196,6 +199,13 @@ void barrelfish_libc_glue_init(void)
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
+	
+	if (!init_domain) {
+		errval_t err = fs_libc_init(aos_rpc_get_init_channel());
+		if(err_is_fail(err)) {
+			DEBUG_PRINTF("Failed to initialized filesystem (err: %s)\n", err_getcode(err));
+		}
+	}
 
     // XXX: set a static buffer for stdout
     // this avoids an implicit call to malloc() on the first printf
@@ -313,7 +323,6 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         set_init_rpc(init_rpc);
 
         ram_alloc_set(NULL);  // use RAM allocation over RPC
-		
 		if (params->terminal_state) {
 			terminal_state = params->terminal_state;
 		} else {

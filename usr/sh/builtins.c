@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <dirent.h>
 
 #include <errno.h>
 
@@ -66,12 +67,10 @@ static void sh_ls(struct shell_env *env)
 	handle_t dir;
 	errval_t err = aos_rpc_opendir(init_rpc, path, &dir);
 	if (err_is_fail(err)) goto error;
-	printf("opendir succeeded\n");
 	
 	struct fs_fileinfo finfo;
 	err = aos_rpc_fstat(init_rpc, dir, &finfo);
 	if (err_is_fail(err)) goto error;
-	printf("fstat succeeded\n");
 	
 	if (finfo.type == FS_FILE) {
 		printf("target is not a directory\n");
@@ -79,12 +78,12 @@ static void sh_ls(struct shell_env *env)
 		return;
 	}
 	
-	printf("target is directory, size: %d\n", finfo.size);
 	char* name;
-	err = aos_rpc_readdir_next(init_rpc, dir, &name);
-	if (err_is_fail(err)) goto error;
-	
-	printf("reported back: %s\n", name);
+	while ((err = aos_rpc_readdir_next(init_rpc, dir, &name)) != FS_ERR_INDEX_BOUNDS) {
+		if (err_is_fail(err) || name == NULL) goto error;
+		printf("  %s\n", name);
+		free(name);
+	}
 	
 	
 	printf("ls succeeded!\n");
@@ -92,6 +91,21 @@ static void sh_ls(struct shell_env *env)
 	return;
 error:
 	printf("ls failed: %s\n", err_getcode(err));
+	
+	/*
+	DIR* dir = opendir(path);
+	struct dirent *de;
+	if (dir == NULL) {
+		printf("Error: cannot open directory '%s'\n", path);
+		env->last_return_status = 1;
+		return;
+	}
+	
+	while ((de = readdir(dir)) != NULL) {
+		printf("    %s\n", de->d_name);
+	}
+	
+	env->last_return_status = 0;*/
 }
 
 static void sh_ps(struct shell_env *env)

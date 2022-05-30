@@ -1457,6 +1457,7 @@ errval_t paging_unmap(struct paging_state *st, const void *region)
     return unmap(st, (lvaddr_t)region);
 }
 
+
 static void __attribute((noreturn))
 handle_real_page_fault(enum exception_type type, int subtype, void *addr,
                        arch_registers_state_t *regs)

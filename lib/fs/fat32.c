@@ -10,6 +10,7 @@
 #include <fs/fs.h>
 #include <fs/fat32.h>
 #include <fs/list.h>
+#include <aos/deferred.h>
 
 #include "fs_internal.h"
 
@@ -159,9 +160,10 @@ static errval_t sd_read_sector(int sector, void *data) {
 
     // DEBUG_PRINTF("DATA OF SECTOR %d\n", sector);
     //I DO NOT KNOW WHY, BUT WITHOUT THESE LINES THE CODE BREAKS!!!!!
-    DEBUG_PRINTF("%d", *(uint8_t *)vaddr);
-    DEBUG_PRINTF("");
+    //DEBUG_PRINTF("%d", *(uint8_t *)vaddr);
+    //DEBUG_PRINTF("");
     // print_block((uint8_t *) vaddr);
+	barrelfish_usleep(25000);
 
     memcpy(data, (void *)vaddr, SDHC_BLOCK_SIZE);
     
@@ -175,8 +177,6 @@ static errval_t sd_read_sector(int sector, void *data) {
 //Write data to logical sector
 static errval_t sd_write_sector(int sector, void *data) {
     errval_t err;
-    
-    abort();
 
     lpaddr_t paddr, vaddr;
     struct capref frame;

@@ -43,11 +43,14 @@ __FBSDID("$FreeBSD$");
 
 #include "libc_private.h"
 
+#include <aos/aos_rpc.h>
+
 void
 abort(void)
 {
 	struct sigaction act;
-
+	
+	aos_rpc_serial_release(aos_rpc_get_serial_channel());
 	/*
 	 * POSIX requires we flush stdio buffers on abort.
 	 * XXX ISO C requires that abort() be async-signal-safe.
