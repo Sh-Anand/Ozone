@@ -270,7 +270,7 @@ static off_t fs_libc_lseek(int fd, off_t offset, int whence)
 static errval_t fs_mkdir(const char *path){ return aos_rpc_mkdir(mount, path);}
 static errval_t fs_rmdir(const char *path){ return aos_rpc_rmdir(mount, path); }
 static errval_t fs_rm(const char *path){ return aos_rpc_frm(mount, path); }
-static errval_t fs_opendir(const char *path, fs_dirhandle_t *h){ return aos_rpc_opendir(mount, path, h); }
+static errval_t fs_opendir(const char *path, fs_dirhandle_t *h){ DEBUG_PRINTF("ENTERING OPENDIR WITH %s\n", path); return aos_rpc_opendir(mount, path, h); }
 static errval_t fs_readdir(fs_dirhandle_t h, char **name) { return aos_rpc_readdir_next(mount, h, name); }
 static errval_t fs_closedir(fs_dirhandle_t h) { return aos_rpc_closedir(mount, h); }
 static errval_t fs_fstat(fs_dirhandle_t h, struct fs_fileinfo *b) { return aos_rpc_fstat(mount, h, b); }

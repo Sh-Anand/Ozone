@@ -976,7 +976,8 @@ errval_t aos_rpc_fwrite(struct aos_rpc *rpc, handle_t handle, void *buffer, size
 
     size_t send_size = sizeof(lvaddr_t) + sizeof(size_t) + bytes;
     void *send_msg = malloc(send_size);
-    memcpy(send_msg, &handle, sizeof(lvaddr_t));
+    DEBUG_PRINTF("Sent Handle : %d\n", (lvaddr_t)handle);
+    *(lvaddr_t *)(send_msg) = (lvaddr_t)(handle); 
     memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
     memcpy(send_msg + sizeof(lvaddr_t) + bytes, buffer, bytes);
 

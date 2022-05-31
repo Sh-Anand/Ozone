@@ -41,6 +41,12 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
     }                                                                                    \
     type *var = in_payload
 
+#define CAST_IN_MSG_STRING                                                          \
+    CAST_IN_MSG_AT_LEAST_SIZE(p, char);                                                 \
+    char *path = malloc(in_size + 1);                                                \
+    memcpy(path, p, in_size);                                                        \
+    path[in_size] = '\0'                                                            
+
 #define CAST_IN_MSG_EXACT_SIZE(var, type)                                                \
     if (in_size != sizeof(type)) {                                                       \
         DEBUG_PRINTF("%s: invalid payload size %lu != sizeof(%s) (%lu)\n", __func__,     \
@@ -67,7 +73,7 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
 #define MALLOC_OUT_MSG_WITH_HANDLE(var, type, handle)                                   \
     size_t size = sizeof(lvaddr_t);                                                     \
     MALLOC_WITH_SIZE(var, type, size);                                                  \
-    *var = (type) handle;                                                           \
+    *var = (type) handle;                                                               \
     *out_payload = var;                                                                 \
     *out_size =  size;                                                                  \
 

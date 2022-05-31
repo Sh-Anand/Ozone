@@ -423,17 +423,21 @@ static errval_t init_sd(void) {
         DEBUG_ERR(err, "FAT INIT FAILED");
 
     //I DO NOT KNOW WHY, BUT WITHOUT THESE LINES THE CODE BREAKS!!!!!
+    // fat32_handle_t handle;
+    // err = fat32_opendir("/sdcard/DIR1", &handle);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "DIR1 open fail");
+    // err = fat32_closedir(handle);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "DIR1 close fail");
+    // char *name;
+    // err = fat32_dir_read_next(handle, &name, NULL);
+    // if(err_is_fail(err))
+    //     DEBUG_ERR(err, "DIR1 read_next fail");
     fat32_handle_t handle;
-    err = fat32_opendir("/sdcard/DIR1", &handle);
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "DIR1 open fail");
-    err = fat32_closedir(handle);
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "DIR1 close fail");
-    char *name;
-    err = fat32_dir_read_next(handle, &name, NULL);
-    if(err_is_fail(err))
-        DEBUG_ERR(err, "DIR1 read_next fail");
+    err = fat32_create("/sdcard/myfile2.txt", &handle);
+    char *msg = "hellow orld!";
+    err = fat32_write(handle, msg, 11, NULL);
 
 
     return SYS_ERR_OK;
@@ -518,16 +522,25 @@ static int bsp_main(int argc, char *argv[])
 
     debug_printf("Message handler loop\n");
 	
-	struct spawninfo shell_si;
-	domainid_t shell_pid;
-	void *sh_terminal_state = terminal_aquire(true);
-	err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
+	// struct spawninfo shell_si;
+	// domainid_t shell_pid;
+	// void *sh_terminal_state = terminal_aquire(true);
+	// err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
+
+    // spawn filereader
+    domainid_t filereader_pid;
+    struct spawninfo shell_si;
+    err = spawn_load_by_name("filereader", &shell_si, &filereader_pid);
+    if(err_is_fail(err)) {
+        DEBUG_ERR(err, "FAILED TO SPAWN FILEREADER");
+    }
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;
     // err = ring_producer_send(urpc_send, &payload, sizeof(uint8_t));
     // err = psci_cpu_on(1, cpu_driver_entry_point, 0);
     // Hang around
+
     struct waitset *default_ws = get_default_waitset();
     while (true) {
         err = event_dispatch(default_ws);

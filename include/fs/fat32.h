@@ -81,9 +81,10 @@ struct fat32_manager {
 
     struct free_cluster_list *free_clusters;
 
-    struct fat32_dirent *root_directory;
     char *mount;
 };
+
+struct fat32_manager *manager;
 
 /**
  * @brief an entry in the fat32_fs
@@ -110,6 +111,8 @@ struct fat32_dirent
 
 };
 
+struct fat32_dirent *root_directory;
+
 /**
  * @brief a handle to an open file or directory
  */
@@ -128,7 +131,6 @@ typedef uint32_t FAT_Entry;
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle);
 
-//NOTE! DO NOT USE THE HNADLE PROVIDED BY FAT32_CREATE, THERE IS SOME WEIRD ERROR WITH THAT ONE. REOPEN FILE WITH FAT32_OPEN
 errval_t fat32_create(const char *path, fat32_handle_t *rethandle);
 
 errval_t fat32_remove(const char *path);
