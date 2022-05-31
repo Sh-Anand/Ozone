@@ -15,9 +15,74 @@ static errval_t forward_to_core(coreid_t core, void *in_payload, size_t in_size,
                                 void **out_payload, size_t *out_size)
 {
     // XXX: trick to retrieve the rpc identifier by -1
-    // aos_rpc_call dispatch events while waiting so no worry for deadlocks
-    return aos_rpc_call(urpc[core], CAST_DEREF(rpc_identifier_t, in_payload, -1),
-                        NULL_CAP, in_payload, in_size, NULL, out_payload, out_size);
+    rpc_identifier_t identifier = CAST_DEREF(rpc_identifier_t, in_payload, -1);
+
+    struct aos_chan *chan = &urpc[core]->chan;
+    assert(chan->type == AOS_CHAN_TYPE_UMP);
+    struct ump_chan *uc = &chan->uc;
+
+    errval_t err;
+
+    uint8_t *recv_payload = NULL;
+    size_t recv_size = 0;
+
+    THREAD_MUTEX_ENTER(&chan->mutex)
+    {
+        // Make the call
+        err = aos_chan_send(chan, identifier, NULL_CAP, in_payload, in_size, false);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "forward_to_core: failed to send\n");
+            THREAD_MUTEX_BREAK;
+        }
+
+        // Dispatch events while waiting
+        while (!ump_chan_can_recv(uc)) {
+            err = event_dispatch_non_block(get_default_waitset());
+            if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
+                DEBUG_ERR(err, "forward_to_core: failure in event_dispatch_non_block\n");
+                break;
+            }
+        }
+        if (err != LIB_ERR_NO_EVENT) {
+            THREAD_MUTEX_BREAK;
+        }
+
+        // Receive acknowledgement and/or return message
+        err = ump_chan_recv(uc, (void **)&recv_payload, &recv_size);
+        if (err_is_fail(err)) {
+            err = err_push(err, LIB_ERR_UMP_CHAN_RECV);
+            DEBUG_ERR(err, "rpc_ump_call: failed to recv\n");
+            THREAD_MUTEX_BREAK;
+        }
+
+        // Receive cap if needed
+        assert(recv_size >= sizeof(rpc_identifier_t));
+    }
+    THREAD_MUTEX_EXIT(&chan->mutex)
+
+    // Handle error happened in the critical section
+    if (err_is_fail(err)) {
+        goto RET;
+    }
+
+    if (CAST_DEREF(rpc_identifier_t, recv_payload, 0) == RPC_ACK) {
+        if (out_payload != NULL) {
+            // XXX: it is annoying to malloc a new buf and make the copy just to remove
+            //      the identifier. Consider moving it into ring buffer.
+            MALLOC_OUT_MSG_WITH_SIZE(ret_buf, uint8_t, recv_size - sizeof(rpc_identifier_t));
+            memcpy(ret_buf, recv_payload + sizeof(rpc_identifier_t), *out_size);
+        }
+        err = SYS_ERR_OK;
+        goto RET;
+    } else {
+        assert(recv_size == sizeof(rpc_identifier_t) + sizeof(errval_t));
+        err = *((errval_t *)(recv_payload + sizeof(rpc_identifier_t)));
+        goto RET;
+    }
+
+RET:
+    free(recv_payload);
+    return err;
 }
 
 RPC_HANDLER(stress_test_handler)
@@ -494,6 +559,7 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
 {
     // Wait for the nameserver to online
     if (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
+        thread_yield();
         return MON_ERR_RETRY;
     }
 
@@ -510,6 +576,7 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
         cap_destroy(frame);
         if (lmp_err_is_transient(err)) {
             cap_destroy(frame);
+            thread_yield();
             return MON_ERR_RETRY;
         }
         return err;  // expose transient error to the user

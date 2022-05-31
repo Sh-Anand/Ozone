@@ -31,7 +31,7 @@
 #include "threads_priv.h"
 #include "init.h"
 
-#define DIRECT_PRINTF 0
+#define DIRECT_PRINTF 1
 
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;

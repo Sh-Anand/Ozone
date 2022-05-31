@@ -18,6 +18,11 @@ enum aos_chan_type {
 
 typedef uint8_t rpc_identifier_t;
 
+enum {
+    RPC_ACK = 0,
+    RPC_ERR
+};
+
 #define RPC_IDENTIFIER_USER_START 8
 #define RPC_IDENTIFIER_USER_END ((1U << (sizeof(rpc_identifier_t) * 8 - 1)) - 1)
 

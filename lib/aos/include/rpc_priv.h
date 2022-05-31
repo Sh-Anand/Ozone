@@ -8,10 +8,8 @@
 #include <aos/rpc.h>
 
 enum {
-    RPC_ACK,
-    RPC_ACK_CAP_CHANNEL,  // on UMP: capability transfer channel is setup
+    RPC_ACK_CAP_CHANNEL = RPC_ERR + 1,  // on UMP: capability transfer channel is setup
     RPC_PUT_CAP,          // on LMP: this message is putting a cap in the init channel
-    RPC_ERR,
     RPC_MSG_IN_FRAME,     // on LMP: the actual message in encode in the frame cap
     INTERNAL_RPC_IDENTIFIER_COUNT,
 
