@@ -107,8 +107,6 @@ error:
 	DEBUG_PRINTF("BEFORE LOOP\n");
 	while ((de = readdir(dir)) != NULL) {
 		DEBUG_PRINTF("INSIDE LOO (de: %p)P\n", de);
-		de->d_name[8] = 0;
-		DEBUG_PRINTF("INSIDE LOOP 1\n");
 		printf("    %s\n", de->d_name);
 		DEBUG_PRINTF("INSIDE LOOP 2\n");
 	}
