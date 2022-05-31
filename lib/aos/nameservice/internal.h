@@ -27,6 +27,7 @@ errval_t server_deregister(const char *name);
 errval_t server_bind_lmp(domainid_t pid, const char *name);
 errval_t server_bind_ump(domainid_t pid, const char *name, struct capref frame);
 errval_t server_kill_by_pid(domainid_t pid);
+struct aos_chan *server_lookup_chan(domainid_t pid);
 
 struct client_side_chan;
 

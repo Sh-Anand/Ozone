@@ -207,6 +207,16 @@ FAILURE_CREATE_UMP_CHAN:
     return err;
 }
 
+struct aos_chan *server_lookup_chan(domainid_t pid) {
+    struct server_side_chan *c;
+    LIST_FOREACH(c, &chans, link) {
+        if (c->pid == pid) {
+            return &c->chan;
+        }
+    }
+    return NULL;
+}
+
 /**
  * UMP handler.
  * @param arg  Pointer to a struct server_side_chan

@@ -113,5 +113,7 @@ errval_t nameservice_lookup(const char *name, nameservice_chan_t *chan);
  */
 errval_t nameservice_enumerate(char *query, size_t *num, char **result);
 
+struct aos_chan *nameservice_get_client_chan(domainid_t pid);
+
 
 #endif /* INCLUDE_AOS_AOS_NAMESERVICE_H_ */

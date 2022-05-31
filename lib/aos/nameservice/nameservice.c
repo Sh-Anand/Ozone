@@ -197,6 +197,10 @@ errval_t nameservice_enumerate(char *query, size_t *num, char **result)
     return client_enumerate_service(query, num, result);
 }
 
+struct aos_chan *nameservice_get_client_chan(domainid_t pid) {
+    return server_lookup_chan(pid);
+}
+
 /**
  * Handler for binding requests on the server side.
  * @param arg  Expected to be &ns_listener.
