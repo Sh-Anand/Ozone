@@ -74,7 +74,7 @@ static void uart3_int_handler(void* arg)
 	char c;
 	errval_t err = lpuart_getchar(lp_uart_3, &c);
 	while (err == LPUART_ERR_NO_DATA) {
-		event_dispatch(get_default_waitset());
+		event_dispatch_non_block(get_default_waitset());
 		err = lpuart_getchar(lp_uart_3, &c);
 	}
 	
