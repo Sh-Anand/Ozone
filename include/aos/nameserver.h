@@ -34,6 +34,11 @@ struct ns_binding_notification {
     char name[0];
 };
 
+struct ns_enumerate_reply_msg {
+    size_t num;
+    char buf[0];
+};
+
 typedef void* nameservice_chan_t;
 
 /**
@@ -104,9 +109,9 @@ errval_t nameservice_lookup(const char *name, nameservice_chan_t *chan);
  * 
  * @param query     the query
  * @param num 		number of entries in the result array
- * @param result	an array of entries, should be freed outside (each entry and the whole)
+ * @param result	an array of entries
  */
-errval_t nameservice_enumerate(char *query, size_t *num, char ***result);
+errval_t nameservice_enumerate(char *query, size_t *num, char **result);
 
 
 #endif /* INCLUDE_AOS_AOS_NAMESERVICE_H_ */

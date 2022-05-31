@@ -26,7 +26,7 @@ static struct aos_chan ns_listener;
 static errval_t ensure_nameserver_chan(void)
 {
     // If the channel is already setup, return OK
-    if (aos_chan_can_recv(&ns_rpc.chan)) {
+    if (aos_chan_is_connected(&ns_rpc.chan)) {
         return SYS_ERR_OK;
     }
 
@@ -39,6 +39,9 @@ static errval_t ensure_nameserver_chan(void)
     do {
         err = aos_rpc_call(get_init_rpc(), RPC_BIND_NAMESERVER, NULL_CAP, NULL, 0, &frame,
                            NULL, NULL);
+        if (err == MON_ERR_RETRY) {
+            thread_yield();
+        }
     } while (err == MON_ERR_RETRY);
     if (err_is_fail(err)) {
         goto FAILURE_BIND_NAMESERVER_RPC;
@@ -187,7 +190,7 @@ errval_t nameservice_lookup(const char *name, nameservice_chan_t *nschan)
  * @param num 		number of entries in the result array
  * @param result	an array of entries, should be freed outside (each entry and the whole)
  */
-errval_t nameservice_enumerate(char *query, size_t *num, char ***result)
+errval_t nameservice_enumerate(char *query, size_t *num, char **result)
 {
     errval_t err;
     ENSURE_NAMESERVER_CHAN;

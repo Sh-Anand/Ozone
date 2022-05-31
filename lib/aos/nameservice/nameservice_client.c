@@ -103,43 +103,34 @@ FAILURE_IDENTIFY_CAP:
     return err;
 }
 
-errval_t client_enumerate_service(char *query, size_t *num, char ***ret)
+errval_t client_enumerate_service(char *query, size_t *num, char **ret)
 {
     errval_t err;
 
     // Query the nameserver
     void *ret_buf = NULL;
     size_t ret_size = 0;
-    err = aos_rpc_call(&ns_rpc, NAMESERVICE_ENUMERATE, NULL_CAP, NULL, 0, NULL, &ret_buf,
+    err = aos_rpc_call(&ns_rpc, NAMESERVICE_ENUMERATE, NULL_CAP, query, strlen(query) + 1, NULL, &ret_buf,
                        &ret_size);
     if (err_is_fail(err)) {
         return err;
     }
 
-    assert(ret_size >= sizeof(struct enumerate_reply_msg));
-    struct enumerate_reply_msg *reply_msg = (struct enumerate_reply_msg *)ret_buf;
-
-    char **result = malloc(sizeof(char *) * reply_msg->num);
-    if (result == NULL) {
-        err = LIB_ERR_MALLOC_FAIL;
-        goto RET;
-    }
+    assert(ret_size >= sizeof(struct ns_enumerate_reply_msg));
+    struct ns_enumerate_reply_msg *reply_msg = (struct ns_enumerate_reply_msg *)ret_buf;
 
     size_t i = 0;
     char *buf = reply_msg->buf;
-    while (i < reply_msg->num) {
-        result[i] = strdup(buf);
+    while (i < reply_msg->num && i < *num) {
+        ret[i] = strdup(buf);
         while(*buf != '\0') ++buf;
         ++buf;
         ++i;
     }
-
-    *num = reply_msg->num;
-    *ret = result;
-    err = SYS_ERR_OK;
-RET:
+    *num = i;
     free(ret_buf);
-    return err;
+
+    return SYS_ERR_OK;
 }
 
 errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,

@@ -9,6 +9,8 @@
 #include <aos/rpc_handler_builder.h>
 #include <sys/tree.h>
 
+#define MAX_ENUM_COUNT 256
+
 struct program {
     domainid_t pid;
     struct aos_chan chan;
@@ -213,11 +215,55 @@ RPC_HANDLER(handle_lookup)
     // DEBUG_PRINTF(">> process %u lookup \"%s\"\n", client->pid, name);
 }
 
+// https://stackoverflow.com/a/4771038/10087792
+static bool startswith(const char *pre, const char *str)
+{
+    size_t lenpre = strlen(pre),
+           lenstr = strlen(str);
+    return lenstr < lenpre ? false : memcmp(pre, str, lenpre) == 0;
+}
+
+RPC_HANDLER(handle_enumerate)
+{
+    struct program *client = arg;
+//    errval_t err;
+
+    CAST_IN_MSG_AT_LEAST_SIZE(query, char);
+
+    DEBUG_PRINTF("process %u enumerate \"%s\"\n", client->pid, query);
+
+    struct service *matched[MAX_ENUM_COUNT];
+    size_t count = 0;
+    size_t buf_size = 0;
+
+    struct service *s;
+    RB_FOREACH(s, service_rb_tree, &services) {
+        if (startswith(query, s->name)) {
+            matched[count++] = s;
+            buf_size += strlen(s->name) + 1;
+        }
+    }
+
+    MALLOC_OUT_MSG_WITH_SIZE(reply, struct ns_enumerate_reply_msg, sizeof(struct ns_enumerate_reply_msg) + buf_size);
+    reply->num = count;
+    char *buf = reply->buf;
+    for (int i = 0; i < count; ++i) {
+        size_t len = strlen(matched[i]->name);
+        memcpy(buf, matched[i]->name, len + 1);
+        buf += len + 1;
+    }
+
+    return SYS_ERR_OK;
+
+    // DEBUG_PRINTF(">> process %u lookup \"%s\"\n", client->pid, name);
+}
+
 // Empty entries are NULL since it's a global variable
 static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT] = {
     [NAMESERVICE_REGISTER] = handle_register,
     [NAMESERVICE_DEREGISTER] = handle_deregister,
     [NAMESERVICE_LOOKUP] = handle_lookup,
+    [NAMESERVICE_ENUMERATE] = handle_enumerate,
 };
 
 struct aos_chan init_listener;

@@ -177,6 +177,8 @@ errval_t aos_chan_nack(struct aos_chan *chan, errval_t err)
 
 bool aos_chan_is_connected(struct aos_chan *chan) {
     switch (chan->type) {
+    case AOS_CHAN_TYPE_UNKNOWN:
+        return false;
     case AOS_CHAN_TYPE_LMP:
         return (chan->lc.connstate == LMP_CONNECTED);
     case AOS_CHAN_TYPE_UMP:
