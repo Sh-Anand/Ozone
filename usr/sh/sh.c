@@ -43,6 +43,7 @@ static void setup_environment(void)
 	// allocate buffers
 	env.command_buffer_size = 64;
 	env.default_command_buffer_size = 64;
+	env.zero_sep_command_line = NULL;
 	allocate_command_buffer();
 	env.max_args = 16;
 	allocate_argv();
@@ -298,6 +299,7 @@ int main(int argc, char **argv)
 		env.command_buffer = (char*)malloc(env.command_buffer_size);
 		env.command_buffer_offset = 0;
 		env.command_buffer_cursor = 0;
+		if (env.zero_sep_command_line != NULL) free(env.zero_sep_command_line);
 		shell_print_prefix(&env);
 		shell_print_current_line(&env);
 		
