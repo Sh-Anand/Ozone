@@ -25,7 +25,7 @@ struct proc_mgmt {
     domainid_t pid_upper;
 };
 
-coreid_t spawn_get_core(domainid_t pid);
+coreid_t pid_get_core(domainid_t pid);
 
 errval_t proc_mgmt_init(struct proc_mgmt *ps);
 

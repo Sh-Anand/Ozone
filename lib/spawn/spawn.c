@@ -681,7 +681,11 @@ errval_t spawn_kill(domainid_t pid) {
     }
     err = invoke_dispatcher_stop(dispatcher);
     if (err_is_fail(err)) {
-        return err_push(err, PROC_MGMT_ERR_KILL);
+        return err;
+    }
+    err = proc_mgmt_delete(&mgmt, pid);
+    if (err_is_fail(err)) {
+        return err_push(err, PROC_MGMT_ERR_DELETE);
     }
     return SYS_ERR_OK;
 }

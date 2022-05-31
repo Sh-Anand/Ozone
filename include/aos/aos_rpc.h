@@ -19,6 +19,7 @@
 
 enum aos_rpc_identifier {
     RPC_TRANSFER_CAP = RPC_IDENTIFIER_USER_START,
+    RPC_BYE,
     RPC_NUM,
     RPC_STR,
     RPC_RAM_REQUEST,

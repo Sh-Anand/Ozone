@@ -218,7 +218,7 @@ RPC_HANDLER(process_get_name_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
 
-    coreid_t core = spawn_get_core(*pid);
+    coreid_t core = pid_get_core(*pid);
     if (disp_get_current_core_id() == core) {
         grading_rpc_handler_process_get_name(*pid);
 
@@ -393,7 +393,7 @@ RPC_HANDLER(cap_transfer_handler)
 
     errval_t err;
 
-    coreid_t core = spawn_get_core(*pid);
+    coreid_t core = pid_get_core(*pid);
     if (core == disp_get_current_core_id()) {
         struct aos_chan *chan;
         err = spawn_get_chan(*pid, &chan);
@@ -437,7 +437,7 @@ RPC_HANDLER(cap_transfer_handler)
 RPC_HANDLER(remote_cap_transfer_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(msg, struct internal_rpc_remote_cap_msg);
-    assert(spawn_get_core(msg->pid) == disp_get_current_core_id());
+    assert(pid_get_core(msg->pid) == disp_get_current_core_id());
 
     errval_t err;
 
@@ -523,6 +523,7 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
 RPC_HANDLER(bind_nameserver_handler)
 {
     struct proc_node *proc = arg;
+    assert(proc != NULL);
 
     // DEBUG_PRINTF("process %u tries to bind nameserver\n", proc->pid);
 
@@ -594,9 +595,26 @@ RPC_HANDLER(remote_bind_nameserver_handler)
     return SYS_ERR_OK;
 }
 
+RPC_HANDLER(process_exit_handler)
+{
+    struct proc_node *proc = arg;
+    assert(proc != NULL);
+
+    DEBUG_PRINTF("Bye process %u!\n", proc->pid);
+
+    errval_t err = spawn_kill(proc->pid);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in spawn_kill");
+    }
+
+    *out_size = -1;  // do not reply
+    return SYS_ERR_OK;
+}
+
 // Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TRANSFER_CAP] = cap_transfer_handler,
+    [RPC_BYE] = process_exit_handler,
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,
     [RPC_RAM_REQUEST] = ram_request_msg_handler,

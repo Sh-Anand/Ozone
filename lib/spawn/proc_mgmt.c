@@ -22,7 +22,7 @@ STATIC_ASSERT(sizeof(domainid_t) == 4, "sizeof(domainid_t)");
 STATIC_ASSERT(sizeof(coreid_t) == 1, "sizeof(coreid_t)");
 #define PID_CORE_ID_FACTOR 10000000
 
-coreid_t spawn_get_core(domainid_t pid)
+coreid_t pid_get_core(domainid_t pid)
 {
     return (coreid_t)(pid / PID_CORE_ID_FACTOR);
 }

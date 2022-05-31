@@ -31,7 +31,7 @@
 #include "threads_priv.h"
 #include "init.h"
 
-#define DIRECT_PRINTF 1
+#define DIRECT_PRINTF 0
 
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;
@@ -48,7 +48,10 @@ void libc_exit(int);
 __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
-    debug_printf("libc exit NYI!\n");
+    errval_t err = aos_chan_send(&get_init_rpc()->chan, RPC_BYE, NULL_CAP, NULL, 0, false);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in RPC_BYE");
+    }
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {
