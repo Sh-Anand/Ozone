@@ -299,7 +299,10 @@ int main(int argc, char **argv)
 		env.command_buffer = (char*)malloc(env.command_buffer_size);
 		env.command_buffer_offset = 0;
 		env.command_buffer_cursor = 0;
-		if (env.zero_sep_command_line != NULL) free(env.zero_sep_command_line);
+		if (env.zero_sep_command_line != NULL) {
+			free(env.zero_sep_command_line);
+			env.zero_sep_command_line = NULL;
+		}
 		shell_print_prefix(&env);
 		shell_print_current_line(&env);
 		

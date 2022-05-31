@@ -522,18 +522,18 @@ static int bsp_main(int argc, char *argv[])
 
     debug_printf("Message handler loop\n");
 	
-	// struct spawninfo shell_si;
-	// domainid_t shell_pid;
-	// void *sh_terminal_state = terminal_aquire(true);
-	// err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
+	struct spawninfo shell_si;
+	domainid_t shell_pid;
+	void *sh_terminal_state = terminal_aquire(true);
+	err = spawn_load_by_name_with_terminal_state("sh", sh_terminal_state, &shell_si, &shell_pid);
 
     // spawn filereader
-    domainid_t filereader_pid;
-    struct spawninfo shell_si;
-    err = spawn_load_by_name("filereader", &shell_si, &filereader_pid);
-    if(err_is_fail(err)) {
-        DEBUG_ERR(err, "FAILED TO SPAWN FILEREADER");
-    }
+    //domainid_t filereader_pid;
+    //struct spawninfo shell_si;
+    //err = spawn_load_by_name("filereader", &shell_si, &filereader_pid);
+    //if(err_is_fail(err)) {
+    //    DEBUG_ERR(err, "FAILED TO SPAWN FILEREADER");
+    //}
 
     // Turn off the core
     // uint8_t payload = RPC_SHUTDOWN;

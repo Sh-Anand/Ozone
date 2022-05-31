@@ -63,7 +63,7 @@ static void sh_ls(struct shell_env *env)
 	} else {
 		path = env->argv[1]; // TODO: add ability for flags
 	}
-	
+	/*
 	struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
 	handle_t dir;
 	errval_t err = aos_rpc_opendir(init_rpc, path, &dir);
@@ -93,8 +93,10 @@ static void sh_ls(struct shell_env *env)
 error:
 	printf("ls failed: %s\n", err_getcode(err));
 	
-	/*
+	*/
+	DEBUG_PRINTF("BEFORE OPENDIR\n");
 	DIR* dir = opendir(path);
+	DEBUG_PRINTF("AFTER OPENDIR\n");
 	struct dirent *de;
 	if (dir == NULL) {
 		printf("Error: cannot open directory '%s'\n", path);
@@ -102,11 +104,16 @@ error:
 		return;
 	}
 	
+	DEBUG_PRINTF("BEFORE LOOP\n");
 	while ((de = readdir(dir)) != NULL) {
+		DEBUG_PRINTF("INSIDE LOO (de: %p)P\n", de);
+		de->d_name[8] = 0;
+		DEBUG_PRINTF("INSIDE LOOP 1\n");
 		printf("    %s\n", de->d_name);
+		DEBUG_PRINTF("INSIDE LOOP 2\n");
 	}
 	
-	env->last_return_status = 0;*/
+	env->last_return_status = 0;
 }
 
 static void sh_ps(struct shell_env *env)
