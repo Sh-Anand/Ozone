@@ -64,19 +64,6 @@ static char exception_stack[EXCEPTION_STACK_SIZE];
 #    define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
-#define CRITICAL_SECTION_ENTER                                                           \
-    /*THREAD_MUTEX_ENTER(&st->frame_alloc_mutex)                                         \
-    {                                                                                    \
-        dispatcher_handle_t handle = disp_disable();                                     \
-        do*/
-
-#define CRITICAL_SECTION_EXIT                                                            \
-    /*while (0)                                                                          \
-        ;                                                                                \
-    disp_enable(handle);                                                                 \
-    }                                                                                    \
-    THREAD_MUTEX_EXIT(&st->frame_alloc_mutex)*/
-
 /// RB tree implementations for general nodes and wrapper functions
 
 static int paging_rb_tree_node_cmp(struct paging_rb_tree_node *e1,
@@ -91,59 +78,35 @@ RB_GENERATE(paging_rb_tree, paging_rb_tree_node, rb_entry, paging_rb_tree_node_c
 static inline void rb_vnode_insert(struct paging_state *st, size_t level,
                                    struct paging_vnode_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_INSERT(paging_rb_tree, &st->vnode_tree[level], (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_INSERT(paging_rb_tree, &st->vnode_tree[level], (struct paging_rb_tree_node *)n);
 }
 
 static inline void rb_vnode_remove(struct paging_state *st, size_t level,
                                    struct paging_vnode_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_REMOVE(paging_rb_tree, &st->vnode_tree[level], (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_REMOVE(paging_rb_tree, &st->vnode_tree[level], (struct paging_rb_tree_node *)n);
 }
 
 static inline void rb_region_insert(struct paging_state *st, struct paging_region_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_INSERT(paging_rb_tree, &st->region_tree, (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_INSERT(paging_rb_tree, &st->region_tree, (struct paging_rb_tree_node *)n);
 }
 
 static inline void rb_region_remove(struct paging_state *st, struct paging_region_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_REMOVE(paging_rb_tree, &st->region_tree, (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_REMOVE(paging_rb_tree, &st->region_tree, (struct paging_rb_tree_node *)n);
 }
 
 static inline void rb_mapping_insert(struct paging_state *st,
                                      struct paging_mapping_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_INSERT(paging_rb_tree, &st->mapping_tree, (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_INSERT(paging_rb_tree, &st->mapping_tree, (struct paging_rb_tree_node *)n);
 }
 
 static inline void rb_mapping_remove(struct paging_state *st,
                                      struct paging_mapping_node *n)
 {
-    CRITICAL_SECTION_ENTER
-    {
-        RB_REMOVE(paging_rb_tree, &st->mapping_tree, (struct paging_rb_tree_node *)n);
-    }
-    CRITICAL_SECTION_EXIT
+    RB_REMOVE(paging_rb_tree, &st->mapping_tree, (struct paging_rb_tree_node *)n);
 }
 
 static inline struct paging_vnode_node *rb_vnode_find(struct paging_state *st,
@@ -279,11 +242,7 @@ static inline errval_t apply_mapping(struct paging_state *st, struct capref dest
         if (store_frame_cap) {
             child->self_paging_frame_cap = src;
         }
-        CRITICAL_SECTION_ENTER
-        {
-            LIST_INSERT_HEAD(mappings, child, link);
-        }
-        CRITICAL_SECTION_EXIT
+        LIST_INSERT_HEAD(mappings, child, link);
     }  // discard otherwise
 
     return SYS_ERR_OK;
@@ -305,24 +264,16 @@ static inline void insert_to_free_list(struct paging_state *st,
 {
     assert(!node->free);
     assert(node->bits >= BASE_PAGE_BITS && node->bits <= PAGING_ADDR_BITS);
-    CRITICAL_SECTION_ENTER
-    {
-        LIST_INSERT_HEAD(free_list_head(st, node->bits), node, fl_link);
-        node->free = true;
-    }
-    CRITICAL_SECTION_EXIT
+    LIST_INSERT_HEAD(free_list_head(st, node->bits), node, fl_link);
+    node->free = true;
 }
 
 static inline void remove_from_free_list(struct paging_state *st,
                                          struct paging_region_node *node)
 {
     assert(node->free);
-    CRITICAL_SECTION_ENTER
-    {
-        node->free = false;
-        LIST_REMOVE(node, fl_link);
-    }
-    CRITICAL_SECTION_EXIT
+    node->free = false;
+    LIST_REMOVE(node, fl_link);
 }
 
 // Create a node. cap is initialized to NULL_CAP. link is not initialized.
@@ -389,6 +340,7 @@ FAILURE_CREATE_VNODE_NODE:
     return err;
 }
 
+// NOTE: this function is called in vnode_mutex
 static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t level,
                                             lvaddr_t addr, struct paging_vnode_node **ret)
 {
@@ -418,10 +370,9 @@ static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t leve
     assert(!capref_is_null(parent->vnode_cap));
 
     // The operation above may trigger refill/vnode alloc that creates the vnode node
-    node = rb_vnode_find(st, level, addr);
-    if ((node = rb_vnode_find(st, level, addr)) != NULL) {
+    /*if ((node = rb_vnode_find(st, level, addr)) != NULL) {
         goto DONE;
-    }
+    }*/
 
     // Create the vnode cap
     struct capref vnode_cap;
@@ -439,10 +390,10 @@ static errval_t lookup_or_create_vnode_node(struct paging_state *st, size_t leve
     // Install the page table
     err = apply_mapping(st, parent->vnode_cap, vnode_cap, get_child_index(addr, level - 1),
                         KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE, 0, 1, NULL, false);
-    if ((node = rb_vnode_find(st, level, addr)) != NULL) {
+    /*if ((node = rb_vnode_find(st, level, addr)) != NULL) {
         err = SYS_ERR_OK;  // fall back to the undo path, and return OK, regardless of error
         goto UNDO_PT_ALLOC;
-    }
+    }*/
     if (err_is_fail(err)) {
         DEBUG_PRINTF("failed to apply_mapping (lookup_or_create_vnode_node)\n");
         goto FAILURE_APPLY_MAPPING;
@@ -781,11 +732,11 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
 #endif
 
         // Allocate the mapping capability slot
-        struct capref mapping_cap;
+        /*struct capref mapping_cap;
         err = st->slot_alloc->alloc(st->slot_alloc, &mapping_cap);
         if (err_is_fail(err)) {
             return err;
-        }
+        }*/
 
         assert(!capref_is_null(l3_node->vnode_cap));
         err = apply_mapping(st, l3_node->vnode_cap, frame, child_start, attr, offset,
@@ -794,7 +745,7 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
         if (err_is_fail(err)) {
             DEBUG_PRINTF("failed to apply_mapping (map_frame, child_count = %lu)\n",
                          child_count);
-            st->slot_alloc->free(st->slot_alloc, mapping_cap);
+            /*st->slot_alloc->free(st->slot_alloc, mapping_cap);*/
             return err;
         }
         offset += child_mapping_size;
@@ -1637,7 +1588,7 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
             // XXX: the frame capability may or may not be stored yet, ignore it for now
             handle_real_page_fault(type, subtype, addr, regs);
         } else {
-#if 1
+#if 0
             DEBUG_PRINTF("paging: installed page to %p\n", addr);
 #endif
         }
