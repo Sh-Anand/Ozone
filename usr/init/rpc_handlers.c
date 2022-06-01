@@ -652,7 +652,7 @@ RPC_HANDLER(fread_handler)
 
         errval_t err = fat32_read(handle, *out_payload + sizeof(size_t), bytes, &ret_size);
 
-        if(err_is_fail(err)) { free(*out_payload); return err; }
+        if(err_is_fail(err)) { return err; }
         memcpy(*out_payload, &ret_size, sizeof(size_t));
         *out_size = sizeof(size_t) + bytes;
         return SYS_ERR_OK;
