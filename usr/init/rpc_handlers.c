@@ -622,7 +622,7 @@ RPC_HANDLER(fread_handler)
 
         errval_t err = fat32_read(handle, (*out_payload) + sizeof(size_t), bytes, &ret_size);
         if(err_is_fail(err)) { free(*out_payload); return err; }
-        memcpy(out_payload, &ret_size, sizeof(size_t));
+        memcpy(*out_payload, &ret_size, sizeof(size_t));
 
         return SYS_ERR_OK;
     } else {
@@ -634,16 +634,13 @@ RPC_HANDLER(fwrite_handler)
 {
     if (disp_get_current_core_id() == 0) {
         handle_t handle = (handle_t) *(lvaddr_t *) in_payload;
-        DEBUG_PRINTF("Received Handle : %d\n", handle);
         size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
 
         size_t ret_size = 0;
-        DEBUG_PRINTF("RPC HANDLER TRYING TO WRITE %s\n", (char *) (in_payload + sizeof(lvaddr_t) + sizeof(size_t)));
         errval_t err = fat32_write(handle, in_payload + sizeof(lvaddr_t) + sizeof(size_t), bytes, &ret_size);
         if(err_is_fail(err)) return err;
-        *out_payload = malloc(sizeof(size_t));
-        memcpy(out_payload, &ret_size, sizeof(size_t));
-
+        MALLOC_OUT_MSG(ret, size_t);
+        *ret = ret_size;
         return SYS_ERR_OK;
     } else {
         return forward_to_core(0, in_payload, in_size, out_payload, out_size);

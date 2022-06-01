@@ -974,8 +974,6 @@ errval_t aos_rpc_fwrite(struct aos_rpc *rpc, handle_t handle, void *buffer, size
     void *return_msg = NULL;
     size_t return_size = 0;
 
-    DEBUG_PRINTF("AT RPC FWRITE, TRYING TO WRITE %s\n", (char *) buffer);
-
     size_t send_size = sizeof(lvaddr_t) + sizeof(size_t) + bytes;
     void *send_msg = malloc(send_size);
     memcpy(send_msg, &handle, sizeof(lvaddr_t));
@@ -983,9 +981,7 @@ errval_t aos_rpc_fwrite(struct aos_rpc *rpc, handle_t handle, void *buffer, size
     memcpy(send_msg + sizeof(lvaddr_t) + sizeof(size_t), buffer, bytes);
 
     errval_t err = aos_rpc_call(rpc, RPC_FWRITE, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
-    DEBUG_PRINTF("got response?\n");
     free(send_msg);
-    DEBUG_PRINTF("processing response\n");
     if(err_is_ok(err)) {
         *ret_bytes = *(size_t *)(return_msg);
         free(return_msg);

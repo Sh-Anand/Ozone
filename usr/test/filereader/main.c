@@ -115,62 +115,62 @@ static uint64_t systime_to_ms(systime_t time){
 //     return err;
 // }
 
-// static errval_t test_fread(char *file)
-// {
-//     int res = 0;
+static errval_t test_fread(char *file)
+{
+    int res = 0;
 
-//     TEST_PREAMBLE(file)
+    TEST_PREAMBLE(file)
 
-//     FILE *f = fopen(file, "r");
-//     if (f == NULL) {
-//         return FS_ERR_OPEN;
-//     }
+    FILE *f = fopen(file, "r");
+    if (f == NULL) {
+        return FS_ERR_OPEN;
+    }
 
-//     /* obtain the file size */
-//     res = fseek (f , 0 , SEEK_END);
-//     if (res) {
-//         return FS_ERR_INVALID_FH;
-//     }
+    /* obtain the file size */
+    res = fseek (f , 0 , SEEK_END);
+    if (res) {
+        return FS_ERR_INVALID_FH;
+    }
 
-//     size_t filesize = ftell (f);
-//     rewind (f);
+    size_t filesize = ftell (f);
+    rewind (f);
 
-//     printf("File size is %zu\n", filesize);
+    printf("File size is %zu\n", filesize);
 
-//     char *buf = calloc(filesize + 2, sizeof(char));
-//     if (buf == NULL) {
-//         return LIB_ERR_MALLOC_FAIL;
-//     }
+    char *buf = calloc(filesize + 2, sizeof(char));
+    if (buf == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
 
-//     size_t read = fread(buf, 1, filesize, f);
+    size_t read = fread(buf, 1, filesize, f);
 
-//     printf("read: %s\n", buf);
+    printf("read: %s\n", buf);
 
-//     if (read != filesize) {
-//         return FS_ERR_READ;
-//     }
+    if (read != filesize) {
+        return FS_ERR_READ;
+    }
 
-//     rewind(f);
+    rewind(f);
 
-//     size_t nchars = 0;
-//     int c;
-//     do {
-//         c = fgetc (f);
-//         nchars++;
-//     } while (c != EOF);
+    size_t nchars = 0;
+    int c;
+    do {
+        c = fgetc (f);
+        nchars++;
+    } while (c != EOF);
 
-//     if (nchars < filesize) {
-//         return FS_ERR_READ;
-//     }
+    if (nchars < filesize) {
+        return FS_ERR_READ;
+    }
 
-//     free(buf);
-//     res = fclose(f);
-//     if (res) {
-//         return FS_ERR_CLOSE;
-//     }
+    free(buf);
+    res = fclose(f);
+    if (res) {
+        return FS_ERR_CLOSE;
+    }
 
-//     return SYS_ERR_OK;
-// }
+    return SYS_ERR_OK;
+}
 
 static errval_t test_fwrite(char *file)
 {
@@ -232,7 +232,7 @@ int main(int argc, char *argv[])
 
     DEBUG_PRINTF("Write test success!\n");
 
-    // run_test(test_fread, MOUNTPOINT FILENAME);
+    run_test(test_fread, MOUNTPOINT FILENAME);
 
     return EXIT_SUCCESS;
 }
