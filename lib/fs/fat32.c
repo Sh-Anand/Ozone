@@ -582,7 +582,7 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
     //Update sector and offset of newly created directory
     dir->sector = sector;
     dir->sector_offset = offset;
-    
+
     //Write newly created directory to appropriate location in current directory 
     uint8_t sector_data[512];
     CHECK_ERR(sd_read_sector(sector, sector_data), "");
@@ -819,7 +819,6 @@ errval_t fat32_create(const char *path, fat32_handle_t *rethandle) {
 }
 
 errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     errval_t err;
     DEBUG_PRINTF("FAT32 OPENING DIR %s\n", path);
     struct fat32_handle *handle;
@@ -833,7 +832,6 @@ errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
 
 //assumes retname is malloced large enough
 errval_t fat32_dir_read_next(fat32_handle_t inhandle, char **retname, struct fs_fileinfo *info) {
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     errval_t err;
     struct fat32_handle *handle = inhandle;
     // DEBUG_PRINTF("READING NEXT OF %s\n AT POS %d", handle->dirent->name, handle->pos);
@@ -897,32 +895,25 @@ errval_t fat32_seek(fat32_handle_t handle, enum fs_seekpos whence, off_t offset)
 }
 
 static void close_handle(struct fat32_handle *handle) {
-    DEBUG_PRINTF("CLOSEH ROOT IS SAFE????? %d\n", root_directory->is_dir);
     free(handle->path);
-    DEBUG_PRINTF("WHICH OF YOU?\n");
     free_dirent(handle->dirent, false);
-    DEBUG_PRINTF("CLOSEH ROOT IS SAFE????? %d\n", root_directory->is_dir);
     free(handle);
 }
 
 errval_t fat32_close(fat32_handle_t inhandle) {
-    DEBUG_PRINTF("CLOSES ROOT IS SAFE????? %d\n", root_directory->is_dir);
+    DEBUG_PRINTF("CLOSING FILE\n");
     struct fat32_handle *handle = inhandle;
     if(handle->isdir)
         return FS_ERR_NOTFILE;
     close_handle(handle);
-    DEBUG_PRINTF("CLOSEE ROOT IS SAFE????? %d\n", root_directory->is_dir);
     return SYS_ERR_OK;
 }
 
 errval_t fat32_closedir(fat32_handle_t inhandle) {
-    DEBUG_PRINTF("FAT32 closedir\n");
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     struct fat32_handle *handle = inhandle;
     if(!handle->isdir)
         return FS_ERR_NOTDIR;
     close_handle(handle);
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     return SYS_ERR_OK;
 }
 
@@ -949,7 +940,7 @@ errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *b
         CHECK_ERR(sector_from_cluster_offset(fhandle->dirent->FstCluster, fhandle->pos, &sector, &offset), "");
         CHECK_ERR(sd_read_sector(sector, data), "bad read");
 
-        size_t cpy_bytes = MIN(SDHC_BLOCK_SIZE - offset, bytes);
+        size_t cpy_bytes = MIN(fhandle->dirent->size - fhandle->pos, MIN(SDHC_BLOCK_SIZE - offset, bytes));
         memcpy(buffer, data + offset, cpy_bytes);
         buffer += cpy_bytes;
         fhandle->pos += cpy_bytes;
@@ -961,7 +952,7 @@ errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *b
     
     if(start_bytes == bytes)
         return FS_ERR_EOF;
-    
+
     return SYS_ERR_OK;
 }
 

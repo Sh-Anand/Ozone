@@ -204,6 +204,7 @@ static int fs_libc_close(int fd)
         return -1;
     }
 
+    DEBUG_PRINTF("After this?\n");
     fat32_handle_t fh = e->handle;
     switch(e->type) {
     case FDTAB_TYPE_FILE:
