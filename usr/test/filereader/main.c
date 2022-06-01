@@ -125,16 +125,18 @@ static errval_t test_fread(char *file)
     if (f == NULL) {
         return FS_ERR_OPEN;
     }
-
+    DEBUG_PRINTF("OPEN SUCCESS\n");
     /* obtain the file size */
     res = fseek (f , 0 , SEEK_END);
     if (res) {
         return FS_ERR_INVALID_FH;
     }
+    DEBUG_PRINTF("FSEEK SUCCESS\n");
 
     size_t filesize = ftell (f);
+    DEBUG_PRINTF("FTELL SUCCESS\n");
     rewind (f);
-
+    DEBUG_PRINTF("REWIND SUCCESS\n");
     printf("File size is %zu\n", filesize);
 
     char *buf = calloc(filesize + 2, sizeof(char));
@@ -142,7 +144,9 @@ static errval_t test_fread(char *file)
         return LIB_ERR_MALLOC_FAIL;
     }
 
+    DEBUG_PRINTF("FILEREADER READ %d\n", filesize);
     size_t read = fread(buf, 1, filesize, f);
+    DEBUG_PRINTF("FREAD SUCCESS\n");
 
     printf("read: %s\n", buf);
 
@@ -163,7 +167,9 @@ static errval_t test_fread(char *file)
         return FS_ERR_READ;
     }
 
+    DEBUG_PRINTF("THIS FREE?\n");
     free(buf);
+    DEBUG_PRINTF("Mayhaps?\n");
     res = fclose(f);
     if (res) {
         return FS_ERR_CLOSE;

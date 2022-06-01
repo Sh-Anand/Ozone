@@ -910,7 +910,6 @@ errval_t aos_rpc_fopen(struct aos_rpc *rpc, const char *path, handle_t *handle)
         free(return_msg);
     }
 
-    free(return_msg);
     return err;
 }
 
@@ -919,6 +918,7 @@ errval_t aos_rpc_fclose(struct aos_rpc *rpc, handle_t handle)
     void *return_msg = NULL;
     size_t return_size = 0;
 
+    DEBUG_PRINTF("AFTER RPC?\n");
     errval_t err = aos_rpc_call(rpc, RPC_FCLOSE, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
 
     return err;
@@ -959,6 +959,7 @@ errval_t aos_rpc_fread(struct aos_rpc *rpc, handle_t handle, void *buffer, size_
     memcpy(send_msg + sizeof(lvaddr_t), &bytes, sizeof(size_t));
 
     errval_t err = aos_rpc_call(rpc, RPC_FREAD, NULL_CAP, send_msg, send_size, NULL, &return_msg, &return_size);
+
     free(send_msg);
     if(err_is_ok(err)) {
         *ret_bytes = *(size_t *)(return_msg);
