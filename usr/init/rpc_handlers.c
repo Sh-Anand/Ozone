@@ -602,11 +602,37 @@ RPC_HANDLER(fcreate_handler)
     }
 }
 
+RPC_HANDLER(frm_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_STRING;
+        errval_t err = fat32_remove(path);
+        free(path);
+        *out_payload = NULL;
+        return err;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
 RPC_HANDLER(mkdir_handler)
 {
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_STRING;
         errval_t err = fat32_mkdir(path);
+        free(path);
+        *out_payload = NULL;
+        return err;
+    } else {
+        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+    }
+}
+
+RPC_HANDLER(rmdir_handler)
+{
+    if (disp_get_current_core_id() == 0) {
+        CAST_IN_MSG_STRING;
+        errval_t err = fat32_rmdir(path);
         free(path);
         *out_payload = NULL;
         return err;
@@ -1043,5 +1069,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
 	[RPC_FSTAT] = fstat_handler,
 	[RPC_READDIR] = readdir_handler,
     [RPC_FSEEK] = fseek_handler,
-    [RPC_FTELL] = ftell_handler
+    [RPC_FTELL] = ftell_handler,
+    [RPC_FRM]   = frm_handler,
+    [RPC_RMDIR] = rmdir_handler,
 };
