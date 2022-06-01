@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
-#include <dirent.h>
+#include <fs/dirent.h>
 
 #include <errno.h>
 
@@ -94,21 +94,25 @@ error:
 	printf("ls failed: %s\n", err_getcode(err));
 	
 	*/
-	DEBUG_PRINTF("BEFORE OPENDIR\n");
-	DIR* dir = opendir(path);
-	DEBUG_PRINTF("AFTER OPENDIR\n");
-	struct dirent *de;
+	fs_dirhandle_t dir;
+	errval_t err = opendir(path, &dir);
 	if (dir == NULL) {
 		printf("Error: cannot open directory '%s'\n", path);
 		env->last_return_status = 1;
 		return;
 	}
 	
-	DEBUG_PRINTF("BEFORE LOOP\n");
-	while ((de = readdir(dir)) != NULL) {
-		DEBUG_PRINTF("INSIDE LOO (de: %p)P\n", de);
-		printf("    %s\n", de->d_name);
-		DEBUG_PRINTF("INSIDE LOOP 2\n");
+	char *name;
+	while (readdir(dir, &name) == SYS_ERR_OK) {
+		printf(" %s\n", name);
+		free(name);
+	}
+	
+	err = closedir(dir);
+	if (err_is_fail(err)) {
+		printf("Error closing directory handle: %s\n", err_getcode(err));
+		env->last_return_status = 1;
+		return;
 	}
 	
 	env->last_return_status = 0;

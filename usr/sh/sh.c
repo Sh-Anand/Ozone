@@ -13,6 +13,7 @@
 #include "escape_sequence.h"
 
 #include <aos/nameserver.h>
+#include <fs/fs.h>
 
 #define SHELL_HISTORY_MAX_SIZE 1024
 
@@ -291,6 +292,10 @@ int main(int argc, char **argv)
 {
 	puts("AOS Team 1 shell starting...");
 	
+	errval_t err = filesystem_init();
+	if (err_is_fail(err)) {
+		printf("Error: failed to initialise filesystem!\n");
+	}
 	setup_environment();
 	
 	while (env.active) {
