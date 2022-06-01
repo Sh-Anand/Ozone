@@ -493,16 +493,20 @@ static inline errval_t lookup_or_create_region_node(struct paging_state *st,
                                                     struct paging_region_node **ret,
                                                     bool create)
 {
-    errval_t err;
+    errval_t err = SYS_ERR_OK;
 
-    struct paging_region_node *node = rb_region_find(st, addr);
-
-    if (node == NULL && create) {
-        // Create the region node
-        err = create_region_node(st, addr, bits, &node);
-        if (err_is_fail(err)) {
-            return err;
+    struct paging_region_node *node;
+    THREAD_MUTEX_ENTER(&st->region_mutex)
+    {
+        node = rb_region_find(st, addr);
+        if (node == NULL && create) {
+            // Create the region node
+            err = create_region_node(st, addr, bits, &node);
         }
+    }
+    THREAD_MUTEX_EXIT(&st->region_mutex)
+    if (err_is_fail(err)) {
+        return err;
     }
 
     if (node != NULL && node->bits != bits) {
@@ -680,8 +684,6 @@ static errval_t chop_down_region(struct paging_state *st,
     errval_t err;
 
     while (node->bits > bits) {
-
-
         // Downgrade to next level
         node->bits--;
         struct paging_region_node *left = node;
@@ -760,7 +762,11 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
 
         // Get the L3 page table node
         struct paging_vnode_node *l3_node = NULL;
-        err = lookup_or_create_vnode_node(st, 3, l3_addr, &l3_node);
+        THREAD_MUTEX_ENTER(&st->vnode_mutex)
+        {
+            err = lookup_or_create_vnode_node(st, 3, l3_addr, &l3_node);
+        }
+        THREAD_MUTEX_EXIT(&st->vnode_mutex)
         if (err_is_fail(err)) {
             return err;
         }
@@ -825,56 +831,72 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
 
     errval_t err, err2;
 
-    struct paging_mapping_node *mapping = NULL;
-
-    // Find a free block as small as possible
-    for (uint8_t b = bits; b <= PAGING_ADDR_BITS; b++) {
-        struct paging_region_node *node = NULL;
-
-        err = lookup_or_create_region_node(st, vaddr & ~MASK(b), b, &node, false);
-        if (err_is_ok(err)) {
-            if (node->free) {
-                remove_from_free_list(st, node);  // refill will not touch it
-            } else {
-                continue;  // look for a larger one
-            }
-
-            err = chop_down_region(st, &node, vaddr - node->addr, bits);
-            if (err_is_fail(err)) {
-                DEBUG_PRINTF("Failed to chop_down_region\n");
-                goto FAILURE_CHOP_DOWN_REGION;
-            }
-            assert(node->bits == bits && node->addr == vaddr);
-
-            // Create the mapping record
-            err = create_mapping_node(st, node, &mapping);
-            if (err_is_fail(err)) {
-                DEBUG_PRINTF("Failed to create_mapping_node\n");
-                goto FAILURE_CREATE_MAPPING_NODE;
-            }
-
-            // Actually map the frame, which may span multiple tables
-            err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings,
-                            false);
-            if (err_is_fail(err)) {
-                DEBUG_PRINTF("failed to map_frame (map_naturally_aligned_fixed)\n");
-                goto FAILURE_MAP_FRAME;
-            }
-
-            assert(!node->free);
-
-            return SYS_ERR_OK;
-
-        } else if (err == LIB_ERR_PAGING_REGION_NODE_NOT_FOUND) {
-            // Continue to next order
-        } else {
-            // Other error, no need to clean up
-            return err;
-        }
+    err = ensure_enough_slabs(st);
+    if (err_is_fail(err)) {
+        return err;  // here is nothing much we can do here
     }
 
-    // DEBUG_PRINTF("paging: fixed mapping to already used region\n");
-    return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
+    struct paging_region_node *node = NULL;
+    struct paging_mapping_node *mapping = NULL;
+
+    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    {
+        // Find a free block as small as possible
+        for (uint8_t b = bits; b <= PAGING_ADDR_BITS; b++) {
+            err = lookup_or_create_region_node(st, vaddr & ~MASK(b), b, &node, false);
+            if (err_is_ok(err)) {
+                if (node->free) {
+                    remove_from_free_list(st, node);
+                } else {
+                    continue;  // look for a larger one
+                }
+
+                err = chop_down_region(st, &node, vaddr - node->addr, bits);
+                if (err_is_fail(err)) {
+                    DEBUG_PRINTF("Failed to chop_down_region\n");
+                    goto EXIT_FIND_BLOCK;
+                }
+                assert(node->bits == bits && node->addr == vaddr);
+
+                goto EXIT_FIND_BLOCK;
+
+            } else if (err == LIB_ERR_PAGING_REGION_NODE_NOT_FOUND) {
+                // Continue to next order
+            } else {
+                // Other error, no need to clean up
+                return err;
+            }
+        }
+    EXIT_FIND_BLOCK:
+        THREAD_MUTEX_BREAK;
+    }
+    THREAD_MUTEX_EXIT(&st->free_list_mutex)
+    if (err_is_fail(err)) {
+        goto FAILURE_CHOP_DOWN_REGION;
+    }
+
+    if (node != NULL) {
+        // Create the mapping record
+        err = create_mapping_node(st, node, &mapping);
+        if (err_is_fail(err)) {
+            DEBUG_PRINTF("Failed to create_mapping_node\n");
+            goto FAILURE_CREATE_MAPPING_NODE;
+        }
+
+        // Actually map the frame, which may span multiple tables
+        err = map_frame(st, vaddr, frame, offset, bytes, attr, &mapping->mappings, false);
+        if (err_is_fail(err)) {
+            DEBUG_PRINTF("failed to map_frame (map_naturally_aligned_fixed)\n");
+            goto FAILURE_MAP_FRAME;
+        }
+
+        assert(!node->free);
+
+        return SYS_ERR_OK;
+    } else {
+        // DEBUG_PRINTF("paging: fixed mapping to already used region\n");
+        return LIB_ERR_PAGING_FIXED_MAP_OCCUPIED;
+    }
 
 FAILURE_MAP_FRAME:
     // Continue to unmap_and_delete
@@ -1027,7 +1049,8 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
                 err = chop_down_region(st, &node, 0, bits);
                 if (err_is_fail(err)) {
                     DEBUG_ERR(err, "failed to chop_down_region\n");
-                    while(1);
+                    while (1)
+                        ;
                     goto EXIT_FAST_PATH;
                 }
                 assert(node->bits == bits);
@@ -1061,7 +1084,7 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
                             goto EXIT_SLOW_PATH;
                         }
                         assert(node->bits == bits);
-                        
+
                         goto EXIT_SLOW_PATH;
                     }
                 }
@@ -1201,32 +1224,44 @@ static errval_t unmap(struct paging_state *st, lvaddr_t vaddr)
     mapping = NULL;
 
     // Merge node iteratively
-    while (node->bits < PAGING_ADDR_BITS) {
-        // Lookup buddy node
-        struct paging_region_node *buddy = NULL;
-        const lvaddr_t buddy_addr = node->addr ^ BIT(node->bits);
-        err = lookup_or_create_region_node(st, buddy_addr, node->bits, &buddy, false);
-        if (err_is_fail(err) && err != LIB_ERR_PAGING_REGION_NODE_NOT_FOUND) {
-            DEBUG_PRINTF("fail to lookup_or_create_region_node 0x%lx/%u bits\n",
-                         buddy_addr, node->bits);
-            return err;  // here is nothing much we can do here
+    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    {
+        while (node->bits < PAGING_ADDR_BITS) {
+            // Lookup buddy node
+            struct paging_region_node *buddy = NULL;
+            const lvaddr_t buddy_addr = node->addr ^ BIT(node->bits);
+            err = lookup_or_create_region_node(st, buddy_addr, node->bits, &buddy, false);
+            if (err_is_fail(err) && err != LIB_ERR_PAGING_REGION_NODE_NOT_FOUND) {
+                DEBUG_PRINTF("fail to lookup_or_create_region_node 0x%lx/%u bits\n",
+                             buddy_addr, node->bits);
+                goto EXIT_MERGE_BLOCK;
+            }
+
+            if (err == LIB_ERR_PAGING_REGION_NODE_NOT_FOUND || !buddy->free) {
+                err = SYS_ERR_OK;
+                break;  // the buddy is not free, or the buddy node is not at the same level
+            } else {
+                remove_from_free_list(st, buddy);
+            }
+
+            // Combine the node with its buddy and switch to the upper level one
+            assert(node->bits == buddy->bits);
+            if ((buddy->addr & BIT(buddy->bits)) == 0) {
+                node = buddy;
+            }
+            node->bits++;
         }
 
-        if (err == LIB_ERR_PAGING_REGION_NODE_NOT_FOUND || !buddy->free) {
-            break;  // the buddy is not free, or the buddy node is not at the same level
-        } else {
-            remove_from_free_list(st, buddy);
-        }
+        insert_to_free_list(st, node);
 
-        // Combine the node with its buddy and switch to the upper level one
-        assert(node->bits == buddy->bits);
-        if ((buddy->addr & BIT(buddy->bits)) == 0) {
-            node = buddy;
-        }
-        node->bits++;
+    EXIT_MERGE_BLOCK:
+        THREAD_MUTEX_BREAK;
+    }
+    THREAD_MUTEX_EXIT(&st->free_list_mutex)
+    if (err_is_fail(err)) {
+        return err;
     }
 
-    insert_to_free_list(st, node);
 #if 0
     DEBUG_PRINTF("unmap insert 0x%lx/%lu to free list\n", node->addr, BIT(node->bits));
 #endif
@@ -1285,6 +1320,8 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     thread_mutex_init(&st->frame_alloc_mutex);
     thread_mutex_init(&st->free_list_mutex);
+    thread_mutex_init(&st->vnode_mutex);
+    thread_mutex_init(&st->region_mutex);
     st->slot_alloc = ca;
     st->start_addr = start_vaddr;
 
@@ -1318,7 +1355,11 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     errval_t err;
     struct paging_vnode_node *l0 = NULL;
-    err = create_vnode_node(st, 0, 0, &l0);
+    THREAD_MUTEX_ENTER(&st->vnode_mutex)
+    {
+        err = create_vnode_node(st, 0, 0, &l0);
+    }
+    THREAD_MUTEX_EXIT(&st->vnode_mutex)
     if (err_is_fail(err)) {
         DEBUG_PRINTF("failed to create L0 vnode node\n");
         return err;
@@ -1326,7 +1367,11 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     l0->vnode_cap = pdir;
 
     struct paging_region_node *init_region = NULL;
-    err = create_region_node(st, 0, PAGING_ADDR_BITS, &init_region);
+    THREAD_MUTEX_ENTER(&st->region_mutex)
+    {
+        err = create_region_node(st, 0, PAGING_ADDR_BITS, &init_region);
+    }
+    THREAD_MUTEX_EXIT(&st->region_mutex)
     if (err_is_fail(err)) {
         DEBUG_PRINTF("failed to create L0 region node\n");
         return err;
