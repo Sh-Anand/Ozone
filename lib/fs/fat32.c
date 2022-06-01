@@ -181,11 +181,9 @@ static errval_t sd_write_sector(int sector, void *data) {
 
     memcpy((void *)vaddr, data, SDHC_BLOCK_SIZE);
 
-    dmb();
+    DEBUG_PRINTF("WRITING TO SECTOR %d\n", sector);
 
     CHECK_ERR_PUSH(sdhc_write_block(manager->sd, sector, paddr), FS_ERR_BLOCK_WRITE);
-
-    dmb();
 
 	barrelfish_usleep(25000);
 
@@ -499,7 +497,7 @@ static errval_t write_to_FAT(int cluster, uint32_t value) {
 //if last_cluster is -1, skip modifying the existing directory entry
 static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_cluster, int *retcluster) {
     errval_t err;
-
+    DEBUG_PRINTF("Extending Fst cluster : %d, last cluster : %d\n", dir->FstCluster, last_cluster);
     CHECK_ERR(allocate_cluster(retcluster), "");
 
     if(dir->FstCluster == 0)
@@ -512,6 +510,7 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
     else if(last_cluster == 0) {
         //write back to the sector of this dirent
         uint8_t dir_data[SDHC_BLOCK_SIZE];
+        DEBUG_PRINTF("DIR's sector is %d ?\n", dir->sector);
         CHECK_ERR(sd_read_sector(dir->sector, dir_data), "");
         assert(dir->FstCluster == *retcluster);
         marshall_directory_entry(dir, dir_data + dir->sector_offset);
@@ -559,14 +558,17 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
     }
     struct fat32_dirent *dir;
     create_new_empty_dirent(curr, name, is_dir, Attr, &dir);
+    DEBUG_PRINTF("DONE CREATING EMPTY DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
 
     if(Attr == ATTR_DIRECTORY) {
         CHECK_ERR(create_new_directory(dir), "Failed to create new directory");
     }
 
+    //Find first free dirent space to write newly created directory to
     int sector,offset,cluster;   
     err = find_in_directory(curr, name, true, NULL, &sector, &offset, &cluster);
 
+    //If not enough free space in the current directory, extend
     if(err == FS_ERR_NOTFOUND) {
         int next_cluster; 
         CHECK_ERR(extend_dirent_by_one_cluster(curr, cluster, &next_cluster), "");
@@ -576,7 +578,12 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
     }
     
     assert(offset % 32 == 0);
+
+    //Update sector and offset of newly created directory
+    dir->sector = sector;
+    dir->sector_offset = offset;
     
+    //Write newly created directory to appropriate location in current directory 
     uint8_t sector_data[512];
     CHECK_ERR(sd_read_sector(sector, sector_data), "");
     marshall_directory_entry(dir, sector_data + offset);
@@ -630,6 +637,7 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
     // if(CREATE_IF_NOT_EXIST && !created)
     //     return FS_ERR_EXISTS;
     
+    DEBUG_PRINTF("DONE CREATING/FINDING DIRENT, AT SECTOR AND OFFSET %d, %d\n", curr->sector, curr->sector_offset);
     *retent = curr;
 
     DEBUG_PRINTF("ARe we succeeding?\n");
@@ -652,6 +660,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
     }
 
     CHECK_ERR_PUSH(search_dirent(dir, path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
+    DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
 
     return SYS_ERR_OK;
 }
@@ -669,6 +678,7 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
     strcpy(clean_path, path);
     strtoupper(clean_path);
     CHECK_ERR_PUSH(find_dirent(manager->mount, clean_path, CREATE, ATTR, &dir), FS_ERR_OPEN);
+    DEBUG_PRINTF("DONE FINDING DIRENT AT SECTOR, OFFSET %d, %d\n", dir->sector, dir->sector_offset);
     
     if(!(dir->Attr & ATTR))
         return ERR;
@@ -785,27 +795,26 @@ errval_t fat32_init(char *mnt) {
 }
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     errval_t err;
     DEBUG_PRINTF("OPENING %s\n", path);
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE, false, FS_ERR_NOTFILE), "failed to open file");
     handle->isdir = false;
     *rethandle = handle;
-    DEBUG_PRINTF("RETURNING HANDLE %d for %s", *rethandle, path);
+    DEBUG_PRINTF("RETURNING HANDLE %d for %s\n", *rethandle, path);
     return SYS_ERR_OK;
 }
 
 errval_t fat32_create(const char *path, fat32_handle_t *rethandle) {
-    DEBUG_PRINTF("ROOT IS SAFE????? %d\n", root_directory->is_dir);
     errval_t err;
 
     DEBUG_PRINTF("CREATING %s\n", path);
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE, true, FS_ERR_NOTFILE), "failed to open file");
+    DEBUG_PRINTF("DONE OPENING DIRENT, AT SECTOR AND OFFSET %d, %d\n", handle->dirent->sector, handle->dirent->sector_offset);
     handle->isdir = false;
     *rethandle = handle;
-    DEBUG_PRINTF("RETURNING HANDLE %d for %s", *rethandle, path);
+    DEBUG_PRINTF("RETURNING HANDLE %d for %s\n", *rethandle, path);
     return SYS_ERR_OK;
 }
 
@@ -958,9 +967,8 @@ errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *b
 
 errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, size_t *bytes_written) {
     errval_t err;
-    DEBUG_PRINTF("FAT32 Writing?!?!");
     struct fat32_handle *fhandle = handle;
-    DEBUG_PRINTF("FAT32 WRITING %d into %s\n", bytes, fhandle->dirent->name);
+    DEBUG_PRINTF("FAT32 WRITING %d bytes into %s, at sector and offset %d, %d\n", bytes, fhandle->dirent->name, fhandle->dirent->sector, fhandle->dirent->sector_offset);
     uint8_t data[SDHC_BLOCK_SIZE];
     size_t start_bytes = bytes;
     while(bytes != 0) {

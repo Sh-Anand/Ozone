@@ -633,13 +633,12 @@ RPC_HANDLER(fread_handler)
 RPC_HANDLER(fwrite_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        DEBUG_PRINTF("Look this is happening right?\n");
         handle_t handle = (handle_t) *(lvaddr_t *) in_payload;
         DEBUG_PRINTF("Received Handle : %d\n", handle);
         size_t bytes = *(size_t *)(in_payload + sizeof(lvaddr_t));
 
         size_t ret_size = 0;
-
+        DEBUG_PRINTF("RPC HANDLER TRYING TO WRITE %s\n", (char *) (in_payload + sizeof(lvaddr_t) + sizeof(size_t)));
         errval_t err = fat32_write(handle, in_payload + sizeof(lvaddr_t) + sizeof(size_t), bytes, &ret_size);
         if(err_is_fail(err)) return err;
         *out_payload = malloc(sizeof(size_t));
