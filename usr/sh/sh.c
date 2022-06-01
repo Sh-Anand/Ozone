@@ -14,6 +14,7 @@
 
 #include <aos/nameserver.h>
 #include <fs/fs.h>
+#include <glob.h>
 
 #define SHELL_HISTORY_MAX_SIZE 1024
 
@@ -54,8 +55,8 @@ static void setup_environment(void)
 	// set stdin to unbuffered
 	setbuffer(stdin, NULL, 0);
 	
-	env.current_path = "/";
-	env.home_path = "/";
+	env.current_path = "/sdcard/";
+	env.home_path = "/sdcard/";
 	
 	env.next_core = 1;
 	
@@ -301,7 +302,7 @@ int main(int argc, char **argv)
 	while (env.active) {
 		// setup new command prompt
 		env.command_buffer_size = env.default_command_buffer_size;
-		env.command_buffer = (char*)malloc(env.command_buffer_size);
+		env.command_buffer = (char*)calloc(env.command_buffer_size, 1);
 		env.command_buffer_offset = 0;
 		env.command_buffer_cursor = 0;
 		if (env.zero_sep_command_line != NULL) {
@@ -328,6 +329,8 @@ int main(int argc, char **argv)
 			printf("Error: Failed to parse command line!\n");
 			continue;
 		}
+		
+		
 		
 		/*char* token = strtok_r(env.command_buffer, " \r\n\t", &state);
 		do {

@@ -15,6 +15,64 @@
 
 #define REGISTER_BUILTIN(name, ...) if (strcmp(env->argv[0], #name) == 0) { sh_##name(env, ##__VA_ARGS__); return 1; }
 
+static char* sanitize_path(struct shell_env *env, const char* inpath)
+{
+	char* prefix;
+	if (inpath[0] == '/') {
+		// absolute path
+		prefix = "";
+	} else {
+		// relative path
+		prefix = env->current_path;
+	}
+	
+	bool endsinslash = inpath[strlen(inpath) - 1] == '/';
+	
+	size_t len = strlen(prefix) + strlen(inpath) + 2;
+	char* buffer = (char*)malloc(len);
+	size_t ndirs = 0;
+	size_t maxdirs = 64;
+	char** dirs = (char**)malloc(sizeof(char*) * maxdirs);
+	snprintf(buffer, len, "%s/%s", prefix, inpath);
+	
+	dirs[0] = strtok(buffer, "/");
+	if (dirs[0] == NULL) {
+		// empty path, return current directors, but this should not happen technically
+		return env->current_path;
+	}
+	
+	// tokenise as list of directory names
+	while ((dirs[++ndirs] = strtok(NULL, "/")) != NULL) {
+		if (ndirs == maxdirs) dirs = (char**)realloc(dirs, maxdirs *= 2);
+	}
+	
+	endsinslash |= strcmp(dirs[ndirs-1], ".") == 0 || strcmp(dirs[ndirs-1], "..") == 0;
+	
+	// remove . and .. entries along with parents if necessary
+	for (int i = 0; i < ndirs; i++) {
+		if (strcmp(dirs[i], ".") == 0 || (i == 1 && strcmp(dirs[i], "..") == 0)) { // in case there is .. out of the mount point, ignore it
+			// . found, remove from list
+			for (int j = i; j < ndirs - 1; j++) dirs[j] = dirs[j+1];
+			i--;
+			ndirs--;
+		} else if (strcmp(dirs[i], "..") == 0) {
+			// .. found, remove with parent
+			assert(i != 0 && ".. cannot be root of absolute directory");
+			for (int j = i-1; j < ndirs - 2; j++) dirs[j] = dirs[j+2];
+			i -= 2;
+			ndirs -= 2;
+		}
+	}
+	
+	// rebuilt path string
+	size_t offset = 0;
+	for (size_t i = 0; i < ndirs; i++) offset += sprintf(buffer + offset, "/%s", dirs[i]);
+	if (endsinslash) sprintf(buffer + offset, "/");
+	
+	free(dirs);
+	return buffer;
+}
+
 static void sh_exit(struct shell_env *env)
 {
 	env->active = 0;
@@ -35,20 +93,71 @@ static void sh_echo(struct shell_env *env)
 	
 }
 
+static void sh_cat(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: cat <path...>\n");
+		goto error;
+	}
+	
+	for (size_t i = 1; i < env->argc; i++) {
+		char *path = sanitize_path(env, env->argv[i]);
+		
+		FILE* f = fopen(path, "r");
+		if (f == NULL) {
+			printf("\nerror: could not open %s\n", path);
+			continue;
+		}
+		
+		printf("\nReading file %s:\n", path);
+		int res = fseek(f, 0, SEEK_END);
+		if (res) {
+			printf("error: invalid filehandle\n");
+			continue;
+		}
+		size_t size = ftell(f);
+		size_t offset = 0;
+		size_t read = 0;
+		char *buffer = (char*)malloc(size+1);
+		while ((read = fread(buffer + offset, 1, size - offset, f)) < size - offset) offset += read;
+		buffer[size] = 0; // null terminate to be sure
+		
+		if (!feof(f)) {
+			printf("An error occured while reading: %d\n", ferror(f));
+		} else {
+			puts(buffer);
+		}
+		
+		free(path);
+		fclose(f);
+	}
+	
+	env->last_return_status = 0;
+	return;
+error:
+	env->last_return_status = 1;
+	return;
+}
+
 static void sh_mkdir(struct shell_env *env)
 {
 	env->last_return_status = 1;
-	if (env->argc != 2) {
-		printf("usage: mkdir <path>\n");
+	errval_t err;
+	if (env->argc < 2) {
+		printf("usage: mkdir <path...>\n");
 		return;
 	}
 	
-	char *path = env-> argv[1]; // TODO: add flags like -p
-	errval_t err = aos_rpc_mkdir(aos_rpc_get_init_channel(), path);
-	
-	if (err_is_fail(err)) {
-		printf("mkdir failed\n");
-		return;
+	for (size_t i = 0; i < env->argc; i++) {
+		char *path = sanitize_path(env, env->argv[i]); // TODO: add flags like -p
+		
+		err = mkdir(path);
+		
+		if (err_is_fail(err)) {
+			printf("mkdir failed: %s cannot be created!\n", path);
+		}
+		
+		free(path);
 	}
 	
 	env->last_return_status = 0;
@@ -59,47 +168,16 @@ static void sh_ls(struct shell_env *env)
 	env->last_return_status = 1;
 	char* path;
 	if (env->argc == 1) {
-		path = env->current_path;
+		path = sanitize_path(env, env->current_path);
 	} else {
-		path = env->argv[1]; // TODO: add ability for flags
-	}
-	/*
-	struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
-	handle_t dir;
-	errval_t err = aos_rpc_opendir(init_rpc, path, &dir);
-	if (err_is_fail(err)) goto error;
-	
-	struct fs_fileinfo finfo;
-	err = aos_rpc_fstat(init_rpc, dir, &finfo);
-	if (err_is_fail(err)) goto error;
-	
-	if (finfo.type == FS_FILE) {
-		printf("target is not a directory\n");
-		env->last_return_status = 0;
-		return;
+		path = sanitize_path(env, env->argv[1]); // TODO: add ability for flags
 	}
 	
-	char* name;
-	while ((err = aos_rpc_readdir_next(init_rpc, dir, &name)) != FS_ERR_INDEX_BOUNDS) {
-		if (err_is_fail(err) || name == NULL) goto error;
-		printf("  %s\n", name);
-		free(name);
-	}
-	
-	
-	printf("ls succeeded!\n");
-	env->last_return_status = 0;
-	return;
-error:
-	printf("ls failed: %s\n", err_getcode(err));
-	
-	*/
 	fs_dirhandle_t dir;
 	errval_t err = opendir(path, &dir);
 	if (dir == NULL) {
 		printf("Error: cannot open directory '%s'\n", path);
-		env->last_return_status = 1;
-		return;
+		goto error;
 	}
 	
 	char *name;
@@ -111,11 +189,53 @@ error:
 	err = closedir(dir);
 	if (err_is_fail(err)) {
 		printf("Error closing directory handle: %s\n", err_getcode(err));
-		env->last_return_status = 1;
-		return;
+		goto error;
+	}
+	
+	free(path);	
+	env->last_return_status = 0;
+	return;
+error:
+	env->last_return_status = 1;
+	free(path);
+	return;
+}
+
+static void sh_cd(struct shell_env *env)
+{
+	char* path = NULL;
+	if (env->argc == 1) {
+		free(env->current_path);
+		env->current_path = (char*)malloc(strlen(env->home_path) + 1);
+		memcpy(env->current_path, env->home_path, strlen(env->home_path) + 1);
+	} else if (env->argc == 2) {
+		path = sanitize_path(env, env->argv[1]);
+		
+		errval_t err;
+		struct fs_fileinfo fi;
+		err = stat(path, &fi);
+		
+		if (err == FS_ERR_NOTFOUND) {
+			printf("error: no such directory\n");
+			goto error;
+		} else if (fi.type == FS_FILE) {
+			printf("error: target is not a directory\n");
+			goto error;
+		} else {
+			free(env->current_path);
+			env->current_path = path;
+		}
+	} else {
+		printf("usage: cd <path>\n");
+		goto error;
 	}
 	
 	env->last_return_status = 0;
+	return;
+error:
+	if (path != NULL) free(path);
+	env->last_return_status = 1;
+	return;
 }
 
 static void sh_ps(struct shell_env *env)
@@ -275,6 +395,16 @@ exit:
 	free(tmp_cmd_buffer);
 }
 
+static void sh_san(struct shell_env *env)
+{
+	if (env->argc != 2) return;
+	
+	char* sanitized = sanitize_path(env, env->argv[1]);
+	
+	printf("Sanitized path: '%s'\n", sanitized);
+	
+	free(sanitized);
+}
 
 int builtin(struct shell_env *env)
 {
@@ -292,6 +422,10 @@ int builtin(struct shell_env *env)
 	// file system utilities
 	REGISTER_BUILTIN(ls);
 	REGISTER_BUILTIN(mkdir);
+	REGISTER_BUILTIN(cat);
+	REGISTER_BUILTIN(cd);
+	
+	REGISTER_BUILTIN(san);
 	
 	return 0; // no builtin has been found
 }
