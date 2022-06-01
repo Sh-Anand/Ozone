@@ -167,9 +167,7 @@ static errval_t test_fread(char *file)
         return FS_ERR_READ;
     }
 
-    DEBUG_PRINTF("THIS FREE?\n");
     free(buf);
-    DEBUG_PRINTF("Mayhaps?\n");
     res = fclose(f);
     if (res) {
         return FS_ERR_CLOSE;

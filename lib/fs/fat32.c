@@ -497,7 +497,8 @@ static errval_t write_to_FAT(int cluster, uint32_t value) {
 //if last_cluster is -1, skip modifying the existing directory entry
 static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_cluster, int *retcluster) {
     errval_t err;
-    DEBUG_PRINTF("Extending Fst cluster : %d, last cluster : %d\n", dir->FstCluster, last_cluster);
+
+    // DEBUG_PRINTF("Extending Fst cluster : %d, last cluster : %d\n", dir->FstCluster, last_cluster);
     CHECK_ERR(allocate_cluster(retcluster), "");
 
     if(dir->FstCluster == 0)
@@ -558,7 +559,7 @@ static errval_t create_dirent_in_dir(struct fat32_dirent *curr, char *name, bool
     }
     struct fat32_dirent *dir;
     create_new_empty_dirent(curr, name, is_dir, Attr, &dir);
-    DEBUG_PRINTF("DONE CREATING EMPTY DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
+    // DEBUG_PRINTF("DONE CREATING EMPTY DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
 
     if(Attr == ATTR_DIRECTORY) {
         CHECK_ERR(create_new_directory(dir), "Failed to create new directory");
@@ -616,7 +617,7 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
             path ++;
 
         struct fat32_dirent *dir;
-        DEBUG_PRINTF("FIND %s in %s\n", next_dir_name, curr->name);
+        // DEBUG_PRINTF("FIND %s in %s\n", next_dir_name, curr->name);
         err = find_in_directory(curr, next_dir_name, false, &dir, NULL, NULL, NULL);
         if(err_is_fail(err)) {
             // DEBUG_PRINTF("FAILED TO FIND! %d,\n", err);
@@ -637,10 +638,9 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
     // if(CREATE_IF_NOT_EXIST && !created)
     //     return FS_ERR_EXISTS;
     
-    DEBUG_PRINTF("DONE CREATING/FINDING DIRENT, AT SECTOR AND OFFSET %d, %d\n", curr->sector, curr->sector_offset);
+    // DEBUG_PRINTF("DONE CREATING/FINDING DIRENT, AT SECTOR AND OFFSET %d, %d\n", curr->sector, curr->sector_offset);
     *retent = curr;
 
-    DEBUG_PRINTF("ARe we succeeding?\n");
     return SYS_ERR_OK;
 }
 
@@ -660,7 +660,7 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
     }
 
     CHECK_ERR_PUSH(search_dirent(dir, path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
-    DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
+    // DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
 
     return SYS_ERR_OK;
 }
@@ -678,10 +678,12 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
     strcpy(clean_path, path);
     strtoupper(clean_path);
     CHECK_ERR_PUSH(find_dirent(manager->mount, clean_path, CREATE, ATTR, &dir), FS_ERR_OPEN);
-    DEBUG_PRINTF("DONE FINDING DIRENT AT SECTOR, OFFSET %d, %d\n", dir->sector, dir->sector_offset);
+    // DEBUG_PRINTF("DONE FINDING DIRENT AT SECTOR, OFFSET %d, %d\n", dir->sector, dir->sector_offset);
     
-    if(!(dir->Attr & ATTR))
+    if(!(dir->Attr & ATTR)) {
+        DEBUG_PRINTF("were dying here?\n");
         return ERR;
+    }
     
     struct fat32_handle *handle = malloc(sizeof(struct fat32_handle));
     handle->dirent = dir;
@@ -808,19 +810,20 @@ errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
 errval_t fat32_create(const char *path, fat32_handle_t *rethandle) {
     errval_t err;
 
-    DEBUG_PRINTF("CREATING %s\n", path);
+    // DEBUG_PRINTF("CREATING %s\n", path);
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE, true, FS_ERR_NOTFILE), "failed to open file");
-    DEBUG_PRINTF("DONE OPENING DIRENT, AT SECTOR AND OFFSET %d, %d\n", handle->dirent->sector, handle->dirent->sector_offset);
+    // DEBUG_PRINTF("DONE OPENING DIRENT, AT SECTOR AND OFFSET %d, %d\n", handle->dirent->sector, handle->dirent->sector_offset);
     handle->isdir = false;
     *rethandle = handle;
-    DEBUG_PRINTF("RETURNING HANDLE %d for %s\n", *rethandle, path);
+
     return SYS_ERR_OK;
 }
 
 errval_t fat32_opendir(const char *path, fat32_handle_t *rethandle) {
     errval_t err;
-    DEBUG_PRINTF("FAT32 OPENING DIR %s\n", path);
+    
+    // DEBUG_PRINTF("FAT32 OPENING DIR %s\n", path);
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_DIRECTORY, false, FS_ERR_NOTDIR), "failed to open dir");
     handle->isdir = true;

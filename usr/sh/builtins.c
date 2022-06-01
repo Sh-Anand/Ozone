@@ -212,13 +212,13 @@ static void sh_cd(struct shell_env *env)
 		path = sanitize_path(env, env->argv[1]);
 		
 		errval_t err;
-		struct fs_fileinfo fi;
-		err = stat(path, &fi);
-		
+		fs_dirhandle_t fi;
+		err = opendir(path, &fi);
+
 		if (err == FS_ERR_NOTFOUND) {
 			printf("error: no such directory\n");
 			goto error;
-		} else if (fi.type == FS_FILE) {
+		} else if (err == FS_ERR_NOTDIR) {
 			printf("error: target is not a directory\n");
 			goto error;
 		} else {

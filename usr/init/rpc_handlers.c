@@ -548,7 +548,7 @@ RPC_HANDLER(fopen_handler)
 }
 
 RPC_HANDLER(opendir_handler)
-{
+{   
     if (disp_get_current_core_id() == 0) {
         CAST_IN_MSG_STRING;
         handle_t handle;

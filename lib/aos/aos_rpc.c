@@ -1026,11 +1026,10 @@ errval_t aos_rpc_opendir(struct aos_rpc *rpc, const char *path, handle_t *handle
 {
     void *return_msg = NULL;
     size_t return_size = 0;
-
     errval_t err = aos_rpc_call(rpc, RPC_OPENDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
     if(err_is_ok(err)) {
         *handle = *(handle_t *)(return_msg);
-        free(return_msg);
+        free(return_msg);  
     }
 
     return err;
