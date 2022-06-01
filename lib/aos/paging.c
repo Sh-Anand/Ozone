@@ -680,10 +680,7 @@ static errval_t chop_down_region(struct paging_state *st,
     errval_t err;
 
     while (node->bits > bits) {
-        err = ensure_enough_slabs(st);
-        if (err_is_fail(err)) {
-            return err;  // here is nothing much we can do here
-        }
+
 
         // Downgrade to next level
         node->bits--;
@@ -960,13 +957,6 @@ static errval_t map_dynamic_using_node(struct paging_state *st, void **buf, uint
 #endif
     errval_t err, err2;
 
-    err = chop_down_region(st, &node, 0, bits);
-    if (err_is_fail(err)) {
-        DEBUG_PRINTF("failed to chop_down_region\n");
-        goto FAILURE_CHOP_DOWN_REGION;
-    }
-    assert(node->bits == bits);
-
     struct paging_mapping_node *mapping = NULL;
 
     err = create_mapping_node(st, node, &mapping);
@@ -1004,15 +994,19 @@ FAILURE_MAP_FRAME:
         err = err_push(err, err2);
     }
 FAILURE_CREATE_MAPPING_NODE:
-
-    // Nothing to do on failure of chop_down_region, see its comment
-FAILURE_CHOP_DOWN_REGION:
     return err;
 }
 
 static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
                             size_t alignment, struct capref frame, uint64_t attr)
 {
+    errval_t err = SYS_ERR_OK;
+
+    err = ensure_enough_slabs(st);
+    if (err_is_fail(err)) {
+        return err;  // here is nothing much we can do here
+    }
+
 #if 0
     DEBUG_PRINTF("map_dynamic bytes=%lu, alignment = 0x%lu\n", bytes, alignment);
 #endif
@@ -1020,33 +1014,73 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
     uint8_t bits = max(BASE_PAGE_BITS, log2ceil(bytes));
     uint8_t align_bits = max(BASE_PAGE_BITS, log2ceil(alignment));
 
+    struct paging_region_node *node = NULL;
+
     // Fast path: start from align_bits
-    for (uint8_t b = max(bits, align_bits); b <= PAGING_ADDR_BITS; b++) {
-        if (!LIST_EMPTY(free_list_head(st, b))) {
-            struct paging_region_node *node = LIST_FIRST(free_list_head(st, b));
-            remove_from_free_list(st, node);
+    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    {
+        for (uint8_t b = max(bits, align_bits); b <= PAGING_ADDR_BITS; b++) {
+            if (!LIST_EMPTY(free_list_head(st, b))) {
+                node = LIST_FIRST(free_list_head(st, b));
+                remove_from_free_list(st, node);
 
-            return map_dynamic_using_node(st, buf, bits, node, frame, bytes, attr);
-        }
-    }
-
-    // Slow path: try every available region
-    if (bits < align_bits) {
-        lvaddr_t align_mask = MASK(align_bits);
-        for (uint8_t b = bits; b < align_bits; b++) {
-            struct paging_region_node *node = NULL;
-            LIST_FOREACH(node, free_list_head(st, b), fl_link)
-            {
-                if ((node->addr & align_mask) == 0) {
-                    remove_from_free_list(st, node);
-                    return map_dynamic_using_node(st, buf, bits, node, frame, bytes, attr);
+                err = chop_down_region(st, &node, 0, bits);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "failed to chop_down_region\n");
+                    while(1);
+                    goto EXIT_FAST_PATH;
                 }
+                assert(node->bits == bits);
+
+                goto EXIT_FAST_PATH;
             }
         }
+    EXIT_FAST_PATH:
+        THREAD_MUTEX_BREAK;
+    }
+    THREAD_MUTEX_EXIT(&st->free_list_mutex)
+    if (err_is_fail(err)) {
+        return err;  // Nothing to do on failure of chop_down_region, see its comment
     }
 
-    // No available region
-    return LIB_ERR_PAGING_NO_MEMORY;
+    if (node == NULL && bits < align_bits) {
+        // Slow path: try every available region
+        lvaddr_t align_mask = MASK(align_bits);
+
+        THREAD_MUTEX_ENTER(&st->free_list_mutex)
+        {
+            for (uint8_t b = bits; b < align_bits; b++) {
+                LIST_FOREACH(node, free_list_head(st, b), fl_link)
+                {
+                    if ((node->addr & align_mask) == 0) {
+                        remove_from_free_list(st, node);
+
+                        err = chop_down_region(st, &node, 0, bits);
+                        if (err_is_fail(err)) {
+                            DEBUG_ERR(err, "failed to chop_down_region\n");
+                            goto EXIT_SLOW_PATH;
+                        }
+                        assert(node->bits == bits);
+                        
+                        goto EXIT_SLOW_PATH;
+                    }
+                }
+            }
+        EXIT_SLOW_PATH:
+            THREAD_MUTEX_BREAK;
+        }
+        THREAD_MUTEX_EXIT(&st->free_list_mutex)
+        if (err_is_fail(err)) {
+            return err;  // Nothing to do on failure of chop_down_region, see its comment
+        }
+    }
+
+    if (node != NULL) {
+        return map_dynamic_using_node(st, buf, bits, node, frame, bytes, attr);
+    } else {
+        // No available region
+        return LIB_ERR_PAGING_NO_MEMORY;
+    }
 }
 
 /**
@@ -1250,6 +1284,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     assert(ca != NULL);
 
     thread_mutex_init(&st->frame_alloc_mutex);
+    thread_mutex_init(&st->free_list_mutex);
     st->slot_alloc = ca;
     st->start_addr = start_vaddr;
 
@@ -1557,7 +1592,7 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
             // XXX: the frame capability may or may not be stored yet, ignore it for now
             handle_real_page_fault(type, subtype, addr, regs);
         } else {
-#if 0
+#if 1
             DEBUG_PRINTF("paging: installed page to %p\n", addr);
 #endif
         }

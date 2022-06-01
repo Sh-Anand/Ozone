@@ -39,6 +39,7 @@ errval_t paging_init_onthread(struct thread *t);
 /**
  * \brief Find a bit of free virtual address space that is large enough to
  *        accomodate a buffer of size `bytes`.
+ * \note  The alignment must be a power of two and a multiple of base page size.
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes,
                       size_t alignment);
