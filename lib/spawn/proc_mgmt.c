@@ -18,6 +18,15 @@ static int proc_node_cmp(struct proc_node *n1, struct proc_node *n2)
 RB_PROTOTYPE(proc_rb_tree, proc_node, rb_entry, proc_node_cmp)
 RB_GENERATE(proc_rb_tree, proc_node, rb_entry, proc_node_cmp)
 
+STATIC_ASSERT(sizeof(domainid_t) == 4, "sizeof(domainid_t)");
+STATIC_ASSERT(sizeof(coreid_t) == 1, "sizeof(coreid_t)");
+#define PID_CORE_ID_FACTOR 10000000
+
+coreid_t pid_get_core(domainid_t pid)
+{
+    return (coreid_t)(pid / PID_CORE_ID_FACTOR);
+}
+
 errval_t proc_mgmt_init(struct proc_mgmt *ps)
 {
     RB_INIT(&ps->running);
@@ -33,14 +42,14 @@ errval_t proc_mgmt_alloc(struct proc_mgmt *ps, struct proc_node **ret)
 
     struct proc_node *node = NULL;
     if (LIST_EMPTY(&ps->free_list)) {
-        if (ps->pid_upper == (MAX_DOMAINID & MASK(CORE_ID_OFFSET_BIT))) {
+        if (ps->pid_upper == PID_CORE_ID_FACTOR) {
             return PROC_MGMT_ERR_NO_AVAILABLE_PID;
         }
         node = malloc(sizeof(struct proc_node));
         if (node == NULL) {
             return LIB_ERR_MALLOC_FAIL;
         }
-        node->pid = ps->pid_upper | (disp_get_core_id() << CORE_ID_OFFSET_BIT);
+        node->pid = ps->pid_upper + (disp_get_core_id() * PID_CORE_ID_FACTOR);
         ps->pid_upper++;
     } else {
         node = LIST_FIRST(&ps->free_list);

@@ -21,6 +21,7 @@
 #include <aos/waitset.h>
 #include <aos/paging.h>
 #include <aos/nameserver.h>
+#include "err.h"
 
 
 #define PANIC_IF_FAIL(err, msg)                                                          \
@@ -29,6 +30,7 @@
     }
 
 #define SERVICE_NAME "myservicename"
+#define SERVICE_NAME2 "myservicename2"
 #define TEST_BINARY "nameservicetest"
 
 static int printf_in_frame(struct capref *frame, const char *format, ...)
@@ -102,6 +104,8 @@ static void run_client(void)
                           rx_cap);
     PANIC_IF_FAIL(err, "failed to do the nameservice rpc\n");
 
+    debug_printf("client: got response \"%s\"\n", (char *)response);
+
     struct capability c;
     err = cap_direct_identify(rx_cap, &c);
     if (err == SYS_ERR_CAP_NOT_FOUND) {
@@ -115,8 +119,6 @@ static void run_client(void)
             debug_printf("client: got a cap with type %u\n", c.type);
         }
     }
-
-    debug_printf("client: got response \"%s\"\n", (char *)response);
 }
 
 /*
@@ -158,6 +160,18 @@ static void server_recv_handler(void *st, void *message, size_t bytes, void **re
     *response_bytes = strlen(myresponse);
 }
 
+static void test_enumerate(char *query)
+{
+    size_t count = 256;
+    char *names[256];
+    errval_t err = nameservice_enumerate(query, &count, names);
+    PANIC_IF_FAIL(err, "failed to enumerate service\n");
+    debug_printf("server: enumerate \"%s\" got %lu services:\n", query, count);
+    for (size_t i = 0; i < count; i++) {
+        debug_printf("%lu. %s\n", i + 1, names[i]);
+        free(names[i]);
+    }
+}
 static void run_server(void)
 {
     errval_t err;
@@ -166,8 +180,16 @@ static void run_server(void)
     err = nameservice_register(SERVICE_NAME, server_recv_handler, NULL);
     PANIC_IF_FAIL(err, "failed to register...\n");
 
+    debug_printf("register with nameservice '%s'\n", SERVICE_NAME2);
+    err = nameservice_register(SERVICE_NAME2, server_recv_handler, NULL);
+    PANIC_IF_FAIL(err, "failed to register...\n");
+
+    test_enumerate("");
+    test_enumerate(SERVICE_NAME);
+    test_enumerate(SERVICE_NAME2);
+
     domainid_t did;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 8; ++i) {
         coreid_t core = (disp_get_core_id() + i) % 4;
         debug_printf("spawning test binary '%s' on core %u\n", TEST_BINARY, core);
         err = aos_rpc_process_spawn(get_init_rpc(), TEST_BINARY " a", core, &did);

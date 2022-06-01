@@ -9,6 +9,8 @@
 #include <fs/fs.h>
 #include <fs/dirent.h>
 #include <fs/ramfs.h>
+#include <aos/aos_rpc.h>
+#include <fs/fat32.h>
 
 #include "fs_internal.h"
 
@@ -35,13 +37,20 @@ errval_t filesystem_init(void)
 
     /* TODO: Filesystem project: hook up your init code here */
 
-    ramfs_mount_t st = NULL;
-    err = ramfs_mount("/", &st);
-    if (err_is_fail(err)) {
-        return err;
-    }
+    // ramfs_mount_t st = NULL;
+    // err = ramfs_mount("/", &st);
+    // if (err_is_fail(err)) {
+    //     return err;
+    // }
 
     /* TODO: Mount your sdcard at /sdcard */
+    struct aos_chan *st = get_init_chan();
+    if(!st) {
+        err = fat32_init("/SDCARD/");
+        if (err_is_fail(err)) {
+            return err;
+        }
+    }
 
     /* register libc fopen/fread and friends */
     fs_libc_init(st);

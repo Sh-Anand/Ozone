@@ -10,11 +10,9 @@
 
 // XXX: is there a more elegant way to expose it only to aos lib and init?
 enum nameservice_rpc_identifier {
-    NAMESERVICE_REGISTER,             // [call] payload: name
+    NAMESERVICE_REGISTER = RPC_IDENTIFIER_USER_START,
+                                      // [call] payload: name
                                       // [return] errval
-
-    NAMESERVICE_REFILL_LMP_ENDPOINT,  // Deprecated
-
 
     NAMESERVICE_DEREGISTER,           // [call] payload: name
                                       // [return] errval
@@ -34,6 +32,11 @@ enum ns_notification_identifier {
 struct ns_binding_notification {
     domainid_t pid;
     char name[0];
+};
+
+struct ns_enumerate_reply_msg {
+    size_t num;
+    char buf[0];
 };
 
 typedef void* nameservice_chan_t;
@@ -106,9 +109,11 @@ errval_t nameservice_lookup(const char *name, nameservice_chan_t *chan);
  * 
  * @param query     the query
  * @param num 		number of entries in the result array
- * @param result	an array of entries, should be freed outside (each entry and the whole)
+ * @param result	an array of entries
  */
-errval_t nameservice_enumerate(char *query, size_t *num, char ***result);
+errval_t nameservice_enumerate(char *query, size_t *num, char **result);
+
+struct aos_chan *nameservice_get_client_chan(domainid_t pid);
 
 
 #endif /* INCLUDE_AOS_AOS_NAMESERVICE_H_ */

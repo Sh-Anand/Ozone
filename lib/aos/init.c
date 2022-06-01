@@ -27,6 +27,8 @@
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
 #include <aos/aos_rpc.h>
+#include <aos/debug.h>
+
 
 #include "threads_priv.h"
 #include "init.h"
@@ -43,12 +45,28 @@ extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 extern void (*_libc_exit_func)(int);
 extern void (*_libc_assert_func)(const char *, const char *, const char *, int);
 
+extern void* terminal_state;
+
+size_t (*local_terminal_write_function)(const char*, size_t) = NULL;
+size_t (*local_terminal_read_function)(char*, size_t) = NULL;
+
 void libc_exit(int);
 
 __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
-    debug_printf("libc exit NYI!\n");
+	// release the terminal
+	//errval_t err = aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	//DEBUG_ERR(err, "terminal release (err: %s)", err_getcode(err));
+	
+    //debug_printf("libc exit NYI!\n");
+	
+	aos_rpc_serial_release(aos_rpc_get_serial_channel());
+	
+    errval_t err = aos_chan_send(&get_init_rpc()->chan, RPC_BYE, NULL_CAP, NULL, 0, false);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in RPC_BYE");
+    }
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {
@@ -83,26 +101,37 @@ __attribute__((__used__)) static size_t syscall_terminal_write(const char *buf, 
 
 __attribute__((__used__)) static size_t aos_terminal_write(const char *buf, size_t len)
 {
-    // sys_print("aos_terminal_write called\n", 27);
-    size_t sent;
-    errval_t err;
-    struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-    assert(serial_rpc != NULL);
-
-    // TODO: this is probably very inefficient, so maybe do this for whole strings instead
-    for (sent = 0; sent < len;) {
-        err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
-
-        if (err_is_fail(err)) {
-            // sending failed, so return
-            break;
-        }
-
-        sent++;
-    }
-
-    // return the number of characters sent
-    return sent;
+	errval_t err;
+	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+	//assert (serial_rpc);
+	if (!serial_rpc) return 0;
+	
+	// NO LONGER TODO : this is probably very inefficient, so maybe do this for whole strings instead
+	/*or (sent = 0; sent < len;) {
+		err = aos_rpc_serial_putchar(serial_rpc, buf[sent]);
+		
+		if (err_is_fail(err)) {
+			// sending failed, so return
+			break;
+		}
+		
+		sent++;
+	}*/
+	
+	//DEBUG_PRINTF("str: '%s' (%d)\n", buf, strlen(buf));
+	
+	// this is the way
+	size_t ret_len;
+	err = aos_rpc_serial_puts(serial_rpc, buf, len, &ret_len);
+	if (err_is_fail(err)) {
+		DEBUG_ERR(err, "Failed to print!");
+		return 0;
+	}
+	
+	//if (ret_len > len) DEBUG_PRINTF("ret_len: %llu, len: %llu\n", ret_len, len);
+	
+	// return the number of characters sent
+	return ret_len;
 }
 
 __attribute__((__used__)) static size_t dummy_terminal_read(char *buf, size_t len)
@@ -113,25 +142,54 @@ __attribute__((__used__)) static size_t dummy_terminal_read(char *buf, size_t le
 
 __attribute__((__used__)) static size_t aos_terminal_read(char *buf, size_t len)
 {
-    size_t read = 0;
-    errval_t err;
-    char c;
-    struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
-    assert(serial_rpc != NULL);
-
-    for (; read < len;) {
-        err = aos_rpc_serial_getchar(serial_rpc, &c);
-
-        if (err_is_fail(err)) {
-            // cannot receive so exit
-            break;
-        }
-
-        buf[read++] = c;
-    }
-
+	size_t read = 0;
+	errval_t err;
+	char c;
+	struct aos_rpc *serial_rpc = aos_rpc_get_serial_channel();
+	
+	
+	
+	assert(serial_rpc);
+	
+	// wait for access to stdin
+	bool can_access_stdin = false;
+	do {
+		err = aos_rpc_serial_has_stdin(serial_rpc, &can_access_stdin);
+		if (!can_access_stdin) thread_yield();
+	} while (!can_access_stdin);
+	
+	for (; read < len;) {
+		do {
+			err = aos_rpc_serial_getchar(serial_rpc, &c);
+			if (err == TERM_ERR_RECV_CHARS) thread_yield();
+		} while (err == TERM_ERR_RECV_CHARS);
+		
+		if (err_is_fail(err)) {
+			// cannot receive so exit
+			break;
+		}
+		
+		buf[read++] = c;
+	}
+	
+	buf[read] = 0;
+	
     return read;
 }
+static size_t local_terminal_write(const char* buf, size_t len) __attribute__((unused));
+static size_t local_terminal_write(const char* buf, size_t len)
+{
+	if (local_terminal_write_function) return local_terminal_write_function(buf, len);
+	return 0;
+}
+
+static size_t local_terminal_read(char* buf, size_t len)
+{
+	if (local_terminal_read_function) return local_terminal_read_function(buf, len);
+	return 0;
+}
+
+extern errval_t fs_libc_init(void*);
 
 /* Set libc function pointers */
 void barrelfish_libc_glue_init(void)
@@ -140,11 +198,18 @@ void barrelfish_libc_glue_init(void)
     // what we need for that
     // TODO: change these to use the user-space serial driver if possible
     // TODO: set these functions
-    _libc_terminal_read_func = !init_domain ? aos_terminal_read : dummy_terminal_read;
-    _libc_terminal_write_func = !init_domain && !DIRECT_PRINTF ? aos_terminal_write : syscall_terminal_write;
+    _libc_terminal_read_func = !init_domain || !disp_get_current_core_id() ? aos_terminal_read : local_terminal_read;
+    _libc_terminal_write_func = !init_domain || !disp_get_current_core_id() ? aos_terminal_write : local_terminal_write;
     _libc_exit_func = libc_exit;
     _libc_assert_func = libc_assert;
     /* morecore func is setup by morecore_init() */
+	
+	if (!init_domain) {
+		errval_t err = fs_libc_init(aos_rpc_get_init_channel());
+		if(err_is_fail(err)) {
+			DEBUG_PRINTF("Failed to initialized filesystem (err: %s)\n", err_getcode(err));
+		}
+	}
 
     // XXX: set a static buffer for stdout
     // this avoids an implicit call to malloc() on the first printf
@@ -262,8 +327,16 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         set_init_rpc(init_rpc);
 
         ram_alloc_set(NULL);  // use RAM allocation over RPC
+		if (params->terminal_state) {
+			terminal_state = params->terminal_state;
+		} else {
+			aos_rpc_serial_aquire(aos_rpc_get_serial_channel(), false);
+		}
+		
+		DEBUG_PRINTF("Received terminal state: %p\n", terminal_state);
+		
     }
-
+	
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
     return SYS_ERR_OK;

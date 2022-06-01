@@ -5,7 +5,7 @@
 #ifndef AOS_RPC_HANDLER_BUILDER_H
 #define AOS_RPC_HANDLER_BUILDER_H
 
-#include "aos_rpc.h"
+#include <aos/rpc.h>
 
 typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
                                   void **out_payload, size_t *out_size,
@@ -41,13 +41,21 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
     }                                                                                    \
     type *var = in_payload
 
-#define CAST_IN_MSG_EXACT_SIZE(var, type)                                                \
-    if (in_size != sizeof(type)) {                                                       \
+#define CAST_IN_MSG_STRING                                                          \
+    CAST_IN_MSG_AT_LEAST_SIZE(p, char);                                                 \
+    char *path = malloc(in_size + 1);                                                \
+    memcpy(path, p, in_size);                                                        \
+    path[in_size] = '\0'                                                            
+
+#define CAST_EXACT_SIZE(payload, size, var, type)                                        \
+    if (size != sizeof(type)) {                                                          \
         DEBUG_PRINTF("%s: invalid payload size %lu != sizeof(%s) (%lu)\n", __func__,     \
                      in_size, #type, sizeof(type));                                      \
         return LIB_ERR_RPC_INVALID_PAYLOAD_SIZE;                                         \
     }                                                                                    \
-    type *var = in_payload
+    type *var = payload
+
+#define CAST_IN_MSG_EXACT_SIZE(var, type) CAST_EXACT_SIZE(in_payload, in_size, var, type)
 
 #define MALLOC_WITH_SIZE(var, type, size)                                                \
     type *var = malloc(size);                                                            \
@@ -63,5 +71,12 @@ typedef errval_t (*rpc_handler_t)(void *arg, void *in_payload, size_t in_size,
     *out_size = size
 
 #define MALLOC_OUT_MSG(var, type) MALLOC_OUT_MSG_WITH_SIZE(var, type, sizeof(*var))
+
+#define MALLOC_OUT_MSG_WITH_HANDLE(var, type, handle)                                   \
+    size_t size = sizeof(lvaddr_t);                                                     \
+    MALLOC_WITH_SIZE(var, type, size);                                                  \
+    *var = (type) handle;                                                               \
+    *out_payload = var;                                                                 \
+    *out_size =  size;                                                                  \
 
 #endif  // AOS_RPC_HANDLER_BUILDER_H

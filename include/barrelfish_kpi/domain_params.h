@@ -29,6 +29,8 @@ struct spawn_domain_params {
     size_t tls_init_len;        ///< Length of initialised TLS data block
     size_t tls_total_len;       ///< Total (initialised + BSS) TLS data length
     size_t pagesize;            ///< the page size to be used (domain spanning)
+	
+	void* terminal_state;
 };
 
 __END_DECLS

@@ -83,35 +83,37 @@ static uint64_t systime_to_ms(systime_t time){
 
 
 
-static errval_t test_read_dir(char *dir)
-{
-    errval_t err;
+// static errval_t test_read_dir(char *dir)
+// {
+//     errval_t err;
 
-    TEST_PREAMBLE(dir)
+//     TEST_PREAMBLE(dir)
 
-    fs_dirhandle_t dh;
-    err = opendir(dir, &dh);
-    if (err_is_fail(err)) {
-        return err;
-    }
+//     fs_dirhandle_t dh;
+//     err = opendir(dir, &dh);
+//     if (err_is_fail(err)) {
+//         DEBUG_PRINTF("FAILED TO READ DIR %s\n", dir);
+//         return err;
+//     }
 
-    assert(dh);
+//     assert(dh);
 
-    do {
-        char *name;
-        err = readdir(dh, &name);
-        if (err_no(err) == FS_ERR_INDEX_BOUNDS) {
-            break;
-        } else if (err_is_fail(err)) {
-            goto err_out;
-        }
-        printf("%s\n", name);
-    } while(err_is_ok(err));
+//     do {
+//         char *name;
+//         err = readdir(dh, &name);
+//         if (err_no(err) == FS_ERR_INDEX_BOUNDS) {
+//             break;
+//         } else if (err_is_fail(err)) {
+//             goto err_out;
+//         }
+//         printf("%s\n", name);
+//     } while(err_is_ok(err));
 
-    return closedir(dh);
-    err_out:
-    return err;
-}
+//     DEBUG_PRINTF("SUCCESS!\n");
+//     return closedir(dh);
+//     err_out:
+//     return err;
+// }
 
 static errval_t test_fread(char *file)
 {
@@ -123,16 +125,18 @@ static errval_t test_fread(char *file)
     if (f == NULL) {
         return FS_ERR_OPEN;
     }
-
+    DEBUG_PRINTF("OPEN SUCCESS\n");
     /* obtain the file size */
     res = fseek (f , 0 , SEEK_END);
     if (res) {
         return FS_ERR_INVALID_FH;
     }
+    DEBUG_PRINTF("FSEEK SUCCESS\n");
 
     size_t filesize = ftell (f);
+    DEBUG_PRINTF("FTELL SUCCESS\n");
     rewind (f);
-
+    DEBUG_PRINTF("REWIND SUCCESS\n");
     printf("File size is %zu\n", filesize);
 
     char *buf = calloc(filesize + 2, sizeof(char));
@@ -140,7 +144,9 @@ static errval_t test_fread(char *file)
         return LIB_ERR_MALLOC_FAIL;
     }
 
+    DEBUG_PRINTF("FILEREADER READ %d\n", filesize);
     size_t read = fread(buf, 1, filesize, f);
+    DEBUG_PRINTF("FREAD SUCCESS\n");
 
     printf("read: %s\n", buf);
 
@@ -177,8 +183,11 @@ static errval_t test_fwrite(char *file)
 
     FILE *f = fopen(file, "w");
     if (f == NULL) {
+        DEBUG_PRINTF("OPENING/CREATING %s FAILED\n", file);
         return FS_ERR_OPEN;
     }
+
+    DEBUG_PRINTF("OPENING/CREATING %s SUCCESS\n", file);
 
     const char *inspirational_quote = "I love deadlines. I like the whooshing "
         "sound they make as they fly by.";
@@ -191,10 +200,14 @@ static errval_t test_fwrite(char *file)
         return FS_ERR_READ;
     }
 
+    DEBUG_PRINTF("WRITE SUCCESS!\n");
+
     res = fclose(f);
     if (res) {
         return FS_ERR_CLOSE;
     }
+
+    DEBUG_PRINTF("Close success\n");
 
     return SYS_ERR_OK;
 }
@@ -211,11 +224,17 @@ int main(int argc, char *argv[])
     err = filesystem_init();
     EXPECT_SUCCESS(err, "fs init", 0);
 
-    run_test(test_read_dir, MOUNTPOINT "/");
+    // run_test(test_read_dir, MOUNTPOINT "/");
 
-    run_test_fail(test_read_dir, DIR_NOT_EXIST);
+    // DEBUG_PRINTF("Exist test success!\n");
+
+    // run_test_fail(test_read_dir, DIR_NOT_EXIST);
+
+    // DEBUG_PRINTF("Not exists test success!\n");
 
     run_test(test_fwrite, MOUNTPOINT FILENAME);
+
+    DEBUG_PRINTF("Write test success!\n");
 
     run_test(test_fread, MOUNTPOINT FILENAME);
 

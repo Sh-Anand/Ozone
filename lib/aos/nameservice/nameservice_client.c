@@ -3,8 +3,6 @@
 //
 
 #include <aos/aos.h>
-#include <aos/aos_rpc.h>
-#include <aos/lmp_handler_builder.h>
 #include "internal.h"
 
 #define CLIENT_SIDE_LMP_BUF_LEN 32
@@ -24,7 +22,7 @@ static errval_t create_chan(domainid_t pid, struct client_side_chan **ret)
     if (chan == NULL) {
         return LIB_ERR_MALLOC_FAIL;
     }
-    chan->rpc.chan.type = AOS_CHAN_TYPE_UNKNOWN;
+    aos_rpc_init(&chan->rpc);
     chan->pid = pid;
     LIST_INSERT_HEAD(&chans, chan, link);
     *ret = chan;
@@ -77,17 +75,9 @@ errval_t client_lookup_service(const char *name, struct client_side_chan **ret)
 
     switch (c.type) {
     case ObjType_EndPointLMP: {
+        // The following call include sending the local cap to complete setup
         err = aos_chan_lmp_accept(&chan->rpc.chan, CLIENT_SIDE_LMP_BUF_LEN, ret_cap);
         if (err_is_fail(err)) {
-            goto FAILURE_CHAN_SETUP;
-        }
-        struct lmp_chan *lc = &chan->rpc.chan.lc;
-
-        // Send the local cap through the channel to complete setup
-        err = aos_rpc_call(&chan->rpc, IDENTIFIER_NORMAL, lc->local_cap, NULL, 0, NULL,
-                           NULL, NULL);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "client_lookup_service: fail to send local_cap\n");
             goto FAILURE_CHAN_SETUP;
         }
     } break;
@@ -113,43 +103,34 @@ FAILURE_IDENTIFY_CAP:
     return err;
 }
 
-errval_t client_enumerate_service(char *query, size_t *num, char ***ret)
+errval_t client_enumerate_service(char *query, size_t *num, char **ret)
 {
     errval_t err;
 
     // Query the nameserver
     void *ret_buf = NULL;
     size_t ret_size = 0;
-    err = aos_rpc_call(&ns_rpc, NAMESERVICE_ENUMERATE, NULL_CAP, NULL, 0, NULL, &ret_buf,
+    err = aos_rpc_call(&ns_rpc, NAMESERVICE_ENUMERATE, NULL_CAP, query, strlen(query) + 1, NULL, &ret_buf,
                        &ret_size);
     if (err_is_fail(err)) {
         return err;
     }
 
-    assert(ret_size >= sizeof(struct enumerate_reply_msg));
-    struct enumerate_reply_msg *reply_msg = (struct enumerate_reply_msg *)ret_buf;
-
-    char **result = malloc(sizeof(char *) * reply_msg->num);
-    if (result == NULL) {
-        err = LIB_ERR_MALLOC_FAIL;
-        goto RET;
-    }
+    assert(ret_size >= sizeof(struct ns_enumerate_reply_msg));
+    struct ns_enumerate_reply_msg *reply_msg = (struct ns_enumerate_reply_msg *)ret_buf;
 
     size_t i = 0;
     char *buf = reply_msg->buf;
-    while (i < reply_msg->num) {
-        result[i] = strdup(buf);
+    while (i < reply_msg->num && i < *num) {
+        ret[i] = strdup(buf);
         while(*buf != '\0') ++buf;
         ++buf;
         ++i;
     }
-
-    *num = reply_msg->num;
-    *ret = result;
-    err = SYS_ERR_OK;
-RET:
+    *num = i;
     free(ret_buf);
-    return err;
+
+    return SYS_ERR_OK;
 }
 
 errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,
@@ -159,7 +140,7 @@ errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,
     errval_t err;
 
     struct capref ret_cap = NULL_CAP;
-    err = aos_rpc_call(&chan->rpc, IDENTIFIER_NORMAL, tx_cap, message, bytes, &ret_cap, response, response_bytes);
+    err = aos_rpc_call(&chan->rpc, DEFAULT_IDENTIFIER, tx_cap, message, bytes, &ret_cap, response, response_bytes);
     if (err_is_fail(err)) {
         return err;
     }

@@ -17,10 +17,10 @@ extern char **environ;
 extern struct bootinfo *bi;
 extern coreid_t my_core_id;
 
-static void (*rpc_handler)(void *) = NULL;
+static aos_chan_handler_t rpc_handler = NULL;
 
 static struct proc_mgmt mgmt;
-#define PROC_ENDPOINT_BUF_LEN 16
+#define PROC_ENDPOINT_BUF_LEN 32
 
 // TODO: these address works?
 #define CHILD_DISPFRAME_VADDR (0x20000000)
@@ -224,36 +224,29 @@ static errval_t setup_endpoint(struct spawninfo *si)
     errval_t err;
 
     // Create a new endpoint for the program
-    // si->lc should point to proc_node.chan.lc and uninitialized
-    assert(si->lc != NULL);
-    err = lmp_chan_init_local(si->lc, PROC_ENDPOINT_BUF_LEN);
+    err = aos_chan_lmp_init_local(si->chan, PROC_ENDPOINT_BUF_LEN);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_CHAN_INIT);
     }
 
-    // Assign initial slot for incoming cap
-    err = lmp_chan_alloc_recv_slot(si->lc);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
-    }
-
-    // Start receiving on the channel
-    err = lmp_chan_register_recv(si->lc, get_default_waitset(), MKCLOSURE(rpc_handler, si->proc));
+    // Start receiving on the channel (include lmp_chan_alloc_recv_slot)
+    err = aos_chan_register_recv(si->chan, get_default_waitset(), rpc_handler, si->proc);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CHAN_REGISTER_RECV);
     }
 
     // The channel is still waiting for remote_cap
-    si->lc->connstate = LMP_BIND_WAIT;
+    assert(si->chan->lc.connstate == LMP_BIND_WAIT);
 
     struct capref child_initep_slot = {
         .cnode = si->taskcn,
         .slot = TASKCN_SLOT_INITEP,
     };
-    err = cap_copy(child_initep_slot, si->lc->local_cap);
+    err = cap_copy(child_initep_slot, si->chan->lc.local_cap);
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
+	DEBUG_PRINTF("Endpoint setup done.\n");
 
     return SYS_ERR_OK;
 }
@@ -272,6 +265,8 @@ static errval_t setup_arguments(struct spawninfo *si, int argc, char *argv[])
         return err;
     }
     assert(params != 0);
+	
+	params->terminal_state = si->terminal_state;
 
     // Map the arg page to the child's vspace
     err = paging_map_fixed_attr(si->child_paging_state, CHILD_ARGFRAME_VADDR, argpage,
@@ -516,6 +511,12 @@ static errval_t setup_elf(struct spawninfo *si)
     return SYS_ERR_OK;
 }
 
+errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
+{
+    return spawn_load_argv_complete(argc, argv, cap_to_transfer, NULL, si, pid);
+}
+
+
 /**
  * \brief Spawn a new dispatcher called 'argv[0]' with 'argc' arguments.
  *
@@ -532,9 +533,9 @@ static errval_t setup_elf(struct spawninfo *si)
  * \return Either SYS_ERR_OK if no error occured or an error
  * indicating what went wrong otherwise.
  */
-errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
+errval_t spawn_load_argv_complete(int argc, char *argv[], struct capref cap_to_transfer, void* terminal_state, struct spawninfo *si, domainid_t *pid)
 {
-    // - Get the module from the multiboot image
+	// - Get the module from the multiboot image
     //   and map it (take a look at multiboot.c)
     // - Setup the child's cspace
     // - Setup the child's vspace
@@ -547,6 +548,7 @@ errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_t
     assert(pid != NULL);
 
     si->cap_to_transfer = cap_to_transfer;
+	si->terminal_state = terminal_state;
 
     si->binary_name = argv[0];
     // Temporary, will be set to persisting string in setup_dispatcher
@@ -573,7 +575,6 @@ errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_t
 
     si->proc = node;
     si->chan = &node->chan;  // will be filled by setup_endpoint()
-    si->lc = &si->chan->lc;
 
     // Setup CSpace
     err = setup_cspace(si);
@@ -599,7 +600,8 @@ errval_t spawn_load_argv_with_cap(int argc, char *argv[], struct capref cap_to_t
         return err_push(err, SPAWN_ERR_SETUP_DISPATCHER);
     }
     node->dispatcher = si->dispatcher_cap_in_parent;
-
+	
+	DEBUG_PRINTF("testing path...\n");
     // Setup endpoint
     err = setup_endpoint(si);
     if (err_is_fail(err)) {
@@ -641,7 +643,38 @@ errval_t spawn_load_argv(int argc, char *argv[], struct spawninfo *si, domainid_
  */
 errval_t spawn_load_by_name_with_cap(char *binary_name, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
 {
-    struct mem_region *module = multiboot_find_module(bi, binary_name);
+	return spawn_load_by_name_complete(binary_name, cap_to_transfer, NULL, si, pid);
+}
+
+errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid) {
+    return spawn_load_by_name_complete(binary_name, NULL_CAP, NULL, si, pid);
+}
+
+errval_t spawn_load_by_name_with_terminal_state(char *binary_name, void* terminal_state, struct spawninfo *si, domainid_t *pid) {
+	return spawn_load_by_name_complete(binary_name, NULL_CAP, terminal_state, si, pid);
+}
+
+errval_t spawn_load_cmdline_with_cap(const char *cmdline, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
+{
+    return spawn_load_cmdline_complete(cmdline, cap_to_transfer, NULL, si, pid);
+}
+
+errval_t spawn_load_cmdline_complete(const char *cmdline, struct capref cap_to_transfer, void* terminal_state, struct spawninfo *si, domainid_t *pid)
+{
+    int argc = 0;
+    char *buf;
+    char **argv = make_argv(cmdline, &argc, &buf);
+
+    errval_t err = spawn_load_argv_complete(argc, argv, cap_to_transfer, terminal_state, si, pid);
+    // Fall through on either success or failure
+    free(argv);
+    free(buf);
+    return err;
+}
+
+errval_t spawn_load_by_name_complete(char *binary_name, struct capref cap_to_transfer, void* terminal_state, struct spawninfo *si, domainid_t *pid)
+{
+	struct mem_region *module = multiboot_find_module(bi, binary_name);
     if (module == NULL) {
         return SPAWN_ERR_FIND_MODULE;
     }
@@ -652,31 +685,14 @@ errval_t spawn_load_by_name_with_cap(char *binary_name, struct capref cap_to_tra
         return SPAWN_ERR_GET_CMDLINE_ARGS;
     }
 
-    return spawn_load_cmdline_with_cap(opts, cap_to_transfer, si, pid);
-}
-
-errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid) {
-    return spawn_load_by_name_with_cap(binary_name, NULL_CAP, si, pid);
-}
-
-errval_t spawn_load_cmdline_with_cap(const char *cmdline, struct capref cap_to_transfer, struct spawninfo *si, domainid_t *pid)
-{
-    int argc = 0;
-    char *buf;
-    char **argv = make_argv(cmdline, &argc, &buf);
-
-    errval_t err = spawn_load_argv_with_cap(argc, argv, cap_to_transfer, si, pid);
-    // Fall through on either success or failure
-    free(argv);
-    free(buf);
-    return err;
+    return spawn_load_cmdline_complete(opts, cap_to_transfer, terminal_state, si, pid);
 }
 
 errval_t spawn_load_cmdline(const char *cmdline, struct spawninfo *si, domainid_t *pid) {
     return spawn_load_cmdline_with_cap(cmdline, NULL_CAP, si, pid);
 }
 
-void spawn_init(void (*handler)(void *)) {
+void spawn_init(aos_chan_handler_t handler) {
     proc_mgmt_init(&mgmt);
     rpc_handler = handler;
 }
@@ -690,7 +706,11 @@ errval_t spawn_kill(domainid_t pid) {
     }
     err = invoke_dispatcher_stop(dispatcher);
     if (err_is_fail(err)) {
-        return err_push(err, PROC_MGMT_ERR_KILL);
+        return err;
+    }
+    err = proc_mgmt_delete(&mgmt, pid);
+    if (err_is_fail(err)) {
+        return err_push(err, PROC_MGMT_ERR_DELETE);
     }
     return SYS_ERR_OK;
 }

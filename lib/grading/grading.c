@@ -124,7 +124,7 @@ void grading_test_early(void)
         &addr5, 3145728 + 8192);  // TODO: there seems to be an issue still here, where
                                   // something causes a pagefault*/
 
-    grading_test_paging(&aos_mm, get_current_paging_state());
+    //grading_test_paging(&aos_mm, get_current_paging_state());
     //    grading_test_fixed_map_more_time(&aos_mm, get_current_paging_state(), 10000);
     //    grading_test_dynamic_map_more_time(&aos_mm, get_current_paging_state(), 10000);
 
@@ -148,9 +148,9 @@ __attribute__((__unused__)) static void delay(int count)
 
 void grading_test_late(void)
 {
-    struct spawninfo info[21];
+   /* struct spawninfo info[21];
     domainid_t pid = -1;
-    errval_t err;
+    errval_t err;*/
 
 //       DEBUG_PRINTF("Run spawnTester 10...\n");
 //            err = spawn_load_cmdline("spawnTester 10", &info[0], &pid);
@@ -183,7 +183,7 @@ void grading_test_late(void)
 //           DEBUG_PRINTF("  %u %s\n", pids[i], name);
 //           free(name);
 //       }
-
+/*
     if (disp_get_core_id() == 0) {
         DEBUG_PRINTF("Start first hello with spawn_load_by_name...\n");
         err = spawn_load_by_name("hello", &info[0], &pid);
@@ -191,7 +191,7 @@ void grading_test_late(void)
             DEBUG_ERR(err, "spawn_load_by_name failed");
         }
         assert(pid != -1);
-    }
+    }*/
 
     //    DEBUG_PRINTF("Kill the first hello...\n");
     //    err = invoke_dispatcher_stop(info[0].dispatcher_cap_in_parent);
