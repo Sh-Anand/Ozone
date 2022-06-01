@@ -83,94 +83,94 @@ static uint64_t systime_to_ms(systime_t time){
 
 
 
-static errval_t test_read_dir(char *dir)
+// static errval_t test_read_dir(char *dir)
+// {
+//     errval_t err;
+
+//     TEST_PREAMBLE(dir)
+
+//     fs_dirhandle_t dh;
+//     err = opendir(dir, &dh);
+//     if (err_is_fail(err)) {
+//         DEBUG_PRINTF("FAILED TO READ DIR %s\n", dir);
+//         return err;
+//     }
+
+//     assert(dh);
+
+//     do {
+//         char *name;
+//         err = readdir(dh, &name);
+//         if (err_no(err) == FS_ERR_INDEX_BOUNDS) {
+//             break;
+//         } else if (err_is_fail(err)) {
+//             goto err_out;
+//         }
+//         printf("%s\n", name);
+//     } while(err_is_ok(err));
+
+//     DEBUG_PRINTF("SUCCESS!\n");
+//     return closedir(dh);
+//     err_out:
+//     return err;
+// }
+
+static errval_t test_fread(char *file)
 {
-    errval_t err;
+    int res = 0;
 
-    TEST_PREAMBLE(dir)
+    TEST_PREAMBLE(file)
 
-    fs_dirhandle_t dh;
-    err = opendir(dir, &dh);
-    if (err_is_fail(err)) {
-        DEBUG_PRINTF("FAILED TO READ DIR %s\n", dir);
-        return err;
+    FILE *f = fopen(file, "r");
+    if (f == NULL) {
+        return FS_ERR_OPEN;
     }
 
-    assert(dh);
+    /* obtain the file size */
+    res = fseek (f , 0 , SEEK_END);
+    if (res) {
+        return FS_ERR_INVALID_FH;
+    }
 
+    size_t filesize = ftell (f);
+    rewind (f);
+
+    printf("File size is %zu\n", filesize);
+
+    char *buf = calloc(filesize + 2, sizeof(char));
+    if (buf == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
+
+    size_t read = fread(buf, 1, filesize, f);
+
+    printf("read: %s\n", buf);
+
+    if (read != filesize) {
+        return FS_ERR_READ;
+    }
+
+    rewind(f);
+
+    size_t nchars = 0;
+    int c;
     do {
-        char *name;
-        err = readdir(dh, &name);
-        if (err_no(err) == FS_ERR_INDEX_BOUNDS) {
-            break;
-        } else if (err_is_fail(err)) {
-            goto err_out;
-        }
-        printf("%s\n", name);
-    } while(err_is_ok(err));
+        c = fgetc (f);
+        nchars++;
+    } while (c != EOF);
 
-    DEBUG_PRINTF("SUCCESS!\n");
-    return closedir(dh);
-    err_out:
-    return err;
+    if (nchars < filesize) {
+        return FS_ERR_READ;
+    }
+
+    free(buf);
+    res = fclose(f);
+    if (res) {
+        return FS_ERR_CLOSE;
+    }
+
+    return SYS_ERR_OK;
 }
-
-// static errval_t test_fread(char *file)
-// {
-//     int res = 0;
-
-//     TEST_PREAMBLE(file)
-
-//     FILE *f = fopen(file, "r");
-//     if (f == NULL) {
-//         return FS_ERR_OPEN;
-//     }
-
-//     /* obtain the file size */
-//     res = fseek (f , 0 , SEEK_END);
-//     if (res) {
-//         return FS_ERR_INVALID_FH;
-//     }
-
-//     size_t filesize = ftell (f);
-//     rewind (f);
-
-//     printf("File size is %zu\n", filesize);
-
-//     char *buf = calloc(filesize + 2, sizeof(char));
-//     if (buf == NULL) {
-//         return LIB_ERR_MALLOC_FAIL;
-//     }
-
-//     size_t read = fread(buf, 1, filesize, f);
-
-//     printf("read: %s\n", buf);
-
-//     if (read != filesize) {
-//         return FS_ERR_READ;
-//     }
-
-//     rewind(f);
-
-//     size_t nchars = 0;
-//     int c;
-//     do {
-//         c = fgetc (f);
-//         nchars++;
-//     } while (c != EOF);
-
-//     if (nchars < filesize) {
-//         return FS_ERR_READ;
-//     }
-
-//     free(buf);
-//     res = fclose(f);
-//     if (res) {
-//         return FS_ERR_CLOSE;
-//     }
-
-//     return SYS_ERR_OK;
-// }
 
 static errval_t test_fwrite(char *file)
 {
@@ -220,19 +220,19 @@ int main(int argc, char *argv[])
     err = filesystem_init();
     EXPECT_SUCCESS(err, "fs init", 0);
 
-    run_test(test_read_dir, MOUNTPOINT "/");
+    // run_test(test_read_dir, MOUNTPOINT "/");
 
-    DEBUG_PRINTF("Exist test success!\n");
+    // DEBUG_PRINTF("Exist test success!\n");
 
-    run_test_fail(test_read_dir, DIR_NOT_EXIST);
+    // run_test_fail(test_read_dir, DIR_NOT_EXIST);
 
-    DEBUG_PRINTF("Not exists test success!\n");
+    // DEBUG_PRINTF("Not exists test success!\n");
 
     run_test(test_fwrite, MOUNTPOINT FILENAME);
 
     DEBUG_PRINTF("Write test success!\n");
 
-    // run_test(test_fread, MOUNTPOINT FILENAME);
+    run_test(test_fread, MOUNTPOINT FILENAME);
 
     return EXIT_SUCCESS;
 }

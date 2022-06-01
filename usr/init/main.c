@@ -434,10 +434,10 @@ static errval_t init_sd(void) {
     // err = fat32_dir_read_next(handle, &name, NULL);
     // if(err_is_fail(err))
     //     DEBUG_ERR(err, "DIR1 read_next fail");
-    fat32_handle_t handle;
-    err = fat32_create("/sdcard/myfile2.txt", &handle);
-    char *msg = "hellow orld!";
-    err = fat32_write(handle, msg, 11, NULL);
+    // fat32_handle_t handle;
+    // err = fat32_create("/sdcard/myfile2.txt", &handle);
+    // char *msg = "hellow orld!";
+    // err = fat32_write(handle, msg, 11, NULL);
 
 
     return SYS_ERR_OK;
