@@ -14,6 +14,7 @@ const char *esc_arrow_left = "\e[D";
 
 const char *esc_end = "\e[F";
 const char *esc_home = "\e[H";
+const char *esc_delete = "\e[3~";
 
 #define IS(o) strcmp(seq, o) == 0
 
@@ -125,6 +126,17 @@ static void cursor_home(struct shell_env *env)
 	env->command_buffer_cursor = 0;
 }
 
+static void delete(struct shell_env *env)
+{
+	if (env->command_buffer_cursor == env->command_buffer_offset) {
+		bell();
+		return;
+	}
+	
+	env->command_buffer_cursor++;
+	shell_delete_character(env);
+}
+
 void handle_escape_sequence(struct shell_env *env, char* seq)
 {
 	if (IS(esc_arrow_up)) prev_command(env);
@@ -133,6 +145,7 @@ void handle_escape_sequence(struct shell_env *env, char* seq)
 	else if (IS(esc_arrow_right)) cursor_right(env);
 	else if (IS(esc_end)) cursor_end(env);
 	else if (IS(esc_home)) cursor_home(env);
+	else if (IS(esc_delete)) delete(env);
 	else if (ends_with(seq, 'p')) handle_keyboard_string(env, seq);
 	else {
 		// nothing to do ?

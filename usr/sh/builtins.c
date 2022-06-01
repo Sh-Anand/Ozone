@@ -116,14 +116,27 @@ static void sh_cat(struct shell_env *env)
 			continue;
 		}
 		size_t size = ftell(f);
+		fseek(f, 0, 0);
 		size_t offset = 0;
 		size_t read = 0;
 		char *buffer = (char*)malloc(size+1);
-		while ((read = fread(buffer + offset, 1, size - offset, f)) < size - offset) offset += read;
+		while ((read = fread(buffer + offset, 1, size - offset, f)) < size - offset) {
+			offset += read;
+			if (feof(f)) {
+				free(path);
+				printf("Error, unexpected end of file.\n");
+				goto error;
+			}
+			if (ferror(f)) {
+				free(path);
+				printf("Error occured during file read: %d\n", ferror(f));
+			}
+		}
 		buffer[size] = 0; // null terminate to be sure
 		
-		if (!feof(f)) {
-			printf("An error occured while reading: %d\n", ferror(f));
+		int err;
+		if ((err = ferror(f))) {
+			printf("An error occured while reading: %d\n", err);
 		} else {
 			puts(buffer);
 		}
@@ -148,19 +161,42 @@ static void sh_mkdir(struct shell_env *env)
 		return;
 	}
 	
-	for (size_t i = 0; i < env->argc; i++) {
+	for (size_t i = 1; i < env->argc; i++) {
 		char *path = sanitize_path(env, env->argv[i]); // TODO: add flags like -p
 		
 		err = mkdir(path);
 		
 		if (err_is_fail(err)) {
-			printf("mkdir failed: %s cannot be created!\n", path);
+			printf("mkdir failed: %s cannot be created (%s)!\n", path, err_getcode(err));
 		}
 		
 		free(path);
 	}
 	
 	env->last_return_status = 0;
+}
+
+static void sh_rm(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: rm <path...>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	errval_t err;
+	for (size_t i = 1; i < env->argc; i++) {
+		char* path = sanitize_path(env, env->argv[i]);
+		
+		err = rm(path);
+		
+		if (err_is_fail(err)) printf("Failed to delete %s\n", path);
+		
+		free(path);
+	}
+	
+	env->last_return_status = 0;
+	return;
 }
 
 static void sh_ls(struct shell_env *env)
@@ -236,6 +272,12 @@ error:
 	if (path != NULL) free(path);
 	env->last_return_status = 1;
 	return;
+}
+
+static void sh_pwd(struct shell_env *env)
+{
+	puts(env->current_path);
+	env->last_return_status = 0;
 }
 
 static void sh_ps(struct shell_env *env)
@@ -424,6 +466,8 @@ int builtin(struct shell_env *env)
 	REGISTER_BUILTIN(mkdir);
 	REGISTER_BUILTIN(cat);
 	REGISTER_BUILTIN(cd);
+	REGISTER_BUILTIN(pwd);
+	REGISTER_BUILTIN(rm);
 	
 	REGISTER_BUILTIN(san);
 	

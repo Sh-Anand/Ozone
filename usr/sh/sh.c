@@ -55,8 +55,9 @@ static void setup_environment(void)
 	// set stdin to unbuffered
 	setbuffer(stdin, NULL, 0);
 	
-	env.current_path = "/sdcard/";
 	env.home_path = "/sdcard/";
+	env.current_path = (char*)malloc(strlen(env.home_path) + 1);
+	strcpy(env.current_path, env.home_path);
 	
 	env.next_core = 1;
 	
@@ -205,7 +206,7 @@ static uint8_t read_from_input(void)
 			if (i+1 >= max_i) escape_sequence = (char*)realloc(escape_sequence, max_i *= 2);
 			c = getchar();
 			escape_sequence[i++] = c;
-			if (is_alpha(c)) { // escape sequences are terminated by an alpha character
+			if (is_alpha(c) || c == '~') { // escape sequences are terminated by an alpha character or a tilde
 				escape_sequence[i] = 0;
 				active = 0;
 			}
@@ -247,9 +248,12 @@ void shell_insert_character(struct shell_env *shenv, char c)
 	// in case the cursor is at the end, simply append
 	if (shenv->command_buffer_cursor != shenv->command_buffer_offset) {
 		size_t len = strlen(shenv->command_buffer);
-		if (len >= shenv->command_buffer_size - 2) allocate_command_buffer();
+		if (len >= shenv->command_buffer_size - 3) allocate_command_buffer();
 		
-		for (size_t i = len; i >= shenv->command_buffer_cursor; i--) shenv->command_buffer[i+1] = shenv->command_buffer[i];
+		for (size_t i = len; i > shenv->command_buffer_cursor+1; i--) {
+			DEBUG_PRINTF("cursor: %d len: %d size: %d i: %d\n", shenv->command_buffer_cursor, len, shenv->command_buffer_size, i);
+			shenv->command_buffer[i] = shenv->command_buffer[i-1];
+		}
 	}
 	
 	shenv->command_buffer[shenv->command_buffer_cursor] = c;
