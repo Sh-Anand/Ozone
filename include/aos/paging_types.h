@@ -94,6 +94,9 @@ struct paging_state {
     struct slab_allocator mapping_node_slabs;
     struct slab_allocator mapping_child_slabs;
     struct thread_mutex frame_alloc_mutex;
+    struct thread_mutex free_list_mutex;
+    struct thread_mutex vnode_mutex;
+    struct thread_mutex region_mutex;
     LIST_HEAD(paging_free_list_head, paging_region_node) free_list[PAGING_ADDR_BITS - BASE_PAGE_BITS + 1];
     lvaddr_t start_addr;
     bool refilling;

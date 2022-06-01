@@ -53,6 +53,7 @@
 #include <aos/lmp_chan.h>
 #include <aos/lmp_endpoints.h>
 #include <aos/ump_chan.h>
+#include <aos/rpc.h>
 #include <aos/solution.h>
 
 /* XXX: utility macros. not sure where to put these */

@@ -59,10 +59,14 @@ void libc_exit(int status)
 	//errval_t err = aos_rpc_serial_release(aos_rpc_get_serial_channel());
 	//DEBUG_ERR(err, "terminal release (err: %s)", err_getcode(err));
 	
-    debug_printf("libc exit NYI!\n");
+    //debug_printf("libc exit NYI!\n");
 	
 	aos_rpc_serial_release(aos_rpc_get_serial_channel());
 	
+    errval_t err = aos_chan_send(&get_init_rpc()->chan, RPC_BYE, NULL_CAP, NULL, 0, false);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in RPC_BYE");
+    }
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {
