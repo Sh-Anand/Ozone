@@ -39,10 +39,9 @@ static inline int background_listener(void *keep_spinning) {
 #define LISTEN_DURING_RPC_CALL(rpc_call)                                                    \
     {                                                                                       \
         bool keep_spinning = true;                                                          \
-        struct thread *background = thread_create(background_listener, &keep_spinning);     \
+        thread_create(background_listener, &keep_spinning);                                 \
         rpc_call                                                                            \
         keep_spinning = false;                                                              \
-        thread_join(background, NULL);                                                      \
     }
 
 #endif
