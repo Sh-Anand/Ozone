@@ -64,6 +64,8 @@ errval_t spawn_get_chan(domainid_t pid, struct aos_chan **chan);
 
 errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count);
 
+struct proc_node *spawn_get_proc_node(domainid_t pid);
+
 // Start a child process using the multiboot command line. Fills in si.
 errval_t spawn_load_by_name(char *binary_name, struct spawninfo *si, domainid_t *pid);
 errval_t spawn_load_by_name_with_terminal_state(char *binary_name, void* terminal_state, struct spawninfo *si, domainid_t *pid);

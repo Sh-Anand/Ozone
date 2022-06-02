@@ -22,6 +22,7 @@ typedef void *handle_t;
 
 enum aos_rpc_identifier {
     RPC_TRANSFER_CAP = RPC_IDENTIFIER_USER_START,
+    RPC_ACCEPT_CAP,
     RPC_BYE,
     RPC_NUM,
     RPC_STR,
@@ -38,9 +39,7 @@ enum aos_rpc_identifier {
     RPC_TERMINAL_PUTCHAR,
 	RPC_TERMINAL_GETS,
 	RPC_TERMINAL_PUTS,
-    RPC_SHUTDOWN,
     RPC_STRESS_TEST,
-    RPC_REGISTER_AS_NAMESERVER,
     RPC_FOPEN,
     RPC_FCREATE,
     RPC_FREAD,

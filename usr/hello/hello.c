@@ -50,13 +50,13 @@ struct thread_param {
 static int thread_func(void *params)
 {
     // struct thread_param *p = params;
-    DEBUG_PRINTF("Trying to malloc 64MB...\n");
-    size_t region_size = 64 * 1024 * 1024;
+    DEBUG_PRINTF("Trying to malloc 4MB...\n");
+    size_t region_size = 4 * 1024 * 1024;
     char *b = malloc(region_size);
     if (b == NULL) {
         print_err_if_any(LIB_ERR_MALLOC_FAIL);
     } else {
-        DEBUG_PRINTF("malloc succeeded, going to memset whole 64MB, will take "
+        DEBUG_PRINTF("malloc succeeded, going to memset whole 4MB, will take "
                "some time...\n");
         memset(b, 0, region_size);
         DEBUG_PRINTF("memset succeeded\n");
@@ -286,6 +286,14 @@ int main(int argc, char *argv[])
 
                         thread_count++;
                     }
+
+                    for (int i = 0; i < 16; i++) {
+                        thread_join(threads[i], NULL);
+                    }
+                } else if (strcmp(buf, "time_self_paging") == 0) {
+                    printf("Going to create 16 threads...\n");
+
+
 
                     for (int i = 0; i < 16; i++) {
                         thread_join(threads[i], NULL);

@@ -14,6 +14,7 @@ struct proc_node {
     struct capref dispatcher;
     char name[DISP_NAME_LEN];
     struct aos_chan chan;
+    int accepting_cap;
     RB_ENTRY(proc_node) rb_entry;
     LIST_ENTRY(proc_node) link;
 };
@@ -83,5 +84,7 @@ errval_t proc_mgmt_get_chan(struct proc_mgmt *ps, domainid_t pid, struct aos_cha
  */
 errval_t proc_mgmt_get_all_pids(struct proc_mgmt *ps, domainid_t **pids,
                                 size_t *pid_count);
+
+struct proc_node *proc_mgmt_get_node(struct proc_mgmt *ps, domainid_t pid);
 
 #endif  // AOS_PROC_MGMT_H

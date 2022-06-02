@@ -51,6 +51,7 @@ errval_t proc_mgmt_alloc(struct proc_mgmt *ps, struct proc_node **ret)
         }
         node->pid = ps->pid_upper + (disp_get_core_id() * PID_CORE_ID_FACTOR);
         ps->pid_upper++;
+        node->accepting_cap = 0;
     } else {
         node = LIST_FIRST(&ps->free_list);
         LIST_REMOVE(node, link);
@@ -65,7 +66,7 @@ errval_t proc_mgmt_alloc(struct proc_mgmt *ps, struct proc_node **ret)
     return SYS_ERR_OK;
 }
 
-static struct proc_node *find_node(struct proc_mgmt *ps, domainid_t pid)
+struct proc_node *proc_mgmt_get_node(struct proc_mgmt *ps, domainid_t pid)
 {
     struct proc_node find;
     find.pid = pid;
@@ -73,7 +74,7 @@ static struct proc_node *find_node(struct proc_mgmt *ps, domainid_t pid)
 }
 
 #define FIND_NODE_OR_RETURN_ERR(node)                                                    \
-    struct proc_node *node = find_node(ps, pid);                                         \
+    struct proc_node *node = proc_mgmt_get_node(ps, pid);                                         \
     if (node == NULL) {                                                                  \
         return PROC_MGMT_ERR_PID_NOT_FOUND;                                              \
     }

@@ -129,11 +129,15 @@ static void run_client(void)
 
 static char *myresponse = "reply!!";
 
+static volatile int received_count = 0;
+
 static void server_recv_handler(void *st, void *message, size_t bytes, void **response,
                                 size_t *response_bytes, struct capref rx_cap,
                                 struct capref *tx_cap)
 {
     debug_printf("server: got a request \"%s\"\n", (char *)message);
+
+    received_count++;
 
     errval_t err;
 
@@ -196,7 +200,7 @@ static void run_server(void)
         PANIC_IF_FAIL(err, "failed to spawn test\n");
     }
 
-    while (1) {
+    while (received_count < 8) {
         event_dispatch(get_default_waitset());
     }
 }

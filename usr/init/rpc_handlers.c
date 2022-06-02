@@ -308,8 +308,10 @@ RPC_HANDLER(get_local_pids_handler)
                              sizeof(struct rpc_process_get_all_pids_return_msg)
                                  + count * sizeof(domainid_t));
     reply->count = count;
-    memcpy(reply->pids, pids, count * sizeof(domainid_t));
-    free(pids);
+    if (pids) {
+        memcpy(reply->pids, pids, count * sizeof(domainid_t));
+        free(pids);
+    }
     return SYS_ERR_OK;
 }
 
@@ -339,7 +341,6 @@ RPC_HANDLER(process_get_all_pids_handler)
             if (err_is_fail(err)) {
                 return err;
             }
-            msg[core]->count = 0;
         } else {
             continue;  // core not booted
         }
@@ -764,7 +765,7 @@ RPC_HANDLER(cap_transfer_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
     if (capref_is_null(in_cap)) {
-        return MON_ERR_CAP_SEND;
+        return ERR_INVALID_ARGS;
     }
 
 #if DEBUG_RPC_HANDLERS
@@ -781,10 +782,23 @@ RPC_HANDLER(cap_transfer_handler)
             return err;
         }
         assert(chan->type == AOS_CHAN_TYPE_LMP);
-        err = rpc_lmp_put_cap(&chan->lc, in_cap);  // not blocking
-        if (err_is_fail(err)) {
-            return err;  // expose transient error to the caller
+
+        struct proc_node *p = spawn_get_proc_node(*pid);
+        if (p->accepting_cap <= 0) {
+            return MON_ERR_CAP_SEND;
         }
+
+
+        err = rpc_lmp_put_cap(&chan->lc, in_cap);  // not blocking, may return failure
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                return MON_ERR_CAP_SEND_TRANSIENT;
+            } else {
+                return err;
+            }
+        }
+
+        p->accepting_cap--;
     } else {
         struct internal_rpc_remote_cap_msg msg;
         msg.pid = *pid;
@@ -815,6 +829,13 @@ RPC_HANDLER(cap_transfer_handler)
     DEBUG_PRINTF("< transfer cap to %u done\n", *pid);
 #endif
 
+    return SYS_ERR_OK;
+}
+
+RPC_HANDLER(cap_accept_handler)
+{
+    struct proc_node *proc = arg;
+    proc->accepting_cap++;
     return SYS_ERR_OK;
 }
 
@@ -1002,6 +1023,7 @@ RPC_HANDLER(process_exit_handler)
 // Unfilled slots are NULL since global variables are initialized to 0
 rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [RPC_TRANSFER_CAP] = cap_transfer_handler,
+    [RPC_ACCEPT_CAP] = cap_accept_handler,
     [RPC_BYE] = process_exit_handler,
     [RPC_NUM] = num_msg_handler,
     [RPC_STR] = str_msg_handler,

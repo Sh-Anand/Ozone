@@ -344,7 +344,7 @@ errval_t rpc_lmp_call(struct aos_chan *chan, rpc_identifier_t identifier,
 errval_t rpc_lmp_put_cap(struct lmp_chan *lc, struct capref cap)
 {
     assert(!capref_is_null(cap));
-    return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0, false);
+    return rpc_lmp_send(lc, RPC_PUT_CAP, cap, NULL, 0, true);
 }
 
 static errval_t rpc_lmp_ack(struct lmp_chan *lc, struct capref cap, const void *buf, size_t size)

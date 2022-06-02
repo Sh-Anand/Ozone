@@ -726,3 +726,7 @@ errval_t spawn_get_chan(domainid_t pid, struct aos_chan **chan) {
 errval_t spawn_get_all_pids(domainid_t **pids, size_t *pid_count) {
     return proc_mgmt_get_all_pids(&mgmt, pids, pid_count);
 }
+
+struct proc_node *spawn_get_proc_node(domainid_t pid) {
+    return proc_mgmt_get_node(&mgmt, pid);
+}

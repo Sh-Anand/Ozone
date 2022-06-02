@@ -195,6 +195,7 @@ sys_dispatcher_stop(struct capability *to)
     trace_event(TRACE_SUBSYS_KERNEL, TRACE_EVENT_KERNEL_SCHED_REMOVE,
                 153);  // XXX: what is this arg
     scheduler_remove(dcb);
+    wakeup_remove(to->u.dispatcher.dcb);
 #endif
 
     return SYSRET(SYS_ERR_OK);

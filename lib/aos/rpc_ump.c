@@ -87,7 +87,7 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
         do {
             err = rpc_lmp_call(&get_init_rpc()->chan, RPC_TRANSFER_CAP, call_cap,
                                &uc->pid, sizeof(uc->pid), NULL, NULL, NULL, true);
-        } while (lmp_err_is_transient(err));
+        } while (err_is_fail(err) && err == MON_ERR_CAP_SEND_TRANSIENT);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_send_cap: cap transfer step 3 fail\n");
             THREAD_MUTEX_BREAK;
@@ -101,6 +101,11 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
 errval_t rpc_ump_recv_cap(struct ump_chan *uc, struct capref *recv_cap)
 {
     errval_t err;
+
+    err = aos_rpc_call(get_init_rpc(), RPC_ACCEPT_CAP, NULL_CAP, NULL, 0, NULL, NULL, NULL);
+    if (err_is_fail(err)) {
+        return err;
+    }
 
     // Prepare the refill slot, do so outside the mutex since it may trigger recursive rpc
     struct capref refill_slot = NULL_CAP;
