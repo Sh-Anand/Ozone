@@ -389,7 +389,7 @@ static void sh_ps(struct shell_env *env)
 	struct aos_rpc *rpc = aos_rpc_get_process_channel();
 	
 	domainid_t *pids;
-	const char* line_format = "  % 6d   %s\n";
+	const char* line_format = "% 12d   %s\n";
 	size_t npids, out_size = 1024, out_offset = 0, overhead_length = strlen(line_format);
 	char* name;
 	char* out_text = (char*)malloc(sizeof(char) * out_size);
@@ -475,7 +475,7 @@ static void sh_oncore(struct shell_env *env)
 	for (size_t i = 2; i < env->argc; i++) {
 		size_t sl = strlen(env->argv[i]);
 		memcpy(tmp_cmd_buffer + offset, env->argv[i], sl);
-		tmp_cmd_buffer[sl] = ' ';
+		tmp_cmd_buffer[offset + sl] = ' ';
 		offset += sl + 1;
 	}
 	
