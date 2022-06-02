@@ -390,7 +390,7 @@ RPC_HANDLER(remote_clean_nameserver_handler) {
     return clean_nameservice_by_pid(*pid);
 }
 
-/*static errval_t kill_process_and_clean(domainid_t pid) {
+static errval_t kill_process_and_clean(domainid_t pid) {
     errval_t err = spawn_kill(pid);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in spawn_kill");
@@ -402,21 +402,15 @@ RPC_HANDLER(remote_clean_nameserver_handler) {
         return urpc_call_to_core(0, INTERNAL_RPC_REMOTE_CLEAN_NAMESERVER, &pid,
                                  sizeof(domainid_t), NULL, NULL);
     }
-}*/
+}
 
 RPC_HANDLER(process_kill_pid_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+
     coreid_t core = pid_get_core(*pid);
-
-    errval_t err;
-
     if (disp_get_current_core_id() == core) {
-        err = spawn_kill(*pid);
-        if (err_is_fail(err)) {
-            DEBUG_ERR(err, "in spawn_kill");
-        }
-        return err;
+        return kill_process_and_clean(*pid);
     } else {
         return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }
@@ -1054,12 +1048,7 @@ RPC_HANDLER(process_exit_handler)
 
 //     DEBUG_PRINTF("bye process %u!\n", proc->pid);
 
-    if (disp_get_current_core_id() == 0) {
-        return clean_nameservice_by_pid(proc->pid);
-    } else {
-        return urpc_call_to_core(0, INTERNAL_RPC_REMOTE_CLEAN_NAMESERVER, &proc->pid,
-                                 sizeof(domainid_t), NULL, NULL);
-    }
+    return kill_process_and_clean(proc->pid);
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
