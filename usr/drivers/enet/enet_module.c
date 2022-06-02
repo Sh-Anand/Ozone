@@ -1268,8 +1268,6 @@ int main(int argc, char *argv[]) {
 
         err = enet_dequeue(st->txq, &buf);
         if (err_is_ok(err)) {
-            buf.valid_data = 0;
-            buf.valid_length = ENET_MAX_BUF_SIZE;
             err = free_tx_buf(st, &buf);
             assert(err_is_ok(err));
         }
