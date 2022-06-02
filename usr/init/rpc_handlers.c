@@ -410,7 +410,7 @@ RPC_HANDLER(process_kill_pid_handler)
 
     coreid_t core = pid_get_core(*pid);
     if (disp_get_current_core_id() == core) {
-        return kill_process_and_clean(*(domainid_t*)in_payload);
+        return kill_process_and_clean(*pid);
     } else {
         return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }

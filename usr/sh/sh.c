@@ -328,33 +328,28 @@ int main(int argc, char **argv)
 		char *token = strtok(temp_buffer, "&");
 		
 		while (token != NULL) {
-			// copy the environment
-			struct shell_env local_env;
-			memcpy(&local_env, &env, sizeof(struct shell_env));
 			char* next_token = strtok(NULL, "&");
 			
-			local_env.command_buffer = token;
-			local_env.attach_terminal = next_token == NULL; // attach stdin only to the last spawn
+			env.command_buffer = token;
+			env.attach_terminal = next_token == NULL; // attach stdin only to the last spawn
 			
 			// split the command line into tokens
-			local_env.argc = 0;
+			env.argc = 0;
 			
 			// split string into tokens and store in env.argv
-			local_env.argv = make_argv(local_env.command_buffer, &(local_env.argc), &(local_env.zero_sep_command_line));
-			if (!local_env.argv) {
+			env.argv = make_argv(env.command_buffer, &(env.argc), &(env.zero_sep_command_line));
+			if (!env.argv) {
 				printf("Error: Failed to parse command line!\n");
 				continue;
 			}
 			
-			if (local_env.argc == 0) {}
-			else if (builtin(&local_env)) {}
-			else if (exec_binary(&local_env)) {}
+			if (env.argc == 0) {}
+			else if (builtin(&env)) {}
+			else if (exec_binary(&env)) {}
 			else {
-				printf("Error: '%s' not builtin and not a known program!\n", local_env.argv[0]);
+				printf("Error: '%s' not builtin and not a known program!\n", env.argv[0]);
 			}
 			
-			env.next_core = local_env.next_core;
-			env.active = local_env.active;
 			token = next_token;
 		}
 		
