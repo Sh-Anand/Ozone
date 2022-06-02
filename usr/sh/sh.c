@@ -251,7 +251,7 @@ void shell_insert_character(struct shell_env *shenv, char c)
 		if (len >= shenv->command_buffer_size - 3) allocate_command_buffer();
 		
 		for (size_t i = len; i > shenv->command_buffer_cursor+1; i--) {
-			DEBUG_PRINTF("cursor: %d len: %d size: %d i: %d\n", shenv->command_buffer_cursor, len, shenv->command_buffer_size, i);
+			//DEBUG_PRINTF("cursor: %d len: %d size: %d i: %d\n", shenv->command_buffer_cursor, len, shenv->command_buffer_size, i);
 			shenv->command_buffer[i] = shenv->command_buffer[i-1];
 		}
 	}

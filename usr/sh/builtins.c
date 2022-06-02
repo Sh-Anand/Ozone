@@ -190,10 +190,90 @@ static void sh_rm(struct shell_env *env)
 		
 		err = rm(path);
 		
-		if (err_is_fail(err)) printf("Failed to delete %s\n", path);
+		if (err_is_fail(err)) printf("Failed to delete %s (err: %s)\n", path, err_getcode(err));
 		
 		free(path);
 	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_touch(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: touch <path...>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	for (size_t i = 1; i < env->argc; i++) {
+		char* path = sanitize_path(env, env->argv[i]);
+		
+		FILE* f = fopen(path, "w");
+		fclose(f);
+		
+		//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+		
+		free(path);
+	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_write(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: write <path> <tokens>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	char* path = sanitize_path(env, env->argv[1]);
+	FILE* f = fopen(path, "w");
+	
+	if (env->argc > 2) { // if there are more arguments, print them line by line
+		for (int i = 2; i < env->argc; i++) {
+			fprintf(f, "%s\n", env->argv[i]);
+		}
+	}
+	fflush(f);
+	fclose(f);
+	
+	//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+	
+	free(path);
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_append(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: append <path> <tokens>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	char* path = sanitize_path(env, env->argv[1]);
+	FILE* f = fopen(path, "a");
+	
+	if (env->argc > 2) { // if there are more arguments, print them line by line
+		for (int i = 2; i < env->argc; i++) {
+			fprintf(f, "%s\n", env->argv[i]);
+		}
+	}
+	fflush(f);
+	fclose(f);
+	
+	//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+	
+	free(path);
 	
 	env->last_return_status = 0;
 	return;
@@ -468,6 +548,9 @@ int builtin(struct shell_env *env)
 	REGISTER_BUILTIN(cd);
 	REGISTER_BUILTIN(pwd);
 	REGISTER_BUILTIN(rm);
+	REGISTER_BUILTIN(touch);
+	REGISTER_BUILTIN(write);
+	REGISTER_BUILTIN(append);
 	
 	REGISTER_BUILTIN(san);
 	
