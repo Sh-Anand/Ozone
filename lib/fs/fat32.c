@@ -181,8 +181,6 @@ static errval_t sd_write_sector(int sector, void *data) {
 
     memcpy((void *)vaddr, data, SDHC_BLOCK_SIZE);
 
-    DEBUG_PRINTF("WRITING TO SECTOR %d\n", sector);
-
     CHECK_ERR_PUSH(sdhc_write_block(manager->sd, sector, paddr), FS_ERR_BLOCK_WRITE);
 
 	barrelfish_usleep(25000);
@@ -673,8 +671,6 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
     CHECK_ERR_PUSH(search_dirent(dir, clean_path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
     // DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
 
-    free(clean_path);
-
     return SYS_ERR_OK;
 }
 
@@ -701,8 +697,6 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
 
     *rethandle = handle;
 
-    free(clean_path);
-    
     return SYS_ERR_OK;
 }
 
