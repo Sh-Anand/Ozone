@@ -410,7 +410,7 @@ RPC_HANDLER(process_kill_pid_handler)
 
     coreid_t core = pid_get_core(*pid);
     if (disp_get_current_core_id() == core) {
-        return kill_process_and_clean(*(domainid_t*)in_payload);
+        return kill_process_and_clean(*pid);
     } else {
         return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }
@@ -1048,7 +1048,12 @@ RPC_HANDLER(process_exit_handler)
 
 //     DEBUG_PRINTF("bye process %u!\n", proc->pid);
 
-    return kill_process_and_clean(proc->pid);
+    if (disp_get_current_core_id() == 0) {
+        return clean_nameservice_by_pid(proc->pid);
+    } else {
+        return urpc_call_to_core(0, INTERNAL_RPC_REMOTE_CLEAN_NAMESERVER, &proc->pid,
+                                 sizeof(domainid_t), NULL, NULL);
+    }
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
