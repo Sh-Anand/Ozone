@@ -370,11 +370,13 @@ RPC_HANDLER(process_get_all_pids_handler)
 
 RPC_HANDLER(process_kill_pid_handler)
 {
-    if (disp_get_current_core_id() == 0) {
-		assert(in_size >= sizeof(domainid_t));
-		return spawn_kill(*(domainid_t*)in_payload);
+    CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+
+    coreid_t core = pid_get_core(*pid);
+    if (disp_get_current_core_id() == core) {
+        return spawn_kill(*(domainid_t*)in_payload);
     } else {
-        return forward_to_core(0, in_payload, in_size, out_payload, out_size);
+        return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }
 }
 
