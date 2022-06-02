@@ -38,6 +38,7 @@ struct shell_env {
 	// flags
 	uint8_t active : 1;
 	uint8_t history_active : 1;
+	uint8_t attach_terminal : 1;
 };
 
 void shell_delete_character(struct shell_env *env);
