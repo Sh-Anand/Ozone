@@ -266,7 +266,6 @@ errval_t aos_rpc_fclose(struct aos_rpc *rpc, handle_t handle)
     void *return_msg = NULL;
     size_t return_size = 0;
 
-    DEBUG_PRINTF("AFTER RPC?\n");
     errval_t err = aos_rpc_call(rpc, RPC_FCLOSE, NULL_CAP, (void *)&handle, sizeof(lvaddr_t), NULL, &return_msg, &return_size);
 
     return err;
