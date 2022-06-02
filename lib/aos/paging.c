@@ -1607,7 +1607,7 @@ __attribute__((__unused__)) static errval_t set_page_fault_handler(void)
         DEBUG_ERR(err, "paging: fail to set exception handler");
         return err;
     } else {
-        DEBUG_PRINTF("page fault handler set\n");
+//        DEBUG_PRINTF("page fault handler set\n");
     }
     return SYS_ERR_OK;
 }

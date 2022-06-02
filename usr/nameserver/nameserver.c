@@ -51,7 +51,7 @@ RPC_HANDLER(nameserver_bind)
     domainid_t pid = *msg;
     struct capref frame = in_cap;
 
-//    DEBUG_PRINTF("process %u bind\n", pid);
+    //    DEBUG_PRINTF("process %u bind\n", pid);
 
     errval_t err;
 
@@ -119,8 +119,11 @@ RPC_HANDLER(nameserver_kill_by_pid)
     CAST_IN_MSG_EXACT_SIZE(msg, domainid_t);
     domainid_t pid = *msg;
 
+//    DEBUG_PRINTF("process %u cleanup\n", pid);
+
     struct service *s, *tmp;
-    RB_FOREACH_SAFE(s, service_rb_tree, &services, tmp) {
+    RB_FOREACH_SAFE(s, service_rb_tree, &services, tmp)
+    {
         if (s->program->pid == pid) {
             RB_REMOVE(service_rb_tree, &services, s);
             free(s);
@@ -179,7 +182,7 @@ RPC_HANDLER(handle_deregister)
 
     CAST_IN_MSG_AT_LEAST_SIZE(name, char);
 
-//    DEBUG_PRINTF("%u process deregister \"%s\"\n", server->pid, name);
+    //    DEBUG_PRINTF("%u process deregister \"%s\"\n", server->pid, name);
 
     struct service *service = find_service(name);
     if (service == NULL) {
@@ -201,7 +204,7 @@ RPC_HANDLER(handle_lookup)
 
     CAST_IN_MSG_AT_LEAST_SIZE(name, char);
 
-//    DEBUG_PRINTF("process %u lookup \"%s\"\n", client->pid, name);
+    //    DEBUG_PRINTF("process %u lookup \"%s\"\n", client->pid, name);
 
     struct service *service = find_service(name);
     if (service == NULL) {
@@ -238,33 +241,34 @@ RPC_HANDLER(handle_lookup)
 // https://stackoverflow.com/a/4771038/10087792
 static bool startswith(const char *pre, const char *str)
 {
-    size_t lenpre = strlen(pre),
-           lenstr = strlen(str);
+    size_t lenpre = strlen(pre), lenstr = strlen(str);
     return lenstr < lenpre ? false : memcmp(pre, str, lenpre) == 0;
 }
 
 RPC_HANDLER(handle_enumerate)
 {
-//    struct program *client = arg;
-//    errval_t err;
+    //    struct program *client = arg;
+    //    errval_t err;
 
     CAST_IN_MSG_AT_LEAST_SIZE(query, char);
 
-//    DEBUG_PRINTF("process %u enumerate \"%s\"\n", client->pid, query);
+    //    DEBUG_PRINTF("process %u enumerate \"%s\"\n", client->pid, query);
 
     struct service *matched[MAX_ENUM_COUNT];
     size_t count = 0;
     size_t buf_size = 0;
 
     struct service *s;
-    RB_FOREACH(s, service_rb_tree, &services) {
+    RB_FOREACH(s, service_rb_tree, &services)
+    {
         if (startswith(query, s->name)) {
             matched[count++] = s;
             buf_size += strlen(s->name) + 1;
         }
     }
 
-    MALLOC_OUT_MSG_WITH_SIZE(reply, struct ns_enumerate_reply_msg, sizeof(struct ns_enumerate_reply_msg) + buf_size);
+    MALLOC_OUT_MSG_WITH_SIZE(reply, struct ns_enumerate_reply_msg,
+                             sizeof(struct ns_enumerate_reply_msg) + buf_size);
     reply->num = count;
     char *buf = reply->buf;
     for (int i = 0; i < count; ++i) {
@@ -296,12 +300,11 @@ static AOS_CHAN_HANDLER(init_msg_handler)
         return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap,
                                out_cap);
     case 1:
-        return nameserver_kill_by_pid(NULL, in_payload, in_size, out_payload, out_size, in_cap,
-                               out_cap);
+        return nameserver_kill_by_pid(NULL, in_payload, in_size, out_payload, out_size,
+                                      in_cap, out_cap);
     default:
         return ERR_INVALID_ARGS;
     }
-
 }
 
 int main(int argc, char *argv[])

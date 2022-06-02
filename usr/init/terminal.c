@@ -222,7 +222,7 @@ void* terminal_aquire(bool use_stdin)
 	// set flags
 	st->flags.use_stdin = use_stdin;
 	
-	DEBUG_PRINTF("Aquiring terminal session %p, %d\n", st, use_stdin);
+//	DEBUG_PRINTF("Aquiring terminal session %p, %d\n", st, use_stdin);
 	
 	// add state to to the stack
 	if (use_stdin) {

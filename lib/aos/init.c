@@ -299,7 +299,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         }
 
         /* wait for init to acknowledge receiving the endpoint */
-        DEBUG_PRINTF("binding with init\n");
+//        DEBUG_PRINTF("binding with init\n");
         while (true) {
             struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
             err = lmp_chan_recv(init_lc, &msg, NULL);
@@ -333,7 +333,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 			aos_rpc_serial_aquire(aos_rpc_get_serial_channel(), false);
 		}
 		
-		DEBUG_PRINTF("Received terminal state: %p\n", terminal_state);
+//		DEBUG_PRINTF("Received terminal state: %p\n", terminal_state);
 		
     }
 	

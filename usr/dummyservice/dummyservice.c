@@ -13,17 +13,17 @@ static void server_recv_handler(void *st, void *message, size_t bytes, void **re
                                 size_t *response_bytes, struct capref rx_cap,
                                 struct capref *tx_cap)
 {
-    debug_printf("server: got a request \"%s\"\n", (char *)message);
+    debug_printf("got a request \"%s\"\n", (char *)message);
 }
 
 int main(int argc, char *argv[]) {
 
     if (argc != 2) {
-        DEBUG_PRINTF("Usage: %s service_name\n", argv[0]);
+        printf("Usage: %s service_name\n", argv[0]);
         return EXIT_FAILURE;
 
     } else {
-        debug_printf("register with nameservice '%s'\n", argv[1]);
+        printf("register with nameservice '%s'\n", argv[1]);
         errval_t err = nameservice_register(argv[1], server_recv_handler, NULL);
         PANIC_IF_FAIL(err, "failed to register...\n");
 

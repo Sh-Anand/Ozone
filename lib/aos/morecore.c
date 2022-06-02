@@ -131,7 +131,7 @@ static void morecore_free(void *base, size_t bytes)
 
 errval_t morecore_init(size_t alignment)
 {
-    debug_printf("initializing dynamic heap\n");
+//    debug_printf("initializing dynamic heap\n");
 
     struct morecore_state *state = get_morecore_state();
 

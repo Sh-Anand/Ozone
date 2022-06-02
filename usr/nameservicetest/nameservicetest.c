@@ -103,7 +103,7 @@ static void run_client(void)
                           rx_cap);
     PANIC_IF_FAIL(err, "failed to do the nameservice rpc\n");
 
-    debug_printf("client: got response \"%s\" ", (char *)response);
+    debug_printf("client: got a response \"%s\" ", (char *)response);
 
     struct capability c;
     err = cap_direct_identify(rx_cap, &c);
@@ -134,7 +134,7 @@ static void server_recv_handler(void *st, void *message, size_t bytes, void **re
                                 size_t *response_bytes, struct capref rx_cap,
                                 struct capref *tx_cap)
 {
-    debug_printf("server: got a request \"%s\" ", (char *)message);
+    debug_printf("server: got a request  \"%s\" ", (char *)message);
 
     received_count++;
 

@@ -26,9 +26,9 @@ int main(int argc, char *argv[])
     char *names[256];
     errval_t err = nameservice_enumerate(query, &count, names);
     PANIC_IF_FAIL(err, "failed to enumerate service\n");
-    debug_printf("server: enumerate \"%s\" got %lu services:\n", query, count);
+    printf("Enumerate \"%s\" got %lu services:\n", query, count);
     for (size_t i = 0; i < count; i++) {
-        debug_printf("%lu. %s\n", i + 1, names[i]);
+        printf("%lu. %s\n", i + 1, names[i]);
         free(names[i]);
     }
 }

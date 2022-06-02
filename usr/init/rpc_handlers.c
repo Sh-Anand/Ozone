@@ -368,13 +368,49 @@ RPC_HANDLER(process_get_all_pids_handler)
     return SYS_ERR_OK;
 }
 
+static errval_t clean_nameservice_by_pid(domainid_t pid) {
+    errval_t err;
+    if (aos_chan_is_connected(&nameserver_rpc.chan)) {
+        // XXX: magic number, put it in a shared header
+        err = aos_chan_send(&nameserver_rpc.chan, 1, NULL_CAP, &pid, sizeof(domainid_t),
+                            true);
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                thread_yield();
+                return MON_ERR_RETRY;
+            }
+            return err;  // expose transient error to the user
+        }
+    }
+    return SYS_ERR_OK;
+}
+
+RPC_HANDLER(remote_clean_nameserver_handler) {
+    CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
+    return clean_nameservice_by_pid(*pid);
+}
+
+static errval_t kill_process_and_clean(domainid_t pid) {
+    errval_t err = spawn_kill(pid);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "in spawn_kill");
+    }
+
+    if (disp_get_current_core_id() == 0) {
+        return clean_nameservice_by_pid(pid);
+    } else {
+        return urpc_call_to_core(0, INTERNAL_RPC_REMOTE_CLEAN_NAMESERVER, &pid,
+                                 sizeof(domainid_t), NULL, NULL);
+    }
+}
+
 RPC_HANDLER(process_kill_pid_handler)
 {
     CAST_IN_MSG_EXACT_SIZE(pid, domainid_t);
 
     coreid_t core = pid_get_core(*pid);
     if (disp_get_current_core_id() == core) {
-        return spawn_kill(*(domainid_t*)in_payload);
+        return kill_process_and_clean(*(domainid_t*)in_payload);
     } else {
         return forward_to_core(core, in_payload, in_size, out_payload, out_size);
     }
@@ -1010,27 +1046,9 @@ RPC_HANDLER(process_exit_handler)
     struct proc_node *proc = arg;
     assert(proc != NULL);
 
-    DEBUG_PRINTF("bye process %u!\n", proc->pid);
+//     DEBUG_PRINTF("bye process %u!\n", proc->pid);
 
-    errval_t err = spawn_kill(proc->pid);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "in spawn_kill");
-    }
-
-    // Notify the nameserver
-    if (aos_chan_is_connected(&nameserver_rpc.chan)) {
-        // XXX: magic number, put it in a shared header
-        err = aos_chan_send(&nameserver_rpc.chan, 1, NULL_CAP, &proc->pid, sizeof(domainid_t),
-                            true);
-        if (err_is_fail(err)) {
-            if (lmp_err_is_transient(err)) {
-                thread_yield();
-                return MON_ERR_RETRY;
-            }
-            return err;  // expose transient error to the user
-        }
-    }
-    return SYS_ERR_OK;
+    return kill_process_and_clean(proc->pid);
 }
 
 // Unfilled slots are NULL since global variables are initialized to 0
@@ -1061,6 +1079,7 @@ rpc_handler_t const rpc_handlers[INTERNAL_RPC_MSG_COUNT] = {
     [INTERNAL_RPC_REMOTE_CAP_TRANSFER] = remote_cap_transfer_handler,
     [INTERNAL_RPC_REMOTE_RAM_REQUEST] = remote_ram_request_handler,
     [INTERNAL_RPC_REMOTE_BIND_NAMESERVER] = remote_bind_nameserver_handler,
+    [INTERNAL_RPC_REMOTE_CLEAN_NAMESERVER] = remote_clean_nameserver_handler,
     [INTERNAL_RPC_GET_LOCAL_PIDS] = get_local_pids_handler,
     [RPC_FOPEN] = fopen_handler,
     [RPC_OPENDIR] = opendir_handler,

@@ -246,7 +246,7 @@ static errval_t setup_endpoint(struct spawninfo *si)
     if (err_is_fail(err)) {
         return err_push(err, SPAWN_ERR_COPY_DOMAIN_CAP);
     }
-	DEBUG_PRINTF("Endpoint setup done.\n");
+//	DEBUG_PRINTF("Endpoint setup done.\n");
 
     return SYS_ERR_OK;
 }
