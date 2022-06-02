@@ -17,13 +17,20 @@
 #define IP_DF 0x4000U        /* dont fragment flag */
 #define IP_MF 0x2000U        /* more fragments flag */
 #define IP_OFFMASK 0x1fffU   /* mask for fragmenting bits */
-#define IP_HLEN 20       /* Default size for ip header */
+#define IP_VERSION 4
+#define IP_HLEN_32 5
+#define IP_HLEN (4 * IP_HLEN_32)       /* Default size for ip header */
+#define IP_TOS 0
+#define IP_NO_FRAGMENT 0x0000U
+#define IP_TTL 255
+#define IP_NO_CHECKSUM 0 // The value is 0 before the computation
 #define IP_PROTO_ICMP    1
 #define IP_PROTO_IGMP    2
 #define IP_PROTO_UDP     17
 #define IP_PROTO_UDPLITE 136
 #define IP_PROTO_TCP     6
 
+#define IP_ADDR_LEN 4
 typedef uint32_t ip_addr_t;
 #define MK_IP(a,b,c,d) (((a)<<24)|((b)<<16)|((c)<<8)|(d))
 

@@ -1403,6 +1403,8 @@ errors sfn NIC_ERR_{
     failure ALLOC_QUEUE          "Failure allocating queue",
     failure ENQUEUE              "Failure during enqueue",
     failure QDRIVER              "Failure starting queue driver",
+    failure PORT_TAKEN           "Port has been handed out before",
+    failure PORT_AVAILABLE       "Port has been freed before",
 };
 
 errors queue QSERVICE_ERR_{

@@ -10,6 +10,11 @@
 #ifndef ENET_H_
 #define ENET_H_
 
+#include <aos/nameserver.h>
+#include <collections/hash_table.h>
+#include <drivers/enet.h>
+#include <netutil/etharp.h>
+#include <netutil/ip.h>
 
 //#define ENET_DEBUG_OPTION 1
 
@@ -85,6 +90,16 @@ struct enet_queue {
     struct region_entry* regions;
 };
 
+struct buf_node {
+    struct devq_buf buf;
+    struct buf_node *next;
+};
+
+struct cache_entry {
+    struct eth_addr mac;
+    struct buf_node *pending;
+};
+
 struct enet_driver_state {
     struct bfdriver_instance *bfi;
     struct capref regs;
@@ -93,12 +108,28 @@ struct enet_driver_state {
     struct enet_queue* rxq;
     struct enet_queue* txq;
     enet_t* d;
-    uint64_t mac;
+
+    struct eth_addr mac;
+    ip_addr_t ip_addr;
 
     uint32_t phy_id;
 
     struct capref rx_mem;
+    void *rx_mem_addr;
+    regionid_t rx_rid;
+
     struct capref tx_mem;
+    void *tx_mem_addr;
+    regionid_t tx_rid;
+    struct buf_node *tx_bufs;
+
+    collections_hash_table *arp_cache;
+
+    nameservice_chan_t *udp_ports;
+    struct enet_udp_res response;
+
+    uint16_t ip_id;
+    uint16_t next_port;
 };
 
 #define ENET_HASH_BITS 6

@@ -19,6 +19,7 @@
 #include <aos/nameserver.h>
 #include <aos/morecore.h>
 #include <aos/coreboot.h>
+#include <aos/deferred.h>
 #include <aos/paging.h>
 #include <aos/waitset.h>
 #include <aos/aos_rpc.h>
@@ -385,6 +386,14 @@ static int bsp_main(int argc, char *argv[])
 
         debug_print_cap_at_capref(buf, 1023, dev_cap_sdhc2);
         DEBUG_PRINTF("SDHC2 capability: %s\n", buf);
+
+		slot_alloc(&dev_cap_enet);
+		cap_retype(dev_cap_enet, dev_cap_full, IMX8X_ENET_BASE - dev_cap.u.devframe.base,
+                    ObjType_DevFrame, IMX8X_ENET_SIZE, 1);
+
+		debug_print_cap_at_capref(buf, 1023, dev_cap_enet);
+		DEBUG_PRINTF("ENET capability: %s\n", buf);
+
         break;
     default:
         dev_cap_sdhc2 = nullref;
@@ -415,6 +424,17 @@ static int bsp_main(int argc, char *argv[])
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "failed to start nameserver");
         exit(EXIT_FAILURE);
+    }
+
+    if (platform_info.platform == PI_PLATFORM_IMX8X) {
+        debug_printf("Spawn enet\n");
+        struct spawninfo enet_si;
+        domainid_t enet_pid;
+        err = spawn_load_by_name_with_cap("enet", dev_cap_enet, &enet_si, &enet_pid);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "failed to start enet");
+            exit(EXIT_FAILURE);
+        }
     }
 
     // Grading

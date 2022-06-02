@@ -13,3 +13,6 @@ module  /armv8/sbin/nameserver
 module  /armv8/sbin/nameservicetest
 module  /armv8/sbin/dummyservice
 module  /armv8/sbin/enumservice
+module  /armv8/sbin/enet
+module  /armv8/sbin/echo_server
+module  /armv8/sbin/nchat

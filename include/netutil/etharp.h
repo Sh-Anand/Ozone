@@ -27,6 +27,10 @@
 struct eth_addr {
     uint8_t addr[6];
 } __attribute__((__packed__));
+#define ETH_ADDR_EQUAL(a, b) (!memcmp(a, b, ETH_ADDR_LEN))
+
+static const struct eth_addr query_mac = { .addr = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
+static const struct eth_addr broadcast_mac = { .addr = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
 
 struct eth_hdr {
     struct eth_addr dst;

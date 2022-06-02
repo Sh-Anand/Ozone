@@ -26,6 +26,9 @@
 #define ICMP_IRQ 15    /* information request */
 #define ICMP_IR  16    /* information reply */
 
+#define ICMP_ECHO_CODE 0
+#define ICMP_NO_CHECKSUM 0
+
 enum icmp_dur_type {
   ICMP_DUR_NET   = 0,  /* net unreachable */
   ICMP_DUR_HOST  = 1,  /* host unreachable */
