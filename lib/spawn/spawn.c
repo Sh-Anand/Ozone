@@ -601,7 +601,7 @@ errval_t spawn_load_argv_complete(int argc, char *argv[], struct capref cap_to_t
     }
     node->dispatcher = si->dispatcher_cap_in_parent;
 	
-	DEBUG_PRINTF("testing path...\n");
+//	DEBUG_PRINTF("testing path...\n");
     // Setup endpoint
     err = setup_endpoint(si);
     if (err_is_fail(err)) {

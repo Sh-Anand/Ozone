@@ -411,7 +411,6 @@ static int bsp_main(int argc, char *argv[])
     
     // Booting other cores
     for (int i = 1; i < 4; i++) {
-        DEBUG_PRINTF("??? %d\n", i);
         err = boot_core(i);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "failed to boot core");

@@ -166,5 +166,19 @@ errval_t client_rpc(struct client_side_chan *chan, void *message, size_t bytes,
 }
 
 errval_t client_kill_by_pid(domainid_t pid) {
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+    struct client_side_chan *c, *tmp;
+    LIST_FOREACH_SAFE(c, &chans, link, tmp) {
+        if (c->pid == pid) {
+            err = aos_chan_deregister_recv(&c->rpc.chan);
+            if (err_is_fail(err)) {
+                return err_push(err, LIB_ERR_CHAN_DEREGISTER_RECV);
+            }
+
+            aos_rpc_destroy(&c->rpc);
+
+            delete_chan(c);
+        }
+    }
+    return SYS_ERR_OK;
 }

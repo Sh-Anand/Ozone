@@ -76,7 +76,10 @@ errval_t urpc_call_to_core(coreid_t core, rpc_identifier_t identifier, void *in_
     uint8_t *recv_payload = NULL;
     size_t recv_size = 0;
 
-    THREAD_MUTEX_ENTER(&chan->mutex)
+    if (!thread_mutex_trylock(&chan->mutex)) {
+        return MON_ERR_RETRY;
+    }
+    do
     {
         // Make the call
         err = aos_chan_send(chan, identifier, NULL_CAP, in_payload, in_size, false);
@@ -108,7 +111,7 @@ errval_t urpc_call_to_core(coreid_t core, rpc_identifier_t identifier, void *in_
         assert(recv_payload != NULL);
         assert(recv_size >= sizeof(rpc_identifier_t));
     }
-    THREAD_MUTEX_EXIT(&chan->mutex)
+    while(0); thread_mutex_unlock(&chan->mutex);
 
     // Handle error happened in the critical section
     if (err_is_fail(err)) {

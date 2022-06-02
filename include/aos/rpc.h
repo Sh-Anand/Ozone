@@ -166,8 +166,17 @@ static inline errval_t aos_rpc_call(struct aos_rpc *rpc, rpc_identifier_t identi
                                     size_t call_size, struct capref *ret_cap,
                                     void **ret_buf, size_t *ret_size)
 {
-    return aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
-                         ret_buf, ret_size);
+    errval_t err;
+    do {
+        err = aos_chan_call(&rpc->chan, identifier, call_cap, call_buf, call_size, ret_cap,
+                      ret_buf, ret_size);
+        if (err == MON_ERR_RETRY) {
+            thread_yield();
+        } else {
+            break;
+        }
+    } while (1);
+    return err;
 }
 
 #endif  // AOS_RPC_H

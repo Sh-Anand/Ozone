@@ -240,5 +240,19 @@ static AOS_CHAN_HANDLER(server_ump_handler)
 
 errval_t server_kill_by_pid(domainid_t pid)
 {
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+    struct server_side_chan *c, *tmp;
+    LIST_FOREACH_SAFE(c, &chans, link, tmp) {
+        if (c->pid == pid) {
+            err = aos_chan_deregister_recv(&c->chan);
+            if (err_is_fail(err)) {
+                return err_push(err, LIB_ERR_CHAN_DEREGISTER_RECV);
+            }
+
+            aos_chan_destroy(&c->chan);
+
+            delete_chan(c);
+        }
+    }
+    return SYS_ERR_OK;
 }

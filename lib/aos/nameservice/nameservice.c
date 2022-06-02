@@ -41,8 +41,10 @@ static errval_t ensure_nameserver_chan(void)
                            NULL, NULL);
         if (err == MON_ERR_RETRY) {
             thread_yield();
+        } else {
+            break;
         }
-    } while (err == MON_ERR_RETRY);
+    } while (1);
     if (err_is_fail(err)) {
         goto FAILURE_BIND_NAMESERVER_RPC;
     }

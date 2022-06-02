@@ -18,7 +18,7 @@ struct program {
     LIST_ENTRY(program) link;
 };
 
-static LIST_HEAD(, program) clients = LIST_HEAD_INITIALIZER(&clients);
+static LIST_HEAD(, program) programs = LIST_HEAD_INITIALIZER(&programs);
 
 struct service {
     char *name;  // hold the life cycle
@@ -51,7 +51,7 @@ RPC_HANDLER(nameserver_bind)
     domainid_t pid = *msg;
     struct capref frame = in_cap;
 
-    DEBUG_PRINTF("process %u bind\n", pid);
+//    DEBUG_PRINTF("process %u bind\n", pid);
 
     errval_t err;
 
@@ -101,7 +101,7 @@ RPC_HANDLER(nameserver_bind)
         goto FAILURE;
     }
 
-    LIST_INSERT_HEAD(&clients, b, link);
+    LIST_INSERT_HEAD(&programs, b, link);
     return SYS_ERR_OK;
 
 FAILURE:
@@ -112,6 +112,24 @@ FAILURE:
     }
     free(b);
     return err;
+}
+
+RPC_HANDLER(nameserver_kill_by_pid)
+{
+    CAST_IN_MSG_EXACT_SIZE(msg, domainid_t);
+    domainid_t pid = *msg;
+
+    struct service *s, *tmp;
+    RB_FOREACH_SAFE(s, service_rb_tree, &services, tmp) {
+        if (s->program->pid == pid) {
+            RB_REMOVE(service_rb_tree, &services, s);
+            free(s);
+        }
+    }
+
+    // FIXME: delete programs and notifier the remaining programs
+
+    return SYS_ERR_OK;
 }
 
 static rpc_handler_t const rpc_handlers[NAMESERVICE_RPC_COUNT];
@@ -136,7 +154,7 @@ RPC_HANDLER(handle_register)
 
     CAST_IN_MSG_AT_LEAST_SIZE(name, char);
 
-    DEBUG_PRINTF("process %u register \"%s\"\n", server->pid, name);
+//    DEBUG_PRINTF("process %u register \"%s\"\n", server->pid, name);
 
     // Check for duplication
     if (find_service(name) != NULL) {
@@ -161,7 +179,7 @@ RPC_HANDLER(handle_deregister)
 
     CAST_IN_MSG_AT_LEAST_SIZE(name, char);
 
-    DEBUG_PRINTF("%u process deregister \"%s\"\n", server->pid, name);
+//    DEBUG_PRINTF("%u process deregister \"%s\"\n", server->pid, name);
 
     struct service *service = find_service(name);
     if (service == NULL) {
@@ -183,7 +201,7 @@ RPC_HANDLER(handle_lookup)
 
     CAST_IN_MSG_AT_LEAST_SIZE(name, char);
 
-    DEBUG_PRINTF("process %u lookup \"%s\"\n", client->pid, name);
+//    DEBUG_PRINTF("process %u lookup \"%s\"\n", client->pid, name);
 
     struct service *service = find_service(name);
     if (service == NULL) {
@@ -227,12 +245,12 @@ static bool startswith(const char *pre, const char *str)
 
 RPC_HANDLER(handle_enumerate)
 {
-    struct program *client = arg;
+//    struct program *client = arg;
 //    errval_t err;
 
     CAST_IN_MSG_AT_LEAST_SIZE(query, char);
 
-    DEBUG_PRINTF("process %u enumerate \"%s\"\n", client->pid, query);
+//    DEBUG_PRINTF("process %u enumerate \"%s\"\n", client->pid, query);
 
     struct service *matched[MAX_ENUM_COUNT];
     size_t count = 0;
@@ -272,8 +290,18 @@ struct aos_chan init_listener;
 
 static AOS_CHAN_HANDLER(init_msg_handler)
 {
-    return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap,
-                           out_cap);
+    switch (identifier) {
+    // XXX: magic numbers, put them in a shared header
+    case 0:
+        return nameserver_bind(NULL, in_payload, in_size, out_payload, out_size, in_cap,
+                               out_cap);
+    case 1:
+        return nameserver_kill_by_pid(NULL, in_payload, in_size, out_payload, out_size, in_cap,
+                               out_cap);
+    default:
+        return ERR_INVALID_ARGS;
+    }
+
 }
 
 int main(int argc, char *argv[])
@@ -302,7 +330,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    DEBUG_PRINTF("nameserver start\n");
+    DEBUG_PRINTF("nameserver starts\n");
 
     struct waitset *default_ws = get_default_waitset();
     while (true) {

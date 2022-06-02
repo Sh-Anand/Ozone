@@ -87,7 +87,12 @@ static errval_t ump_send_cap(struct ump_chan *uc, struct capref call_cap)
         do {
             err = rpc_lmp_call(&get_init_rpc()->chan, RPC_TRANSFER_CAP, call_cap,
                                &uc->pid, sizeof(uc->pid), NULL, NULL, NULL, true);
-        } while (err_is_fail(err) && err == MON_ERR_CAP_SEND_TRANSIENT);
+            if (err == MON_ERR_RETRY) {
+                thread_yield();
+            } else {
+                break;
+            }
+        } while (1);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "ump_send_cap: cap transfer step 3 fail\n");
             THREAD_MUTEX_BREAK;

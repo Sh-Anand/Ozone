@@ -20,7 +20,7 @@ extern spinlock_t* global_print_lock;
 //spinlock_t* terminal_read_lock;
 volatile domainid_t terminal_read_recipient;
 
-#define DEBUG_RPC_HANDLERS 1
+#define DEBUG_RPC_HANDLERS 0
 
 /*
  * Init values: *out_payload = NULL, *out_size = 0, *out_cap = NULL_CAP (nothing to reply)
@@ -793,7 +793,7 @@ RPC_HANDLER(cap_transfer_handler)
         err = rpc_lmp_put_cap(&chan->lc, in_cap);  // not blocking, may return failure
         if (err_is_fail(err)) {
             if (lmp_err_is_transient(err)) {
-                return MON_ERR_CAP_SEND_TRANSIENT;
+                return MON_ERR_RETRY;
             } else {
                 return err;
             }
@@ -901,7 +901,7 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
                                               struct capref *out_frame)
 {
     // Wait for the nameserver to online
-    if (nameserver_rpc.chan.lc.connstate != LMP_CONNECTED) {
+    if (!aos_chan_is_connected(&nameserver_rpc.chan)) {
         thread_yield();
         return MON_ERR_RETRY;
     }
@@ -914,12 +914,12 @@ static errval_t coordinate_nameserver_binding(domainid_t client_pid,
         return err_push(err, LIB_ERR_FRAME_ALLOC);
     }
 
+    // XXX: magic number, put it in a shared header
     err = aos_chan_send(&nameserver_rpc.chan, 0, frame, &client_pid, sizeof(domainid_t),
                         true);
     if (err_is_fail(err)) {
         cap_destroy(frame);
         if (lmp_err_is_transient(err)) {
-            cap_destroy(frame);
             thread_yield();
             return MON_ERR_RETRY;
         }
@@ -1010,14 +1010,26 @@ RPC_HANDLER(process_exit_handler)
     struct proc_node *proc = arg;
     assert(proc != NULL);
 
-    DEBUG_PRINTF("Bye process %u!\n", proc->pid);
+    DEBUG_PRINTF("bye process %u!\n", proc->pid);
 
     errval_t err = spawn_kill(proc->pid);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in spawn_kill");
     }
 
-    *out_size = -1;  // do not reply
+    // Notify the nameserver
+    if (aos_chan_is_connected(&nameserver_rpc.chan)) {
+        // XXX: magic number, put it in a shared header
+        err = aos_chan_send(&nameserver_rpc.chan, 1, NULL_CAP, &proc->pid, sizeof(domainid_t),
+                            true);
+        if (err_is_fail(err)) {
+            if (lmp_err_is_transient(err)) {
+                thread_yield();
+                return MON_ERR_RETRY;
+            }
+            return err;  // expose transient error to the user
+        }
+    }
     return SYS_ERR_OK;
 }
 

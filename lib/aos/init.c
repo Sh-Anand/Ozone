@@ -63,7 +63,7 @@ void libc_exit(int status)
 	
 	aos_rpc_serial_release(aos_rpc_get_serial_channel());
 	
-    errval_t err = aos_chan_send(&get_init_rpc()->chan, RPC_BYE, NULL_CAP, NULL, 0, false);
+    errval_t err = aos_rpc_call(get_init_rpc(), RPC_BYE, NULL_CAP, NULL, 0, NULL, NULL, NULL);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "in RPC_BYE");
     }

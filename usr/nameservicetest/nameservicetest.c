@@ -56,14 +56,13 @@ static int printf_in_frame(struct capref *frame, const char *format, ...)
     return ret;
 }
 
-static void debug_printf_frame(struct capref rx_cap, const char *name) {
+static void printf_frame(struct capref rx_cap, const char *name) {
     errval_t err;
 
     void *buf;
     err = paging_map_frame_complete(get_current_paging_state(), &buf, rx_cap);
     PANIC_IF_FAIL(err, "failed map rx_cap\n");
-    debug_printf("%s: got a frame cap \"%s\"\n", name,
-                 (const char *)buf);
+    printf("and a frame cap \"%s\"\n", (const char *)buf);
     err = paging_unmap(get_current_paging_state(), buf);
     PANIC_IF_FAIL(err, "failed unmap rx_cap\n");
 }
@@ -91,7 +90,7 @@ static void run_client(void)
     size_t request_size = strlen(myrequest);
 
     struct capref tx_cap;
-    printf_in_frame(&tx_cap, "client of process %u on core %u", disp_get_domain_id(),
+    printf_in_frame(&tx_cap, "client %u on core %u", disp_get_domain_id(),
                     disp_get_core_id());
 
     struct capref rx_cap;
@@ -104,19 +103,19 @@ static void run_client(void)
                           rx_cap);
     PANIC_IF_FAIL(err, "failed to do the nameservice rpc\n");
 
-    debug_printf("client: got response \"%s\"\n", (char *)response);
+    debug_printf("client: got response \"%s\" ", (char *)response);
 
     struct capability c;
     err = cap_direct_identify(rx_cap, &c);
     if (err == SYS_ERR_CAP_NOT_FOUND) {
-        debug_printf("client: no cap received\n");
+        printf("and no cap received\n");
     } else {
         switch (c.type) {
         case ObjType_Frame: {
-            debug_printf_frame(rx_cap, "client");
+            printf_frame(rx_cap, "client");
         } break;
         default:
-            debug_printf("client: got a cap with type %u\n", c.type);
+            printf("and a cap with type %u\n", c.type);
         }
     }
 }
@@ -135,7 +134,7 @@ static void server_recv_handler(void *st, void *message, size_t bytes, void **re
                                 size_t *response_bytes, struct capref rx_cap,
                                 struct capref *tx_cap)
 {
-    debug_printf("server: got a request \"%s\"\n", (char *)message);
+    debug_printf("server: got a request \"%s\" ", (char *)message);
 
     received_count++;
 
@@ -149,15 +148,15 @@ static void server_recv_handler(void *st, void *message, size_t bytes, void **re
 
         switch (c.type) {
         case ObjType_Frame: {
-            debug_printf_frame(rx_cap, "server");
+            printf_frame(rx_cap, "server");
         } break;
         default:
-            debug_printf("server: got a cap with type %u\n", c.type);
+            printf("and a cap with type %u\n", c.type);
         }
     }
 
     // Send a frame back
-    printf_in_frame(tx_cap, "server of process %u on core %u", disp_get_domain_id(),
+    printf_in_frame(tx_cap, "server %u on core %u", disp_get_domain_id(),
                     disp_get_core_id());
 
     *response = myresponse;
