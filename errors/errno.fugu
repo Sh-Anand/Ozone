@@ -598,6 +598,7 @@ errors monitor MON_ERR_ {
 errors nameserver NAMESERVER_ERR_ {
     failure NAME_CONFLICT   "A service with the same name is already registered",
     failure NOT_FOUND       "Cannot find the service with the given name",
+    failure DEREG_NOT_ALLOWED       "Service is only allowed to be deregistered from the same process",
 };
 
 // errors related to the routing library

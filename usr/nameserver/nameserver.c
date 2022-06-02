@@ -167,7 +167,9 @@ RPC_HANDLER(handle_deregister)
     if (service == NULL) {
         return NAMESERVER_ERR_NOT_FOUND;
     }
-    // TODO: check for pid
+    if (service->program != server) {
+        return NAMESERVER_ERR_DEREG_NOT_ALLOWED;
+    }
     RB_REMOVE(service_rb_tree, &services, service);
     free(service->name);
     free(service);

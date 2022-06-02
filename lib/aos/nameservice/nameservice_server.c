@@ -46,6 +46,7 @@ static errval_t create_service(const char *name,
     }
     service->name = strdup(name);
     service->recv_handler = recv_handler;
+    service->pending_lmp_chan = NULL;
     service->st = st;
     *ret = service;
     LIST_INSERT_HEAD(&services, service, link);

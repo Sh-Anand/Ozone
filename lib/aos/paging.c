@@ -447,7 +447,7 @@ static inline errval_t lookup_or_create_region_node(struct paging_state *st,
     errval_t err = SYS_ERR_OK;
 
     struct paging_region_node *node;
-    THREAD_MUTEX_ENTER(&st->region_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->region_mutex)
     {
         node = rb_region_find(st, addr);
         if (node == NULL && create) {
@@ -713,7 +713,7 @@ static errval_t map_frame(struct paging_state *st, lvaddr_t addr, struct capref 
 
         // Get the L3 page table node
         struct paging_vnode_node *l3_node = NULL;
-        THREAD_MUTEX_ENTER(&st->vnode_mutex)
+        THREAD_MUTEX_ENTER_NESTED(&st->vnode_mutex)
         {
             err = lookup_or_create_vnode_node(st, 3, l3_addr, &l3_node);
         }
@@ -790,7 +790,7 @@ static errval_t map_naturally_aligned_fixed(struct paging_state *st, lvaddr_t va
     struct paging_region_node *node = NULL;
     struct paging_mapping_node *mapping = NULL;
 
-    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->free_list_mutex)
     {
         // Find a free block as small as possible
         for (uint8_t b = bits; b <= PAGING_ADDR_BITS; b++) {
@@ -990,7 +990,7 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
     struct paging_region_node *node = NULL;
 
     // Fast path: start from align_bits
-    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->free_list_mutex)
     {
         for (uint8_t b = max(bits, align_bits); b <= PAGING_ADDR_BITS; b++) {
             if (!LIST_EMPTY(free_list_head(st, b))) {
@@ -1021,7 +1021,7 @@ static errval_t map_dynamic(struct paging_state *st, void **buf, size_t bytes,
         // Slow path: try every available region
         lvaddr_t align_mask = MASK(align_bits);
 
-        THREAD_MUTEX_ENTER(&st->free_list_mutex)
+        THREAD_MUTEX_ENTER_NESTED(&st->free_list_mutex)
         {
             for (uint8_t b = bits; b < align_bits; b++) {
                 LIST_FOREACH(node, free_list_head(st, b), fl_link)
@@ -1175,7 +1175,7 @@ static errval_t unmap(struct paging_state *st, lvaddr_t vaddr)
     mapping = NULL;
 
     // Merge node iteratively
-    THREAD_MUTEX_ENTER(&st->free_list_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->free_list_mutex)
     {
         while (node->bits < PAGING_ADDR_BITS) {
             // Lookup buddy node
@@ -1306,7 +1306,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
 
     errval_t err;
     struct paging_vnode_node *l0 = NULL;
-    THREAD_MUTEX_ENTER(&st->vnode_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->vnode_mutex)
     {
         err = create_vnode_node(st, 0, 0, &l0);
     }
@@ -1318,7 +1318,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
     l0->vnode_cap = pdir;
 
     struct paging_region_node *init_region = NULL;
-    THREAD_MUTEX_ENTER(&st->region_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&st->region_mutex)
     {
         err = create_region_node(st, 0, PAGING_ADDR_BITS, &init_region);
     }
@@ -1411,7 +1411,7 @@ errval_t paging_init_onthread(struct thread *t)
     struct capref frame = NULL_CAP;
 
 
-    THREAD_MUTEX_ENTER(&get_current_paging_state()->frame_alloc_mutex)
+    THREAD_MUTEX_ENTER_NESTED(&get_current_paging_state()->frame_alloc_mutex)
     {
         err = frame_alloc(&frame, EXCEPTION_STACK_SIZE, NULL);
         if (err_is_fail(err)) {
@@ -1572,7 +1572,7 @@ static void page_fault_handler(enum exception_type type, int subtype, void *addr
         errval_t err;
         struct capref frame = NULL_CAP;
 
-        THREAD_MUTEX_ENTER(&get_current_paging_state()->frame_alloc_mutex)
+        THREAD_MUTEX_ENTER_NESTED(&get_current_paging_state()->frame_alloc_mutex)
         {
             err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
             if (err_is_fail(err)) {

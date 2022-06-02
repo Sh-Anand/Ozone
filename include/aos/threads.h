@@ -122,11 +122,13 @@ static inline void thread_once(thread_once_t *control, void (*func)(void)) {
  */
 void thread_set_status(int status);
 
-#define THREAD_MUTEX_ENTER(mutex) thread_mutex_lock_nested(mutex); do
+#define THREAD_MUTEX_ENTER(mutex) thread_mutex_lock(mutex); do
+#define THREAD_MUTEX_ENTER_NESTED(mutex) thread_mutex_lock_nested(mutex); do
 #define THREAD_MUTEX_BREAK        break
 #define THREAD_MUTEX_EXIT(mutex)  while(0); thread_mutex_unlock(mutex);
 
-#define THREAD_MUTEX_ENTER_IF(mutex, b) if (b) { thread_mutex_lock_nested(mutex); } do
+#define THREAD_MUTEX_ENTER_IF(mutex, b) if (b) { thread_mutex_lock(mutex); } do
+#define THREAD_MUTEX_ENTER_NESTED_IF(mutex, b) if (b) { thread_mutex_lock_nested(mutex); } do
 #define THREAD_MUTEX_EXIT_IF(mutex, b)  while(0); if (b) { thread_mutex_unlock(mutex); }
 
 __END_DECLS

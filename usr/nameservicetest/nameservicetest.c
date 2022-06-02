@@ -203,6 +203,12 @@ static void run_server(void)
     while (received_count < 8) {
         event_dispatch(get_default_waitset());
     }
+
+    debug_printf("deregister '%s'\n", SERVICE_NAME2);
+    err = nameservice_deregister(SERVICE_NAME2);
+    PANIC_IF_FAIL(err, "failed to deregister...\n");
+
+    test_enumerate("");
 }
 
 /*
