@@ -136,12 +136,6 @@ static errval_t get_no_cache_frame(int size, lpaddr_t *paddr, lpaddr_t *vaddr, s
     return SYS_ERR_OK;
 }
 
-// static void print_block(uint8_t *data) {
-//     for(int i=0;i<SDHC_BLOCK_SIZE;i++)
-//         DEBUG_PRINTF("%d, ", *(data + i));
-//     DEBUG_PRINTF("\n");
-// }
-
 // //Read logical sector <sector> and return a pointer to the info
 // static errval_t sd_read_sector(int sector, void *data)__attribute__((optimize ("Os")));
 
@@ -249,7 +243,6 @@ static errval_t refill_free_clusters(void) {
     //read first sector as offset may not be zero
     CHECK_ERR(sd_read_sector(FAT_SECTOR(DATA_CLUSTER_START), FAT_block), "FAT sector read failed");
 
-    size_t pre_sz = manager->free_clusters->size; 
     //iterate through free clusters
     int blocks = FREE_CLUSTERS_SCANNED_BLOCKS - 1;
     while((manager->FreeClustersToCheckFrom != manager->TotalClusters)) {
@@ -272,8 +265,6 @@ static errval_t refill_free_clusters(void) {
 
         manager->FreeClustersToCheckFrom++;
     }
-
-    DEBUG_PRINTF("Found %d free clusters\n", manager->free_clusters->size - pre_sz);
 
     return SYS_ERR_OK;
 }
@@ -509,7 +500,6 @@ static errval_t extend_dirent_by_one_cluster(struct fat32_dirent *dir, int last_
     else if(last_cluster == 0) {
         //write back to the sector of this dirent
         uint8_t dir_data[SDHC_BLOCK_SIZE];
-        DEBUG_PRINTF("DIR's sector is %d ?\n", dir->sector);
         CHECK_ERR(sd_read_sector(dir->sector, dir_data), "");
         assert(dir->FstCluster == *retcluster);
         marshall_directory_entry(dir, dir_data + dir->sector_offset);
@@ -664,7 +654,6 @@ static errval_t find_dirent(const char *mount_point, const char *path, bool CREA
         dir = root_directory;
     }
     else {
-        DEBUG_PRINTF("Ah this is happening?\n");
         return FS_ERR_NOTFOUND;
     }
 
@@ -684,7 +673,6 @@ static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, i
     // DEBUG_PRINTF("DONE FINDING DIRENT AT SECTOR, OFFSET %d, %d\n", dir->sector, dir->sector_offset);
     
     if(!(dir->Attr & ATTR)) {
-        DEBUG_PRINTF("were dying here?\n");
         return ERR;
     }
     
@@ -801,12 +789,12 @@ errval_t fat32_init(char *mnt) {
 
 errval_t fat32_open(const char *path, fat32_handle_t *rethandle) {
     errval_t err;
-    DEBUG_PRINTF("OPENING %s\n", path);
+
     struct fat32_handle *handle;
     CHECK_ERR(open_dirent(path, &handle, ATTR_ARCHIVE, false, FS_ERR_NOTFILE), "failed to open file");
     handle->isdir = false;
     *rethandle = handle;
-    DEBUG_PRINTF("RETURNING HANDLE %d for %s\n", *rethandle, path);
+
     return SYS_ERR_OK;
 }
 
@@ -907,7 +895,6 @@ static void close_handle(struct fat32_handle *handle) {
 }
 
 errval_t fat32_close(fat32_handle_t inhandle) {
-    DEBUG_PRINTF("CLOSING FILE\n");
     struct fat32_handle *handle = inhandle;
     if(handle->isdir)
         return FS_ERR_NOTFILE;
@@ -966,7 +953,7 @@ errval_t fat32_read(fat32_handle_t handle, void *buffer, size_t bytes, size_t *b
 errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, size_t *bytes_written) {
     errval_t err;
     struct fat32_handle *fhandle = handle;
-    DEBUG_PRINTF("FAT32 WRITING %d bytes into %s, at sector and offset %d, %d\n", bytes, fhandle->dirent->name, fhandle->dirent->sector, fhandle->dirent->sector_offset);
+    //DEBUG_PRINTF("FAT32 WRITING %d bytes into %s, at sector and offset %d, %d\n", bytes, fhandle->dirent->name, fhandle->dirent->sector, fhandle->dirent->sector_offset);
     uint8_t data[SDHC_BLOCK_SIZE];
     size_t start_bytes = bytes;
     while(bytes != 0) {
@@ -981,11 +968,8 @@ errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, si
                     *bytes_written = start_bytes - bytes;
 
                 int last_cluster;
-                DEBUG_PRINTF("Getting last cluster\n");
                 CHECK_ERR(get_last_cluster(fhandle->dirent->FstCluster, &last_cluster), "");
-                DEBUG_PRINTF("Extending\n");
                 CHECK_ERR(extend_dirent_by_one_cluster(fhandle->dirent, last_cluster, &last_cluster), "");
-                DEBUG_PRINTF("Extension worked?\n");
                 sector = FIRST_SECTOR_OF_CLUSTER(last_cluster);
                 offset = 0;
             }
@@ -1006,7 +990,7 @@ errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, si
 
     //write new size back to dirent
     if(start_bytes - bytes > 0) {
-        fhandle->dirent->size += (start_bytes - bytes);
+        fhandle->dirent->size = fhandle->pos;
         CHECK_ERR(sd_read_sector(fhandle->dirent->sector, data), "");
         marshall_directory_entry(fhandle->dirent, data + fhandle->dirent->sector_offset);
         CHECK_ERR(sd_write_sector(fhandle->dirent->sector, data), "");
@@ -1018,7 +1002,6 @@ errval_t fat32_write(fat32_handle_t handle, const void *buffer, size_t bytes, si
     if(start_bytes == bytes)
         return FS_ERR_EOF;
     
-    DEBUG_PRINTF("SUCCESSFUL FAT32 WRITE\n");
     return SYS_ERR_OK;
 }
 
