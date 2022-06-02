@@ -731,7 +731,7 @@ static errval_t send_ip(struct enet_driver_state *st, struct buf_node *tx_buf, i
     hdr->tos = IP_TOS;
     hdr->len = htons(tx_buf->buf.valid_length);
     hdr->id = htons(st->ip_id++);
-    hdr->offset = htons(IP_NO_FRAGMENT);
+    hdr->offset = htons(IP_DF);
     hdr->ttl = IP_TTL;
     hdr->proto = proto;
     hdr->chksum = htons(IP_NO_CHECKSUM);
