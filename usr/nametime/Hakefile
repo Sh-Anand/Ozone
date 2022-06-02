@@ -1,0 +1,6 @@
+[ build application 
+  { 
+    target = "nametime",
+    cFiles = [ "nametime.c" ]
+  }
+]
