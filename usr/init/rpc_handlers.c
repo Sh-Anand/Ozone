@@ -537,7 +537,6 @@ RPC_HANDLER(opendir_handler)
 RPC_HANDLER(fclose_handler)
 {
     if (disp_get_current_core_id() == 0) {
-        DEBUG_PRINTF("AFTER HANDLER?\n");
         handle_t handle = *(handle_t *) in_payload;
         errval_t err = fat32_close(handle);
         *out_payload = NULL;
