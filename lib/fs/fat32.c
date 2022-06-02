@@ -644,31 +644,36 @@ static errval_t search_dirent(struct fat32_dirent *curr, const char *path, bool 
     return SYS_ERR_OK;
 }
 
-//given a mount point and a path, find and return the directory entry
-static errval_t find_dirent(const char *mount_point, const char *path, bool CREATE_IF_NOT_EXIST, uint8_t Attr, struct fat32_dirent **retent) {
-    errval_t err;
-
-    bool from_root = strstr(path, mount_point) == path;
-
-    struct fat32_dirent *dir;
-    if(from_root) {
-        path += strlen(mount_point);
-        dir = root_directory;
-    }
-    else {
-        return FS_ERR_NOTFOUND;
-    }
-
-    CHECK_ERR_PUSH(search_dirent(dir, path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
-    // DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
-
-    return SYS_ERR_OK;
-}
-
 static void strtoupper(char *s) {
     for(int i=0;i<strlen(s);i++)
         if(isalpha(s[i]))
             s[i] = toupper(s[i]);
+}
+
+//given a mount point and a path, find and return the directory entry
+static errval_t find_dirent(const char *mount_point, const char *path, bool CREATE_IF_NOT_EXIST, uint8_t Attr, struct fat32_dirent **retent) {
+    errval_t err;
+
+    char *clean_path = malloc(strlen(path) + 1);
+    strcpy(clean_path, path);
+    strtoupper(clean_path);
+
+    bool from_root = strstr(clean_path, mount_point) == clean_path;
+
+    struct fat32_dirent *dir;
+    if(from_root) {
+        clean_path += strlen(mount_point);
+        dir = root_directory;
+    }
+    else {
+        DEBUG_PRINTF("Ah this is happening?\n");
+        return FS_ERR_NOTFOUND;
+    }
+
+    CHECK_ERR_PUSH(search_dirent(dir, clean_path, CREATE_IF_NOT_EXIST, Attr, retent), FS_ERR_SEARCH_FAIL);
+    // DEBUG_PRINTF("DONE SEARCHING DIRENT, AT SECTOR AND OFFSET %d, %d\n", dir->sector, dir->sector_offset);
+
+    return SYS_ERR_OK;
 }
 
 static errval_t open_dirent(const char *path, struct fat32_handle **rethandle, int ATTR, bool CREATE, errval_t ERR) {
@@ -924,6 +929,8 @@ errval_t fat32_mkdir(const char *path) {
     errval_t err;
 
     struct fat32_dirent *h;
+    DEBUG_PRINTF("FAT32 MKDIR %s\n", path);
+
     CHECK_ERR(find_dirent(manager->mount, path, true, ATTR_DIRECTORY, &h), "mkdir failed");
 
     return SYS_ERR_OK;

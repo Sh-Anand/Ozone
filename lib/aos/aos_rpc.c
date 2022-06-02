@@ -388,6 +388,7 @@ errval_t aos_rpc_mkdir(struct aos_rpc *rpc, const char *path)
     void *return_msg = NULL;
     size_t return_size = 0;
 
+    DEBUG_PRINTF("In mkdir RPC SEND\n");
     errval_t err = aos_rpc_call(rpc, RPC_MKDIR, NULL_CAP, path, strlen(path), NULL, &return_msg, &return_size);
 
     return err;
