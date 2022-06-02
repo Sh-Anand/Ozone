@@ -199,6 +199,29 @@ static void sh_rm(struct shell_env *env)
 	return;
 }
 
+static void sh_rmdir(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: rmdir <path...>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	errval_t err;
+	for (size_t i = 1; i < env->argc; i++) {
+		char* path = sanitize_path(env, env->argv[i]);
+		
+		err = rmdir(path);
+		
+		if (err_is_fail(err)) printf("Failed to delete %s (err: %s)\n", path, err_getcode(err));
+		
+		free(path);
+	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
 static void sh_touch(struct shell_env *env)
 {
 	if (env->argc < 2) {
@@ -548,10 +571,12 @@ int builtin(struct shell_env *env)
 	REGISTER_BUILTIN(cd);
 	REGISTER_BUILTIN(pwd);
 	REGISTER_BUILTIN(rm);
+	REGISTER_BUILTIN(rmdir);
 	REGISTER_BUILTIN(touch);
 	REGISTER_BUILTIN(write);
 	REGISTER_BUILTIN(append);
 	
+	// path sanitizer
 	REGISTER_BUILTIN(san);
 	
 	return 0; // no builtin has been found
