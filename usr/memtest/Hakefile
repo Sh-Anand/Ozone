@@ -1,0 +1,6 @@
+[ build application 
+  { 
+    target = "memtest",
+    cFiles = [ "main.c", "tester.c" ]
+  }
+]
