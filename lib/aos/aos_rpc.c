@@ -109,18 +109,31 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
     return err;
 }
 
+#ifndef min
+#    define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 errval_t aos_rpc_serial_puts(struct aos_rpc *rpc, const char *buf, size_t len, size_t *retlen)
 {
-	size_t *rbuf = NULL;
-	size_t rlen = 0;
+    errval_t err = SYS_ERR_OK;
+
+    *retlen =  0;
 	char* tmp_buf = alloca(len+1);
 	memcpy(tmp_buf, buf, len);
 	tmp_buf[len] = 0;
-	errval_t err = aos_rpc_call(rpc, RPC_TERMINAL_PUTS, NULL_CAP, tmp_buf, len+1, NULL, (void**)&rbuf, &rlen);
-	
-	assert(rlen >= sizeof(size_t));
-	*retlen = *rbuf;
-	free(rbuf);
+
+    for (size_t offset = 0; offset < len + 1; offset += 30) {
+        size_t *rbuf = NULL;
+        size_t rlen = 0;
+        err = aos_rpc_call(rpc, RPC_TERMINAL_PUTS, NULL_CAP, tmp_buf + offset, min(30, len + 1 - offset),
+                                    NULL, (void **)&rbuf, &rlen);
+        assert(rlen >= sizeof(size_t));
+        *retlen += *rbuf;
+        free(rbuf);
+        if (err_is_fail(err)) {
+            break;
+        }
+    }
 		
 	return err;
 }
