@@ -163,8 +163,8 @@ static errval_t software_reset(struct sdhc_s *sd){
     sdhc_vend_spec_cken_wrf(&sd->dev, 0);
 
     sdhc_sys_ctrl_t s = 0;
-    s = sdhc_sys_ctrl_dvs_insert(s, 0x1); // used to be 0xf
-    s = sdhc_sys_ctrl_sdclkfs_insert(s, 0x01); // used to be 0x10
+    s = sdhc_sys_ctrl_dvs_insert(s, 0xf); // used to be 0xf
+    s = sdhc_sys_ctrl_sdclkfs_insert(s, 0x10); // used to be 0x10
     s = sdhc_sys_ctrl_dtocv_insert(s, 0xc);
     sdhc_sys_ctrl_wr(&sd->dev, s);
 
@@ -225,7 +225,7 @@ static errval_t sdhc_send_cmd(struct sdhc_s * sd, struct cmd * cmd) {
         DEBUG("Card busy!\n");
     }
     DEBUG("Card ready (data & cmd inhibit are clear)!\n");
-    barrelfish_usleep(325);
+    barrelfish_usleep(10000);
 
     // Clear interrupts
     sdhc_int_status_rawwr(&sd->dev, ~0x0);

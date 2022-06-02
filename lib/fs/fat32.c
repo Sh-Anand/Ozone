@@ -160,7 +160,7 @@ static errval_t sd_read_sector(int sector, void *data) {
     //DEBUG_PRINTF("%d", *(uint8_t *)vaddr);
     //DEBUG_PRINTF("");
     // print_block((uint8_t *) vaddr);
-	barrelfish_usleep(125);
+	barrelfish_usleep(25000);
 
     memcpy(data, (void *)vaddr, SDHC_BLOCK_SIZE);
     
