@@ -190,10 +190,113 @@ static void sh_rm(struct shell_env *env)
 		
 		err = rm(path);
 		
-		if (err_is_fail(err)) printf("Failed to delete %s\n", path);
+		if (err_is_fail(err)) printf("Failed to delete %s (err: %s)\n", path, err_getcode(err));
 		
 		free(path);
 	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_rmdir(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: rmdir <path...>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	errval_t err;
+	for (size_t i = 1; i < env->argc; i++) {
+		char* path = sanitize_path(env, env->argv[i]);
+		
+		err = rmdir(path);
+		
+		if (err_is_fail(err)) printf("Failed to delete %s (err: %s)\n", path, err_getcode(err));
+		
+		free(path);
+	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_touch(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: touch <path...>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	for (size_t i = 1; i < env->argc; i++) {
+		char* path = sanitize_path(env, env->argv[i]);
+		
+		FILE* f = fopen(path, "w");
+		fclose(f);
+		
+		//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+		
+		free(path);
+	}
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_write(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: write <path> <tokens>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	char* path = sanitize_path(env, env->argv[1]);
+	FILE* f = fopen(path, "w");
+	
+	if (env->argc > 2) { // if there are more arguments, print them line by line
+		for (int i = 2; i < env->argc; i++) {
+			fprintf(f, "%s\n", env->argv[i]);
+		}
+	}
+	fflush(f);
+	fclose(f);
+	
+	//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+	
+	free(path);
+	
+	env->last_return_status = 0;
+	return;
+}
+
+static void sh_append(struct shell_env *env)
+{
+	if (env->argc < 2) {
+		printf("usage: append <path> <tokens>\n");
+		env->last_return_status = 0;
+		return;
+	}
+	
+	//errval_t err;
+	char* path = sanitize_path(env, env->argv[1]);
+	FILE* f = fopen(path, "a");
+	
+	if (env->argc > 2) { // if there are more arguments, print them line by line
+		for (int i = 2; i < env->argc; i++) {
+			fprintf(f, "%s\n", env->argv[i]);
+		}
+	}
+	fflush(f);
+	fclose(f);
+	
+	//if (err_is_fail(err)) printf("Failed to create %s (err: %s)\n", path, err_getcode(err));
+	
+	free(path);
 	
 	env->last_return_status = 0;
 	return;
@@ -286,7 +389,7 @@ static void sh_ps(struct shell_env *env)
 	struct aos_rpc *rpc = aos_rpc_get_process_channel();
 	
 	domainid_t *pids;
-	const char* line_format = "  % 6d   %s\n";
+	const char* line_format = "% 12d   %s\n";
 	size_t npids, out_size = 1024, out_offset = 0, overhead_length = strlen(line_format);
 	char* name;
 	char* out_text = (char*)malloc(sizeof(char) * out_size);
@@ -372,7 +475,7 @@ static void sh_oncore(struct shell_env *env)
 	for (size_t i = 2; i < env->argc; i++) {
 		size_t sl = strlen(env->argv[i]);
 		memcpy(tmp_cmd_buffer + offset, env->argv[i], sl);
-		tmp_cmd_buffer[sl] = ' ';
+		tmp_cmd_buffer[offset + sl] = ' ';
 		offset += sl + 1;
 	}
 	
@@ -468,7 +571,12 @@ int builtin(struct shell_env *env)
 	REGISTER_BUILTIN(cd);
 	REGISTER_BUILTIN(pwd);
 	REGISTER_BUILTIN(rm);
+	REGISTER_BUILTIN(rmdir);
+	REGISTER_BUILTIN(touch);
+	REGISTER_BUILTIN(write);
+	REGISTER_BUILTIN(append);
 	
+	// path sanitizer
 	REGISTER_BUILTIN(san);
 	
 	return 0; // no builtin has been found
