@@ -658,17 +658,13 @@ static errval_t send_ethernet(struct enet_driver_state *st, struct buf_node *tx_
     hdr->type = htons(eth_type);
 
     errval_t err = enet_enqueue(st->txq, &tx_buf->buf);
-    if (err_is_fail(err)) return err;
     free(tx_buf);
 
-    return SYS_ERR_OK;
+    return err;
 }
 
-static errval_t send_arp(struct enet_driver_state *st, uint16_t opcode, struct eth_addr dst_mac, ip_addr_t dst_ip) {
-    struct buf_node *tx_buf;
-    errval_t err = alloc_tx_buf(st, &tx_buf, true);
-    if (err_is_fail(err)) return err;
-
+static errval_t send_arp(struct enet_driver_state *st, struct buf_node *tx_buf, uint16_t opcode, struct eth_addr dst_mac, ip_addr_t dst_ip) {
+    if (tx_buf == NULL || tx_buf->next) return ERR_INVALID_ARGS;
     if (tx_buf->buf.valid_data + tx_buf->buf.valid_length + ARP_HLEN > tx_buf->buf.length) return NIC_ERR_TX_PKT;
     tx_buf->buf.valid_length += ARP_HLEN;
 
@@ -684,18 +680,42 @@ static errval_t send_arp(struct enet_driver_state *st, uint16_t opcode, struct e
     hdr->eth_dst = dst_mac;
     hdr->ip_dst = htonl(dst_ip);
 
-    err = send_ethernet(st, tx_buf, broadcast_mac, ETH_TYPE_ARP);
+    errval_t err = send_ethernet(st, tx_buf, broadcast_mac, ETH_TYPE_ARP);
     if (err_is_fail(err)) return err;
 
     return SYS_ERR_OK;
 }
 
 static errval_t query_arp(struct enet_driver_state *st, ip_addr_t ip) {
-    return send_arp(st, ARP_OP_REQ, query_mac, ip);
+    struct buf_node *tx_buf;
+    errval_t err = alloc_tx_buf(st, &tx_buf, true);
+    if (err_is_fail(err)) return err;
+
+    err = send_arp(st, tx_buf, ARP_OP_REQ, query_mac, ip);
+
+    if (err_is_fail(err)) {
+        err = free_tx_buf(st, &tx_buf->buf);
+        assert(err_is_ok(err));
+        free(tx_buf);
+    }
+
+    return err;
 }
 
 static errval_t answer_arp(struct enet_driver_state *st, struct eth_addr mac, ip_addr_t ip) {
-    return send_arp(st, ARP_OP_REP, mac, ip);
+    struct buf_node *tx_buf;
+    errval_t err = alloc_tx_buf(st, &tx_buf, true);
+    if (err_is_fail(err)) return err;
+
+    err = send_arp(st, tx_buf, ARP_OP_REP, mac, ip);
+
+    if (err_is_fail(err)) {
+        err = free_tx_buf(st, &tx_buf->buf);
+        assert(err_is_ok(err));
+        free(tx_buf);
+    }
+
+    return err;
 }
 
 static errval_t send_ip(struct enet_driver_state *st, struct buf_node *tx_buf, ip_addr_t dst_ip, uint8_t proto) {
@@ -867,15 +887,23 @@ static errval_t handle_icmp(struct enet_driver_state *st, struct devq_buf *rx_bu
         return NIC_ERR_RX_DISCARD;
     }
 
-    struct buf_node *reply_buf;
+    struct buf_node *tx_buf;
     errval_t err;
     switch(hdr->type) {
         case ICMP_ECHO:
-            err = alloc_tx_buf(st, &reply_buf, false);
+            err = alloc_tx_buf(st, &tx_buf, false);
             if (err_is_fail(err)) return err;
-            memcpy((char*)st->tx_mem_addr + reply_buf->buf.offset + reply_buf->buf.valid_data, (char*)st->rx_mem_addr + rx_buf->offset + rx_buf->valid_data, rx_buf->valid_length);
-            reply_buf->buf.valid_length = rx_buf->valid_length;
-            return send_icmp_echo(st, reply_buf, ICMP_ER, ntohs(hdr->id), ntohs(hdr->seqno), src_ip);
+            memcpy((char*)st->tx_mem_addr + tx_buf->buf.offset + tx_buf->buf.valid_data, (char*)st->rx_mem_addr + rx_buf->offset + rx_buf->valid_data, rx_buf->valid_length);
+            tx_buf->buf.valid_length = rx_buf->valid_length;
+
+            err = send_icmp_echo(st, tx_buf, ICMP_ER, ntohs(hdr->id), ntohs(hdr->seqno), src_ip);
+
+            if (err_is_fail(err)) {
+                err = free_tx_buf(st, &tx_buf->buf);
+                assert (err_is_ok(err));
+                free(tx_buf);
+            }
+            return err;
         case ICMP_ER:
             ENET_DEBUG("ICMP reply received from %08X \n", src_ip);
             // TODO maybe do something with the reply
@@ -990,7 +1018,12 @@ static errval_t handle_arp(struct enet_driver_state *st, struct devq_buf *rx_buf
                     tx_buf->next = NULL;
 
                     errval_t err = send_ethernet(st, tx_buf, entry->mac, ETH_TYPE_IP);
-                    if (err_is_fail(err)) ENET_DEBUG("Failed to send pending packet \n");
+                    if (err_is_fail(err)) {
+                        ENET_DEBUG("Failed to send pending packet \n");
+                        err = free_tx_buf(st, &tx_buf->buf);
+                        assert(err_is_ok(err));
+                        free(tx_buf);
+                    }
 
                     tx_buf = next;
                 }
@@ -1120,6 +1153,11 @@ static void enet_recv_handler(void *vst, void *message, size_t bytes, void **res
 
             st->response.err = send_udp(st, tx_buf, hdr->socket, endpoint->port, endpoint->ip);
             if (err_is_ok(st->response.err)) st->response.socket = hdr->socket;
+            else {
+                errval_t err = free_tx_buf(st, &tx_buf->buf);
+                assert (err_is_ok(err));
+                free(tx_buf);
+            }
             break;
         }
     }
