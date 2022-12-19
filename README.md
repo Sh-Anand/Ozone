@@ -1,59 +1,63 @@
-# AOS Code Repository
+Ozone
+=====
+> "OS one", O3
 
-Welcome to AOS. This is the code handout repository.
+Ozone is a [multikernel](https://en.wikipedia.org/wiki/Multikernel) operating system running on the ARM-based Toradex
+iMX.8 board as the project of the [Advance Operating Systems](README.AOS) at ETHZ.
+It is built on a simplified version of [Barrelfish](barrelfish.org), an open-source multikernel developed at ETHZ.
 
-The code in this repository is a simplified version of the [Barrelfish OS](barrelfish.org).
+> :warning: **If you are enrolled in the course, do not proceed further.** Coming up with your own design is part of the
+> project and the course. You might violate the academic integrity regulations by referring to the code here.
 
-## License
+=> [Our design report](report/AOS22-Team1-Ozone.pdf)
 
-see the LICENSE file.
+## Authors
+Team 1:
+* Emil Schätzle (eschaetzle@student.ethz.ch)
+* Linus Vogel (linvogel@student.ethz.ch)
+* Shashank Anand (sanand@student.ethz.ch)
+* Zikai Liu (liuzik@student.ethz.ch)
 
-## Dependencies
+## Features and Highlights
+* Physical memory manager
+  * The buddy allocation algorithm
+  * Binary search tree
+* Virtual memory manager
+  * The buddy allocation algorithm + free list
+  * Support mappings to fixed and dynamic addresses
+  * Demand paging
+  * Unmapping
+  * Thread safe
+* Process spawning
+* Process management
+  * Killing processes
+* Intra-core Local Message Passing (LMP)
+  * Passing large messages in frame
+* User-Level Message Passing (UMP)
+  * Efficient ringbuffer
+  * Waitset Integration
+  * Indirect UMP Capability Transfer
+* Remote Procedure Call (RPC)
+  * Unifying LMP and UMP channels
+  * Easy to use interface
+* Multicore
+  * Bringing up all four cores on iMX.8
+* Shell
+  * Thread-safe terminal server
+  * Command history and Command Line Editing
+  * Built-in commands
+* Filesystem
+  * FAT32 specification with read and write support
+  * High speed access
+  * Shell integration
+* Nameservice
+  * Unified interface for RPCs
+  * Deregister dead services
+* Networking
+  * Low-latency on UDP connections
+  * Clear user-interface to simple listen on ports and send out UDP messages
+  * nchat to chat with another host using UDP
 
-Before you can start, make sure you have installed the following dependencies:
+## Compile and Deployment
 
-```
-apt-get install build-essential bison flex ghc libghc-src-exts-dev \
-                libghc-ghc-paths-dev libghc-parsec3-dev libghc-random-dev \
-                libghc-ghc-mtl-dev libghc-async-dev picocom cabal-install freebsd-glue \
-                libelf-freebsd-dev git gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-                qemu-efi-aarch64 qemu-system-arm qemu-utils python3 parted wget mtools
-
-wget -P $HOME/bin https://github.com/NXPmicro/mfgtools/releases/download/uuu_1.4.165/uuu
-chmod 755 $HOME/bin/uuu
-```
-
-## Docker
-
-Use the following command to obtain and start a Docker container with all dependencies.
-
-```
-./tools/bfdocker.sh
-```
-
-## Building
-
-To build Barrelfish, create a build directory, and execute Hake to generate the Makefile
-
-```
-mkdir build
-cd build
-../hake/hake.sh -s ../ -a armv8
-```
-
-Then you can use `make` to build Barrelfish. To obtain an overview of all targets execute
-```
-make help
-```
-
-Likewise, for all platforms that can be build
-
-```
-make help-platforms
-```
-
-and finally the boot targets with
-
-```
-make help-boot
-```
+Please refer to the [book](main-toradex.pdf) and the [AOS README](README.AOS).
